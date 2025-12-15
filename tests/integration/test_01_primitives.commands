@@ -1,0 +1,3 @@
+print MyGlobalInt
+print MyBoolean
+quit

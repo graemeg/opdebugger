@@ -1,0 +1,50 @@
+= Integration Tests
+:toc: left
+
+Integration tests for the PDR debugger.
+
+== Test Structure
+
+Each test consists of:
+
+* `test_XX_name.pas` - Test program
+* `test_XX_name.commands` - PDR commands to run
+* `test_XX_name.expected` - Expected output
+
+== Running Tests
+
+Run all tests:
+
+[source,bash]
+----
+./run_tests.sh
+----
+
+Run specific test:
+
+[source,bash]
+----
+./run_tests.sh test_01_primitives
+# or
+./run_tests.sh 01
+----
+
+== Current Tests
+
+* **test_01_primitives** - Tests debugging of primitive types (Integer, Boolean)
+
+== Test Workflow
+
+. Compile test program with debug symbols
+. Extract symbol addresses using `nm`
+. Generate `.opdf` file using `opdf_generator`
+. Run test program in background
+. Attach PDR debugger to process
+. Execute commands from `.commands` file
+. Compare output with `.expected` file
+
+== Requirements
+
+* FPC (Free Pascal Compiler)
+* PDR debugger built (`pasbuild compile -m pdr-cli`)
+* OPDF generator built (`pasbuild compile -m tools`)
