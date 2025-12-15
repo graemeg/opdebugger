@@ -1,0 +1,504 @@
+= Object Pascal Debug Format (OPDF) Specification
+:toc: left
+:toclevels: 4
+:sectnums:
+:version: 0.1.0-draft
+:date: 2025-12-15
+
+== Introduction
+
+=== Purpose
+
+The Object Pascal Debug Format (OPDF) is a custom debug information format designed specifically for the Free Pascal Compiler (FPC) and Object Pascal language features. Unlike DWARF, which is procedural-language focused and C-centric, OPDF provides native, first-class support for Object Pascal concepts including properties, string types, dynamic arrays, sets, and variant records.
+
+=== Design Philosophy
+
+* Native representation of Object Pascal language constructs
+* Decoupling from GDB and DWARF limitations
+* Optimized for fast lookup by Pascal runtime debuggers
+* Platform-agnostic core with platform-specific containers
+* Support for both embedded and external debug information
+
+=== Goals
+
+* Seamless debugging of Object Pascal properties (getter/setter methods)
+* Correct display of all Pascal string types (ShortString, AnsiString, UnicodeString)
+* Native support for dynamic arrays, sets, and records
+* Ability to safely call methods during debugging
+* Superior debugging experience comparable to Delphi
+
+== File Structure
+
+=== Storage Containers
+
+OPDF debug information can be stored in two modes:
+
+.Platform Support Matrix
+[cols="1,2,2,1"]
+|===
+|Platform |Binary Format |Embedded Location |External File
+
+|Linux
+|ELF
+|Section `.opdf`
+|`.opdf`
+
+|FreeBSD
+|ELF
+|Section `.opdf`
+|`.opdf`
+
+|Windows
+|PE/COFF
+|Custom Resource or Section `.opdf`
+|`.opdf`
+
+|macOS
+|Mach-O
+|Segment `__OPDF`
+|`.opdf`
+|===
+
+=== Build ID Linking
+
+When debug information is stored externally, a UUID-based handshake ensures correct matching:
+
+. Compiler generates a unique GUID during build
+. GUID is embedded in both the binary (note section) and debug file header
+. Debugger verifies GUID match before loading external debug info
+. Mismatch triggers error requiring rebuild
+
+== Binary Format
+
+=== Header Structure
+
+All data is stored in little-endian format (Intel standard).
+
+[source,pascal]
+----
+TOPDFHeader = packed record
+  Magic: array[0..3] of Char;  // 'OPDF'
+  Version: Word;               // Format version (current: 1)
+  BuildID: TGUID;              // UUID linking binary to debug info
+  TargetArch: Byte;            // Architecture ID (1=i386, 2=x86_64, etc.)
+  PointerSize: Byte;           // Pointer size in bytes (4 or 8)
+  TotalRecords: Cardinal;      // Number of debug records
+  Flags: Cardinal;             // Reserved (compression, encryption)
+end;
+----
+
+.Header Fields
+[cols="1,1,3"]
+|===
+|Field |Size |Description
+
+|Magic
+|4 bytes
+|Magic bytes 'OPDF' for format identification
+
+|Version
+|2 bytes
+|Format version number (incremental)
+
+|BuildID
+|16 bytes
+|GUID linking debug file to specific binary build
+
+|TotalRecords
+|4 bytes
+|Count of debug records following header
+
+|Flags
+|4 bytes
+|Feature flags (reserved for future use)
+|===
+
+=== Record Structure
+
+OPDF uses a "stream of records" approach with typed records rather than DWARF's complex tree structure.
+
+==== Record Header
+
+Every record begins with a generic header:
+
+[source,pascal]
+----
+TOPDFRecordHeader = packed record
+  RecType: Byte;      // Record type identifier (0..255)
+  RecSize: Cardinal;  // Size of payload in bytes (supports large records)
+end;
+----
+
+==== Record Types
+
+[source,pascal]
+----
+TOPDFRecordType = (
+  recUnknown       = 0,
+  recPrimitive     = 1,  // Integer, Boolean, Char, Enum
+  recGlobalVar     = 2,  // Global variable symbol
+  recShortStr      = 3,  // ShortString type definition
+  recAnsiStr       = 4,  // AnsiString type definition
+  recUnicodeStr    = 5,  // UnicodeString type definition
+  recPointer       = 6,  // Pointer type
+  recArray         = 7,  // Static array
+  recRecord        = 8,  // Record/Structure
+  recClass         = 9,  // Class definition
+  recProperty      = 10, // Class property
+  recMethod        = 11, // Class method/function
+  recLocalVar      = 12, // Local variable
+  recParameter     = 13  // Function parameter
+);
+----
+
+== Type Definitions
+
+=== Primitive Types (recPrimitive)
+
+Defines basic data types: Integer, Boolean, Char, Enumerations.
+
+[source,pascal]
+----
+TDefPrimitive = packed record
+  TypeID: Cardinal;   // Unique type identifier (4 bytes, supports 4B+ types)
+  SizeInBytes: Byte;  // Size (1, 2, 4, 8 bytes)
+  IsSigned: Byte;     // 1=signed, 0=unsigned
+  NameLen: Word;      // Length of type name (supports long qualified names)
+  // Followed by NameLen bytes: type name string
+end;
+----
+
+.Examples
+* `TypeID=100, Size=4, IsSigned=1, Name="LongInt"`
+* `TypeID=101, Size=1, IsSigned=0, Name="Boolean"`
+
+=== ShortString Type (recShortStr)
+
+Pascal's length-prefixed static string.
+
+[source,pascal]
+----
+TDefShortString = packed record
+  TypeID: Word;
+  MaxLength: Byte;    // Maximum capacity (0-255)
+  NameLen: Byte;
+  // Followed by Name: e.g., "String20"
+end;
+----
+
+Memory layout known to debugger:
+
+----
+[Length:Byte][Char0][Char1]...[CharN]
+----
+
+=== AnsiString Type (recAnsiStr)
+
+Dynamic string with reference counting.
+
+[source,pascal]
+----
+TDefAnsiString = packed record
+  TypeID: Word;
+  NameLen: Byte;
+  // Followed by Name
+end;
+----
+
+Runtime structure (known to debugger):
+
+----
+Variable -> [Pointer to Heap]
+            Heap-4: RefCount (LongInt)
+            Heap-8: Length (LongInt)
+            Heap-12: CodePage (Word)
+            Heap: Character data
+----
+
+=== UnicodeString Type (recUnicodeStr)
+
+UTF-16 encoded dynamic string.
+
+[source,pascal]
+----
+TDefUnicodeString = packed record
+  TypeID: Word;
+  NameLen: Byte;
+  // Followed by Name
+end;
+----
+
+Similar heap structure to AnsiString but with 2-byte characters.
+
+=== Pointer Type (recPointer)
+
+Type-safe pointer reference.
+
+[source,pascal]
+----
+TDefPointer = packed record
+  TypeID: Word;       // ID of this pointer type
+  TargetTypeID: Word; // Type being pointed to
+  NameLen: Byte;
+  // Followed by Name: e.g., "PInteger"
+end;
+----
+
+=== Array Type (recArray)
+
+Static or dynamic array definition.
+
+[source,pascal]
+----
+TDefArray = packed record
+  TypeID: Word;
+  ElementTypeID: Word;  // Type of array elements
+  Dimensions: Byte;     // Number of dimensions
+  IsDynamic: Byte;      // 1=dynamic, 0=static
+  // If static: followed by dimension bounds
+  // Followed by Name
+end;
+----
+
+=== Record Type (recRecord)
+
+Structured type with named fields.
+
+[source,pascal]
+----
+TDefRecord = packed record
+  TypeID: Word;
+  FieldCount: Word;     // Number of fields
+  TotalSize: Cardinal;  // Total size in bytes
+  NameLen: Byte;
+  // Followed by Name
+  // Followed by FieldCount field descriptors:
+  //   - FieldNameLen: Byte
+  //   - FieldName: string
+  //   - FieldTypeID: Word
+  //   - Offset: Cardinal (byte offset in structure)
+end;
+----
+
+=== Class Type (recClass)
+
+Object Pascal class definition.
+
+[source,pascal]
+----
+TDefClass = packed record
+  TypeID: Word;
+  ParentTypeID: Word;    // 0 if TObject
+  VMTAddress: QWord;     // Virtual Method Table address
+  InstanceSize: Cardinal; // Size of instance
+  FieldCount: Word;      // Number of instance fields
+  NameLen: Byte;
+  // Followed by Name
+  // Followed by field descriptors (similar to Record)
+end;
+----
+
+=== Property Definition (recProperty)
+
+Class property with access methods.
+
+[source,pascal]
+----
+TDefProperty = packed record
+  ClassTypeID: Word;     // Owning class
+  PropertyTypeID: Word;  // Property data type
+  ReadType: Byte;        // 0=Field, 1=Method
+  WriteType: Byte;       // 0=Field, 1=Method, 2=None
+  ReadAddr: QWord;       // Field offset or method address
+  WriteAddr: QWord;      // Field offset or method address
+  NameLen: Byte;
+  // Followed by Name
+end;
+----
+
+.Access Types
+* `ReadType/WriteType = 0`: Direct field access, Addr is byte offset
+* `ReadType/WriteType = 1`: Method access, Addr is absolute method address
+* `WriteType = 2`: Read-only property
+
+== Symbol Definitions
+
+=== Global Variable (recGlobalVar)
+
+Global or unit-level variable.
+
+[source,pascal]
+----
+TDefGlobalVar = packed record
+  TypeID: Word;       // Type of this variable
+  Address: QWord;     // Absolute memory address
+  NameLen: Byte;
+  // Followed by Name: e.g., "MyGlobalInt"
+end;
+----
+
+=== Local Variable (recLocalVar)
+
+Stack-based local variable or function temporary.
+
+[source,pascal]
+----
+TDefLocalVar = packed record
+  TypeID: Word;
+  ScopeID: Cardinal;     // Function/block scope
+  LocationExpr: Byte;    // Location expression type
+  // Followed by location data (register, stack offset, etc.)
+  NameLen: Byte;
+  // Followed by Name
+end;
+----
+
+=== Method Definition (recMethod)
+
+Function or procedure definition.
+
+[source,pascal]
+----
+TDefMethod = packed record
+  MethodID: Cardinal;
+  ClassTypeID: Word;     // 0 for standalone function
+  ReturnTypeID: Word;    // 0 for procedure
+  ParamCount: Byte;
+  IsVirtual: Byte;       // 1 if virtual method
+  Address: QWord;        // Entry point address
+  NameLen: Byte;
+  // Followed by Name
+  // Followed by parameter descriptors
+end;
+----
+
+== Location Expressions
+
+Location expressions encode where data resides at runtime.
+
+=== Expression Types
+
+[cols="1,3"]
+|===
+|Type |Description
+
+|`0x01`
+|Absolute address (global/static)
+
+|`0x02`
+|Register (EAX, RBX, etc.)
+
+|`0x03`
+|Stack offset from frame pointer
+
+|`0x04`
+|Heap pointer dereference
+
+|`0x05`
+|Complex expression (bytecode)
+|===
+
+=== Complex Expressions
+
+For optimized code, location may require calculation:
+
+----
+[OpCode][Operands]
+----
+
+Example opcodes:
+
+* `DW_OP_ADD`: Add top two stack values
+* `DW_OP_DEREF`: Dereference pointer
+* `DW_OP_CONST`: Push constant value
+
+== Platform-Specific Details
+
+=== Linux / FreeBSD (ELF)
+
+Section name: `.opdf`
+
+Section flags:
+
+* Type: `SHT_PROGBITS`
+* Flags: `SHF_ALLOC` (loaded into memory, read-only)
+
+=== Windows (PE/COFF)
+
+Option 1: Custom section `.opdf`
+
+Option 2: Custom resource `RT_RCDATA`, ID `OPDF`
+
+=== macOS (Mach-O)
+
+Segment name: `__OPDF`
+
+Load command: `LC_SEGMENT_64`
+
+Section within segment: `__debug`
+
+== External Debug Files
+
+=== File Format
+
+External `.opdf` files use identical binary structure to embedded sections but stored as standalone files.
+
+=== Discovery
+
+Debugger searches for external debug file:
+
+. Check for embedded `.opdf` section in binary
+. If not found, extract BuildID from binary note section
+. Look for `<binary_name>.opdf` in same directory
+. Verify BuildID matches
+. Load external debug information
+
+=== Distribution
+
+* Release builds: Ship lean binary without debug info
+* Development: Keep `.opdf` files for crash analysis
+* Security: Debug info contains all symbol names; keep private
+
+== Version History
+
+[cols="1,2,3"]
+|===
+|Version |Date |Changes
+
+|0.1.0
+|2025-12-15
+|Initial draft specification
+|===
+
+== Appendices
+
+=== Appendix A: Comparison with DWARF
+
+[cols="1,2,2"]
+|===
+|Feature |DWARF |OPDF
+
+|String Types
+|Limited; ShortString shown as byte array
+|Native support for all Pascal strings
+
+|Properties
+|No concept; requires complex workarounds
+|First-class property definitions
+
+|Method Calls
+|Complex, GDB-dependent
+|Explicit getter/setter encoding
+
+|File Size
+|Large (complex tree structure)
+|Optimized flat record stream
+
+|Extensibility
+|Standards committee
+|FPC community driven
+|===
+
+=== Appendix B: Reference Implementation
+
+The Pascal Debug Reference (PDR) debugger serves as the reference implementation for OPDF consumption. See `implementation-plan.adoc` for development roadmap.

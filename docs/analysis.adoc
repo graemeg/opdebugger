@@ -1,0 +1,593 @@
+= FPC Debugging: Analysis and Strategic Recommendations
+:toc: left
+:toclevels: 4
+:sectnums:
+:version: 1.0.0
+:date: 2025-12-15
+
+== Executive Summary
+
+This document analyzes the current state of debugging Object Pascal code compiled with Free Pascal Compiler (FPC) and evaluates strategic approaches to achieve a debugging experience comparable to Delphi. The analysis compares three primary approaches: improving FPC's DWARF generation for GDB, enhancing the fpdebug project, and developing a custom Object Pascal Debug Format (OPDF).
+
+.Recommendation Summary
+****
+Pursue a hybrid approach with primary focus on developing OPDF and a reference Pascal debugger, while maintaining DWARF 4 baseline support for standard tools. This strategy provides the best long-term solution for Object Pascal-specific debugging challenges.
+****
+
+== Problem Statement
+
+=== Current State
+
+Debugging FPC-compiled code using GDB presents significant challenges with Object Pascal language constructs:
+
+* **String Types**: ShortString, AnsiString, and UnicodeString display incorrectly or as raw byte arrays
+* **Class Properties**: Properties with getter/setter methods are not accessible in debugger
+* **Method Calls**: Limited or no support for calling methods during debugging sessions
+* **Dynamic Arrays**: Incorrect display of length and element access
+* **Sets**: No native representation
+* **Properties with Direct Field Access**: Inconsistent behavior compared to method-based properties
+
+=== Gap Analysis
+
+The disparity between Delphi's debugging experience and FPC with GDB stems from fundamental architectural differences:
+
+[cols="2,3,3"]
+|===
+|Aspect |Delphi |FPC + GDB
+
+|Debug Format
+|Custom, Pascal-optimized format
+|DWARF (C-centric, procedural)
+
+|Debugger
+|Integrated, Pascal-aware debugger
+|GDB (C/C++ focused)
+
+|String Display
+|Native support for all Pascal strings
+|Treats as PChar or byte arrays
+
+|Property Access
+|Direct property evaluation
+|Requires complex method invocation
+
+|Method Calls
+|Seamless execution during debug
+|Limited; often fails or unavailable
+
+|Type Information
+|Complete RTTI integration
+|Partial; DWARF mapping limitations
+|===
+
+== Current FPC DWARF Support
+
+=== DWARF Version Status
+
+FPC currently supports primarily DWARF versions 2 and 3, with ongoing work toward version 4.
+
+Compiler flags:
+
+* `-gw2`: Generate DWARF 2 debug info
+* `-gw3`: Generate DWARF 3 debug info
+* `-gw4`: Partial DWARF 4 support (in development)
+
+=== DWARF Version Capabilities
+
+[cols="1,2,3"]
+|===
+|Version |Key Features |Object Pascal Relevance
+
+|DWARF 2
+|Basic type info, line numbers, variables
+|Minimal; insufficient for complex types
+
+|DWARF 3
+|Improved C++ support, namespaces
+|Better but still C++ focused
+
+|DWARF 4
+|Enhanced string encoding, better optimized code support
+|**Critical** for proper Pascal string handling
+
+|DWARF 5
+|Expression language improvements, compression
+|Future benefit for complex type evaluation
+|===
+
+=== DWARF Limitations for Object Pascal
+
+The DWARF standard was designed for procedural languages (C, C++, Fortran) and lacks native support for:
+
+. **Properties**: No concept of getter/setter accessor methods as a language construct
+. **Dynamic Strings**: Reference-counted heap-allocated strings with metadata
+. **Method Calls**: Complex execution context required for Object Pascal calling conventions
+. **RTTI Integration**: Limited mapping between DWARF DIE and Pascal RTTI
+
+Even with DWARF 4/5, these remain workarounds rather than native representations.
+
+== Strategic Options Analysis
+
+=== Option 1: Improve FPC DWARF Generation
+
+This approach focuses on enhancing FPC's backend to generate better DWARF information for consumption by GDB.
+
+==== Advantages
+
+* Leverages mature, widely-available GDB debugger
+* Benefits all standard debuggers (GDB, LLDB)
+* Large existing community investment
+* No need to maintain separate debugger
+* Cross-platform support via GDB
+
+==== Disadvantages
+
+* **Fundamental mismatch**: DWARF is C-centric; Object Pascal concepts require complex mapping
+* **GDB dependency**: Debugging features limited by GDB's capabilities and development priorities
+* **Property access limitation**: GDB struggles with method invocation for getter/setter evaluation
+* **Ongoing maintenance**: Each new Object Pascal feature requires DWARF mapping
+* **Limited control**: Cannot extend DWARF standard to fit Pascal needs
+* **Complex implementation**: Deep modifications to FPC backend required
+
+==== Effort Assessment
+
+* **Complexity**: High (FPC backend modifications)
+* **Maintenance**: Ongoing (per language feature)
+* **Timeframe**: 2-3 years for comprehensive coverage
+* **Risk**: Medium-High (dependency on GDB capabilities)
+
+==== Recommendation
+
+Priority: **Medium** - Implement DWARF 4 string support as baseline, but do not pursue properties/methods via DWARF.
+
+=== Option 2: Invest in fpdebug Project
+
+The fpdebug project (https://github.com/graemeg/fpdebug) is a debugger written in Object Pascal specifically for debugging Pascal code.
+
+==== Advantages
+
+* **Native Object Pascal understanding**: Direct support for properties, strings, class layouts
+* **No GDB dependency**: Full control over debugging features
+* **Customized type display**: Can render Pascal types exactly as needed
+* **Better error handling**: Understands FPC-specific DWARF quirks
+* **IDE integration**: Already integrates with Lazarus
+* **Extensibility**: Community can add features without standards committee
+
+==== Disadvantages
+
+* **Maintenance burden**: Requires maintaining entire debugger stack
+* **Platform porting**: Must be ported to all FPC target platforms
+* **Development investment**: Significant effort for comprehensive implementation
+* **Tool adoption**: Users must switch from familiar GDB workflow
+* **Maturity**: Less mature than GDB; requires extensive testing
+* **Resource requirements**: Large volunteer effort needed
+
+==== Effort Assessment
+
+* **Complexity**: Very High (full debugger implementation)
+* **Maintenance**: High (ongoing debugger development)
+* **Timeframe**: 3-5 years for production maturity
+* **Risk**: Medium (dependent on community contribution)
+
+==== Current Status
+
+fpdebug currently processes FPC's DWARF output and translates it into Object Pascal concepts. It handles:
+
+* Reading DWARF debug information
+* Interpreting Pascal RTTI
+* Displaying strings correctly
+* Limited property access
+
+==== Recommendation
+
+Priority: **High** - Active development as interim solution and testbed for OPDF requirements.
+
+=== Option 3: Custom Object Pascal Debug Format (OPDF)
+
+Develop a new debug information format designed specifically for Object Pascal, with a reference debugger implementation.
+
+==== Advantages
+
+* **Perfect fit**: Native encoding of all Object Pascal concepts
+* **Future-proof**: Evolves with Pascal language features
+* **Simplified implementation**: Both compiler and debugger have cleaner specifications
+* **Optimal debugging**: Can achieve Delphi-level experience
+* **No compromises**: Not constrained by C-centric standards
+* **Security**: Can be kept separate from production binaries
+* **Performance**: Optimized for Pascal debugger lookup patterns
+
+==== Disadvantages
+
+* **Initial investment**: Requires designing specification and implementing in compiler
+* **Debugger requirement**: Must build or adapt debugger to consume format
+* **Community consensus**: Requires FPC community agreement and coordination
+* **Dual maintenance**: Must maintain DWARF for compatibility during transition
+* **Tool ecosystem**: Third-party tools won't understand OPDF initially
+
+==== Effort Assessment
+
+* **Complexity**: Very High (format design + compiler + debugger)
+* **Maintenance**: Medium (stable specification reduces ongoing work)
+* **Timeframe**: 5-7 years for complete ecosystem
+* **Risk**: Low-Medium (controlled by FPC community)
+
+==== Historical Precedent
+
+Borland/Embarcadero successfully used custom formats:
+
+* **Delphi (Windows)**: Proprietary TD32 format, later PDB hybrid
+* **Kylix (Linux)**: Custom format embedded in ELF binaries
+* **Result**: Superior debugging experience for Object Pascal
+
+==== Recommendation
+
+Priority: **Very High** - Strategic long-term solution; begin specification and phased implementation.
+
+== Recommended Hybrid Strategy
+
+The optimal approach combines elements of all three options in a phased strategy:
+
+=== Phase 1: Foundation (Years 1-2)
+
+**Primary Focus**: fpdebug enhancement + DWARF 4 baseline
+
+. **Complete DWARF 4 Support in FPC**
+** Priority: String types (ShortString, AnsiString, UnicodeString)
+** Ensures baseline compatibility with GDB
+** Benefits all debuggers consuming DWARF
+
+. **Enhance fpdebug**
+** Improve stability and platform support
+** Add comprehensive Object Pascal type support
+** Serve as testbed for OPDF requirements
+** Document all DWARF workarounds (these become OPDF requirements)
+
+. **Begin OPDF Specification**
+** Form working group within FPC community
+** Draft initial specification based on fpdebug experience
+** Focus on MVP: primitives, strings, classes, properties
+
+**Deliverables**:
+
+* FPC with full DWARF 4 string support
+* Stable fpdebug with property access
+* OPDF specification v0.1 (draft)
+
+=== Phase 2: OPDF MVP (Years 2-4)
+
+**Primary Focus**: OPDF implementation + reference debugger
+
+. **Implement OPDF Writer in FPC**
+** Add `-gopdf` compiler flag
+** Support embedded and external debug files
+** Parallel generation: DWARF + OPDF
+
+. **Develop PDR (Pascal Debug Reference)**
+** Minimal CLI debugger consuming OPDF
+** Implements MVP feature set
+** Automated test suite
+** Platform: Linux/FreeBSD (ELF) initially
+
+. **Validate with Real-World Projects**
+** Test OPDF on Lazarus components
+** Test on FreePascal RTL
+** Identify specification gaps
+
+**Deliverables**:
+
+* FPC generating OPDF for MVP types
+* PDR debugger with CLI interface
+* OPDF specification v1.0 (stable)
+
+=== Phase 3: Production Maturity (Years 4-7)
+
+**Primary Focus**: Feature completion + ecosystem integration
+
+. **Complete OPDF Feature Set**
+** Generics support
+** Advanced RTTI integration
+** Exception handling metadata
+** Optimized code support
+
+. **Enhanced PDR**
+** Free Vision TUI interface
+** VSCode integration
+** Lazarus IDE integration
+** Windows and macOS platform support
+
+. **Community Adoption**
+** Documentation and tutorials
+** Migration guides from GDB
+** Promote within FPC community
+
+**Deliverables**:
+
+* Full-featured OPDF in FPC
+* Production-quality PDR debugger
+* IDE integrations
+* Deprecation path for DWARF-only builds
+
+== Platform Considerations
+
+=== Priority Platform Support
+
+[cols="1,2,3,1"]
+|===
+|Platform |Binary Format |Complexity |Priority
+
+|Linux
+|ELF
+|Low - Standard ELF section
+|**Phase 1**
+
+|FreeBSD
+|ELF
+|Low - Same as Linux
+|**Phase 1**
+
+|Windows
+|PE/COFF
+|Medium - Custom section or resource
+|**Phase 2**
+
+|macOS
+|Mach-O
+|High - Mach-O segment, code signing, entitlements
+|**Phase 3**
+|===
+
+=== Platform-Specific Challenges
+
+==== macOS
+
+* **Binary Format**: Mach-O requires different container strategy
+* **Debug API**: Must use Mach kernel APIs (not ptrace)
+* **Security**: Code signing with `com.apple.security.cs.debugger` entitlement required
+* **Recommendation**: Defer to Phase 3; focus on ELF platforms initially
+
+==== Windows
+
+* **Debug API**: Uses `ReadProcessMemory` (different from ptrace)
+* **Container**: PE/COFF section or resource
+* **Recommendation**: Phase 2 after Linux/FreeBSD proven
+
+== Technical Architecture
+
+=== Component Overview
+
+----
+┌─────────────────────────────────────────────────────────────┐
+│                    FPC Compiler                              │
+│  ┌──────────────┐  ┌──────────────┐  ┌─────────────────┐   │
+│  │ Parser/Sem   │→ │ Code Gen     │→ │ Debug Writers   │   │
+│  │              │  │              │  │ ├─ DWARF        │   │
+│  └──────────────┘  └──────────────┘  │ └─ OPDF         │   │
+│                                       └─────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+                              ↓
+                    ┌─────────────────┐
+                    │  Binary + OPDF  │
+                    │  (or .opdf file)│
+                    └─────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────┐
+│              PDR Debugger (Pascal Debug Ref)                 │
+│  ┌──────────────┐  ┌──────────────┐  ┌─────────────────┐   │
+│  │ OPDF Loader  │→ │ Type System  │→ │ UI (CLI/TUI)    │   │
+│  └──────────────┘  └──────────────┘  └─────────────────┘   │
+│                                                               │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ Platform Abstraction (ptrace/WinAPI/Mach)            │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+----
+
+=== Abstraction Layers
+
+==== Debug Format Layer
+
+* **Interface**: `IDebugInfoReader`
+* **Implementations**:
+** `TDWARFReader` - Existing DWARF support
+** `TOPDFReader` - New OPDF support
+
+==== Process Control Layer
+
+* **Interface**: `IProcessController`
+* **Implementations**:
+** `TLinuxPtraceController` (Linux/FreeBSD)
+** `TWindowsDebugController` (Windows)
+** `TMacOSMachController` (macOS)
+
+==== Type System Layer
+
+* **Core**: `TDebugTypeSystem`
+* Manages type lookup, property evaluation, method calls
+* Platform and format agnostic
+
+== Reverse Engineering Kylix
+
+=== Feasibility Assessment
+
+**Question**: Should we reverse engineer Kylix debug format?
+
+**Answer**: **No**
+
+==== Reasons Against
+
+. **Effort**: Extremely high; full reverse engineering of undocumented binary format
+. **Relevance**: Kylix format designed for Delphi 6-era Object Pascal; outdated
+. **Legality**: Legal gray area; avoided by open-source projects
+. **Architecture Mismatch**: FPC internals differ significantly from Borland compiler
+. **Modern Features**: Kylix predates generics, advanced RTTI, modern string types
+
+==== Better Approach
+
+Design OPDF cleanly from scratch, informed by:
+
+* FPC's current architecture
+* Modern Object Pascal language features
+* fpdebug's existing understanding of debugging requirements
+* Community input and consensus
+
+=== Learning from Kylix
+
+While not reverse engineering, examining Kylix conceptually provides validation:
+
+* Borland proved custom format viability for Pascal
+* Demonstrated superior debugging experience is achievable
+* Shows format can coexist with standard binary formats (ELF)
+
+== Risk Analysis
+
+=== Technical Risks
+
+[cols="2,1,3,2"]
+|===
+|Risk |Severity |Mitigation |Owner
+
+|OPDF specification instability
+|High
+|Extensive review period, versioning strategy
+|FPC Core Team
+
+|Platform fragmentation
+|Medium
+|Phased platform rollout, abstraction layers
+|PDR Team
+
+|Performance overhead
+|Low
+|External debug file support, lazy loading
+|FPC Optimizer
+
+|Community adoption
+|Medium
+|Excellent documentation, migration tools, IDE integration
+|Community
+
+|Maintenance burden
+|Medium
+|Clean architecture, comprehensive test suite
+|Both Teams
+|===
+
+=== Resource Risks
+
+[cols="2,1,3"]
+|===
+|Risk |Severity |Mitigation
+
+|Insufficient developer time
+|High
+|Phased approach allows incremental progress
+
+|Competing priorities
+|Medium
+|Clear roadmap and community communication
+
+|Developer burnout
+|Medium
+|Distribute work across multiple contributors
+|===
+
+=== Mitigation Strategies
+
+. **Incremental Development**: MVP approach prevents overcommitment
+. **Parallel Compatibility**: Maintain DWARF support during transition
+. **Community Engagement**: Regular updates, RFC process, open development
+. **Automated Testing**: Comprehensive test suite reduces maintenance burden
+. **Documentation**: Excellent docs reduce onboarding friction
+
+== Success Criteria
+
+=== Phase 1 Success
+
+* [ ] FPC generates DWARF 4 with correct string encoding
+* [ ] fpdebug displays all Pascal string types correctly
+* [ ] OPDF specification draft completed and reviewed
+* [ ] Community consensus on OPDF direction
+
+=== Phase 2 Success
+
+* [ ] FPC generates OPDF for MVP types (primitives, strings, classes)
+* [ ] PDR debugger can inspect variables, properties, call getters
+* [ ] OPDF v1.0 specification finalized
+* [ ] External debug file support working
+
+=== Phase 3 Success
+
+* [ ] Full Object Pascal feature coverage in OPDF
+* [ ] PDR integrated into Lazarus IDE and VSCode
+* [ ] Windows and macOS platform support
+* [ ] Debugging experience comparable to Delphi
+* [ ] Community adoption (measurable usage metrics)
+
+== Conclusion
+
+The current debugging experience for FPC-compiled Object Pascal code is significantly hindered by the mismatch between DWARF's C-centric design and Object Pascal's language features. While incremental improvements to DWARF generation provide baseline compatibility, they cannot solve fundamental issues like property access and Pascal-specific type representations.
+
+The strategic recommendation is a **phased hybrid approach**:
+
+. **Short-term** (1-2 years): Enhance fpdebug and complete DWARF 4 support
+. **Mid-term** (2-4 years): Implement OPDF MVP with reference debugger
+. **Long-term** (4-7 years): Achieve production-quality OPDF ecosystem
+
+This strategy balances immediate improvements (fpdebug) with the long-term vision (OPDF) while maintaining compatibility (DWARF 4). The result will be a debugging experience that honors Object Pascal's unique features and rivals commercial alternatives.
+
+The investment is substantial but justified: debugging is fundamental to developer productivity, and a superior debugging experience will significantly enhance FPC's competitiveness and developer satisfaction.
+
+== References
+
+. Free Pascal Compiler: https://www.freepascal.org
+. fpdebug project: https://github.com/graemeg/fpdebug
+. DWARF Debugging Standard: http://dwarfstd.org
+. Linux Debuginfo Formats: CppCon 2022 - Greg Law
+. FPC DWARF Implementation: `/compiler/dbgdwarf.pas`
+
+== Appendices
+
+=== Appendix A: DWARF Version Timeline
+
+[cols="1,1,3"]
+|===
+|Version |Year |Key Features
+
+|DWARF 1
+|1992
+|Basic debug info for C
+
+|DWARF 2
+|1993
+|Improved type system, line numbers
+
+|DWARF 3
+|2006
+|C++ support, namespaces
+
+|DWARF 4
+|2010
+|String encoding, better optimized code
+
+|DWARF 5
+|2017
+|Expression improvements, compression
+|===
+
+=== Appendix B: Glossary
+
+**DWARF**:: Debugging With Attributed Record Formats - industry-standard debug information format
+
+**OPDF**:: Object Pascal Debug Format - proposed custom debug format for FPC
+
+**PDR**:: Pascal Debug Reference - reference debugger implementation
+
+**RTTI**:: Run-Time Type Information - metadata about types available at runtime
+
+**VMT**:: Virtual Method Table - structure for dynamic method dispatch
+
+**ELF**:: Executable and Linkable Format - standard binary format on Unix-like systems
+
+**Mach-O**:: Mach Object - binary format on macOS/iOS
+
+**PE/COFF**:: Portable Executable / Common Object File Format - Windows binary format

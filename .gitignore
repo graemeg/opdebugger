@@ -1,0 +1,45 @@
+# PasBuild outputs
+target/
+build/
+
+# FPC compiled units
+*.ppu
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+
+# Compiled executables
+*.exe
+pdr
+opdf_generator
+
+# Test outputs
+tests/integration/actual_output.txt
+tests/integration/*.out
+tests/integration/test_*
+!tests/integration/test_*.pas
+!tests/integration/test_*.commands
+!tests/integration/test_*.expected
+
+# Editor/IDE files
+*.lps
+*.compiled
+*.bak
+*.swp
+*~
+.DS_Store
+
+# Debug files
+*.dbg
+*.opdf
+
+# Lazarus/FPC
+lib/
+backup/
+*.lrs
+
+# Operating system
+Thumbs.db
+.directory

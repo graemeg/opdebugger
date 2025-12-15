@@ -1,0 +1,700 @@
+= OPDF Design Decisions & Improvements
+:toc: left
+:toclevels: 4
+:sectnums:
+:version: 1.0.0
+:date: 2025-12-15
+
+== Overview
+
+This document captures key design decisions for the OPDF (Object Pascal Debug Format) and PDR (Pascal Debug Reference) debugger project, incorporating improvements beyond the initial Gemini discussion.
+
+== Repository & Build Structure
+
+=== Decision: PasBuild Multi-Module Layout
+
+**Chosen Approach**: Use PasBuild's multi-module convention for the debugger/library repository.
+
+**Structure**:
+
+----
+opdebugger/                          # Aggregator (packaging=pom)
+├── project.xml                      # Aggregator config
+├── docs/                            # Documentation
+│   ├── opdf-specification.adoc
+│   ├── analysis.adoc
+│   ├── implementation-plan.adoc
+│   └── design-decisions.adoc
+├── opdf-lib/                        # Library module (packaging=library)
+│   ├── project.xml
+│   └── src/main/pascal/
+│       ├── ogopdf.pas               # Core OPDF structures
+│       ├── opdf_io.pas              # I/O utilities
+│       └── opdf_factory.pas         # Factory patterns
+├── pdr-core/                        # Library module (packaging=library)
+│   ├── project.xml
+│   └── src/
+│       ├── main/pascal/
+│       │   ├── pdr_ports.pas        # Interface definitions
+│       │   ├── pdr_engine.pas       # Core debugger engine
+│       │   ├── pdr_typesys.pas      # Type system (Strategy pattern)
+│       │   └── pdr_symbols.pas      # Symbol resolver
+│       └── test/pascal/
+│           ├── test_typesys.pas
+│           └── test_symbols.pas
+├── pdr-adapters/                    # Library module (packaging=library)
+│   ├── project.xml
+│   └── src/main/pascal/
+│       ├── pdr_opdf_adapter.pas     # OPDF reader adapter
+│       ├── pdr_linux_ptrace.pas     # Linux ptrace
+│       ├── pdr_freebsd_ptrace.pas   # FreeBSD ptrace
+│       ├── pdr_windows_debug.pas    # Windows DebugAPI
+│       └── pdr_arch_adapters.pas    # x86/x86_64/ARM adapters
+├── pdr-cli/                         # Application module (packaging=application)
+│   ├── project.xml
+│   └── src/main/pascal/
+│       ├── pdr_main.pas             # CLI entry point
+│       └── pdr_cli_commands.pas     # Command pattern impl
+├── tools/                           # Application module (packaging=application)
+│   ├── project.xml
+│   └── src/main/pascal/
+│       └── opdf_generator.pas       # Standalone OPDF generator
+└── tests/                           # Integration tests
+    └── integration/
+        ├── test_01_primitives.pas
+        ├── test_02_strings.pas
+        └── run_tests.sh
+----
+
+**Root project.xml**:
+
+[source,xml]
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <name>opdebugger</name>
+  <version>0.1.0</version>
+  <author>FPC Community</author>
+  <license>LGPL-2.1-or-later</license>
+
+  <build>
+    <packaging>pom</packaging>
+  </build>
+
+  <modules>
+    <module>opdf-lib</module>
+    <module>pdr-core</module>
+    <module>pdr-adapters</module>
+    <module>pdr-cli</module>
+    <module>tools</module>
+  </modules>
+</project>
+----
+
+**Benefits**:
+
+* Automatic dependency resolution (pdr-core → opdf-lib)
+* Built-in test runner (`pasbuild test`)
+* Consistent build across development machines
+* Easy CI/CD integration
+* Module-level compilation (`pasbuild compile -m pdr-core`)
+
+=== Code Sharing with FPC
+
+**Decision**: Manual copy initially, symlink for development convenience.
+
+**FPC Integration**:
+
+----
+freepascal/fpc/                      # FPC repository
+├── compiler/
+│   ├── dbgdwarf.pas
+│   └── dbgopdf.pas                  # OPDF writer (imports shared code)
+└── packages/
+    └── opdf/                        # Symlink → opdebugger/opdf-lib/
+        └── src/main/pascal/
+            └── ogopdf.pas           # Symlinked shared definitions
+----
+
+**Workflow**:
+
+Development phase:
+```bash
+# In FPC repo
+cd packages/
+ln -s /path/to/opdebugger/opdf-lib/src/main/pascal opdf
+
+# In dbgopdf.pas
+uses
+  {$I ../packages/opdf/ogopdf.pas}
+```
+
+Release phase:
+```bash
+# Copy files into FPC for upstream submission
+cp opdebugger/opdf-lib/src/main/pascal/*.pas fpc/packages/opdf/
+```
+
+**Rationale**: Symlink allows rapid development without manual copying; copy for clean upstream submission.
+
+== Architecture Pattern
+
+=== Decision: Hexagonal Architecture (Ports & Adapters)
+
+**Core Principles**:
+
+* **Domain Core**: Pure business logic, no platform dependencies
+* **Ports**: Interfaces defining contracts (`IProcessController`, `IDebugInfoReader`)
+* **Adapters**: Platform/format-specific implementations
+* **Dependency Injection**: Compose system at startup
+
+**Key Patterns Applied**:
+
+. **Strategy Pattern**: Type evaluators (`ITypeEvaluator`)
+. **Factory Pattern**: Platform controller creation
+. **Command Pattern**: CLI commands
+. **Adapter Pattern**: Debug info readers, process controllers
+
+**Benefits**:
+
+* **Testability**: Mock adapters for unit tests
+* **Platform Independence**: Add FreeBSD/Windows/macOS without core changes
+* **Format Flexibility**: Support DWARF alongside OPDF
+* **UI Flexibility**: CLI, TUI, IDE integrations share core
+
+**Directory Mapping**:
+
+----
+Domain Core (Hexagon):
+  pdr-core/src/main/pascal/
+    ├── pdr_engine.pas        # Orchestration
+    ├── pdr_typesys.pas       # Type evaluation (Strategy)
+    └── pdr_symbols.pas       # Symbol resolution
+
+Ports (Interfaces):
+  pdr-core/src/main/pascal/
+    └── pdr_ports.pas         # All interfaces
+
+Adapters:
+  pdr-adapters/src/main/pascal/
+    ├── pdr_opdf_adapter.pas      # IDebugInfoReader impl
+    ├── pdr_linux_ptrace.pas      # IProcessController impl
+    └── pdr_arch_adapters.pas     # IArchAdapter impls
+
+UI Adapter:
+  pdr-cli/src/main/pascal/
+    └── pdr_main.pas          # Uses ICommandHandler port
+----
+
+== 32-bit vs 64-bit Support
+
+=== Decision: Architecture Metadata in OPDF
+
+**Problem**: Original specification didn't account for pointer size differences.
+
+**Solution**: Add architecture fields to `TOPDFHeader`:
+
+[source,pascal]
+----
+TOPDFHeader = packed record
+  Magic: array[0..3] of Char;  // 'OPDF'
+  Version: Word;               // Format version
+  BuildID: TGUID;              // UUID for binary linking
+  TargetArch: Byte;            // NEW: Architecture ID
+  PointerSize: Byte;           // NEW: 4 or 8 bytes
+  TotalRecords: Cardinal;      // Number of records
+  Flags: Cardinal;             // Feature flags
+end;
+----
+
+**Architecture IDs**:
+
+[cols="1,2,1"]
+|===
+|ID |Architecture |Pointer Size
+
+|1
+|i386 (32-bit x86)
+|4 bytes
+
+|2
+|x86_64 (64-bit x86)
+|8 bytes
+
+|3
+|ARM (32-bit)
+|4 bytes
+
+|4
+|AArch64 (64-bit ARM)
+|8 bytes
+
+|5
+|PowerPC (32-bit)
+|4 bytes
+
+|6
+|PowerPC64
+|8 bytes
+|===
+
+**Architecture Adapter Pattern**:
+
+[source,pascal]
+----
+type
+  IArchAdapter = interface
+    ['{45678901-4567-4567-4567-456789012345}']
+    function GetPointerSize: Byte;
+    function ReadPointer(Address: QWord; out Ptr: QWord): Boolean;
+    function GetCallingConvention: TCallingConvention;
+  end;
+
+  TArchX86Adapter = class(TInterfacedObject, IArchAdapter)
+    function GetPointerSize: Byte;  // Returns 4
+  end;
+
+  TArchX86_64Adapter = class(TInterfacedObject, IArchAdapter)
+    function GetPointerSize: Byte;  // Returns 8
+  end;
+----
+
+**Debugger Initialization**:
+
+[source,pascal]
+----
+// Read OPDF header
+OPDFHeader := ReadHeader(BinaryPath);
+
+// Create appropriate architecture adapter
+case OPDFHeader.TargetArch of
+  1: ArchAdapter := TArchX86Adapter.Create(ProcessController);
+  2: ArchAdapter := TArchX86_64Adapter.Create(ProcessController);
+  else
+    raise Exception.Create('Unsupported architecture');
+end;
+----
+
+**Testing Strategy**:
+
+* Phase 1 MVP: 64-bit only (x86_64 Linux)
+* Phase 2: Add 32-bit support, test both architectures
+* Phase 3+: ARM support
+
+== External vs Embedded Debug Info
+
+=== Decision: External .opdf Files for MVP
+
+**Rationale**:
+
+. **Simpler Implementation**
+   - No ELF/PE section manipulation
+   - No linker integration required
+   - Just write file: `program.opdf`
+
+. **Faster Development Iteration**
+   - Regenerate debug info without recompiling binary
+   - Easier format debugging
+
+. **Natural Migration Path**
+   - External format proves the spec
+   - Embedding is "just" different I/O later
+
+**MVP Workflow**:
+
+```bash
+# Compile program (no special flags yet)
+fpc myprogram.pas
+
+# Generate external OPDF (standalone tool)
+./opdf_generator myprogram > myprogram.opdf
+
+# Debug
+./pdr myprogram  # PDR automatically finds myprogram.opdf
+```
+
+**Future: Embedded Support**:
+
+Phase 2+ adds embedded OPDF in `.opdf` ELF section:
+
+```bash
+# Compile with OPDF embedded
+fpc -gopdf myprogram.pas  # Embeds .opdf section
+
+# PDR automatically checks for embedded first
+./pdr myprogram  # Uses embedded .opdf section
+```
+
+**Debugger Loader Logic**:
+
+[source,pascal]
+----
+function TOPDFLoader.Load(const BinaryPath: String): Boolean;
+begin
+  // Phase 2+: Check for embedded section first
+  if HasEmbeddedOPDF(BinaryPath) then
+    Exit(LoadEmbedded(BinaryPath));
+
+  // Phase 1: Check for external file
+  OPDFPath := ChangeFileExt(BinaryPath, '.opdf');
+  if FileExists(OPDFPath) then
+    Exit(LoadExternal(OPDFPath));
+
+  // Not found
+  Result := False;
+end;
+----
+
+== Vertical Slice Workflow
+
+=== Decision: Type-by-Type Implementation
+
+**Workflow Per Type**:
+
+----
+┌─────────────────────────────────────────────────────────────┐
+│ Iteration N: Implement Type X                               │
+├─────────────────────────────────────────────────────────────┤
+│ 1. Update Specification                                     │
+│    └─ docs/opdf-specification.adoc                          │
+│                                                              │
+│ 2. Add to Shared Library                                    │
+│    ├─ opdf-lib/src/main/pascal/ogopdf.pas                   │
+│    │    └─ Add TDefTypeX record                             │
+│    └─ opdf-lib/src/main/pascal/opdf_io.pas                  │
+│         └─ Add WriteTypeX() method                          │
+│                                                              │
+│ 3. Update Generator Tool                                    │
+│    └─ tools/src/main/pascal/opdf_generator.pas              │
+│         └─ Emit Type X for test programs                    │
+│                                                              │
+│ 4. Write Integration Test                                   │
+│    ├─ tests/integration/test_typeX.pas (test program)       │
+│    ├─ tests/integration/test_typeX.commands (PDR commands)  │
+│    └─ tests/integration/test_typeX.expected (expected out)  │
+│                                                              │
+│ 5. Implement Parser                                         │
+│    └─ pdr-adapters/src/main/pascal/pdr_opdf_adapter.pas     │
+│         └─ Parse recTypeX records                           │
+│                                                              │
+│ 6. Implement Evaluator (Strategy)                           │
+│    └─ pdr-core/src/main/pascal/pdr_typesys.pas              │
+│         ├─ Create TTypeXEvaluator : ITypeEvaluator          │
+│         └─ Register evaluator                               │
+│                                                              │
+│ 7. Test End-to-End                                          │
+│    ├─ pasbuild test -m pdr-core (unit tests)                │
+│    ├─ pasbuild compile (full build)                         │
+│    └─ ./tests/integration/run_tests.sh test_typeX           │
+│         └─ PASS ✓                                           │
+│                                                              │
+│ 8. Document & Commit                                        │
+│    ├─ Update CHANGELOG.adoc                                 │
+│    └─ git commit -m "Add Type X support"                    │
+└─────────────────────────────────────────────────────────────┘
+----
+
+**Type Implementation Order** (from implementation-plan.adoc):
+
+. **Phase 1**: Integer (LongInt, Boolean)
+. **Phase 2**: ShortString, AnsiString
+. **Phase 3**: Pointer, Class, Property (field-backed)
+. **Phase 4**: Dynamic arrays, Sets, Generics, Property (getter/setter)
+
+**Benefits**:
+
+* Each iteration delivers complete, testable functionality
+* Easy to parallelize (multiple contributors work on different types)
+* Incremental validation reduces debugging complexity
+* Clear progress tracking
+
+== Design Pattern Details
+
+=== Strategy Pattern: Type Evaluators
+
+**Problem**: Different types require different evaluation logic.
+
+**Solution**: Each type has its own evaluator implementing `ITypeEvaluator`.
+
+[source,pascal]
+----
+type
+  ITypeEvaluator = interface
+    function Evaluate(const VarInfo: TVariableInfo;
+                     Controller: IProcessController;
+                     ArchAdapter: IArchAdapter): TVariableValue;
+  end;
+
+  TPrimitiveEvaluator = class(TInterfacedObject, ITypeEvaluator)
+    // Evaluates Integer, Boolean, Char
+  end;
+
+  TShortStringEvaluator = class(TInterfacedObject, ITypeEvaluator)
+    // Reads length byte, then characters
+  end;
+
+  TAnsiStringEvaluator = class(TInterfacedObject, ITypeEvaluator)
+    // Follows pointer, reads heap metadata
+  end;
+----
+
+**Registration**:
+
+[source,pascal]
+----
+procedure TTypeSystem.RegisterDefaultEvaluators;
+begin
+  RegisterEvaluator('Integer', TPrimitiveEvaluator.Create);
+  RegisterEvaluator('LongInt', TPrimitiveEvaluator.Create);
+  RegisterEvaluator('ShortString', TShortStringEvaluator.Create);
+  RegisterEvaluator('AnsiString', TAnsiStringEvaluator.Create);
+  // Extensible: users can add custom evaluators
+end;
+----
+
+**Benefit**: Adding new type = implement evaluator + register. No core changes.
+
+=== Command Pattern: CLI Commands
+
+**Problem**: Multiple commands with different behaviors.
+
+**Solution**: Each command is an object implementing `ICommand`.
+
+[source,pascal]
+----
+type
+  ICommand = interface
+    function Execute(const Args: TArray<String>): Boolean;
+    function GetHelp: String;
+  end;
+
+  TPrintCommand = class(TInterfacedObject, ICommand)
+  private
+    FEngine: ICommandHandler;
+  public
+    constructor Create(AEngine: ICommandHandler);
+    function Execute(const Args: TArray<String>): Boolean;
+    function GetHelp: String;
+  end;
+----
+
+**CLI Loop**:
+
+[source,pascal]
+----
+procedure TCLIDebugger.ProcessCommand(const Input: String);
+var
+  Parts: TStringArray;
+  CmdName: String;
+  Cmd: ICommand;
+begin
+  Parts := Input.Split([' ']);
+  CmdName := Parts[0];
+
+  if FCommands.TryGetValue(CmdName, Cmd) then
+    Cmd.Execute(Copy(Parts, 1, Length(Parts) - 1))
+  else
+    WriteLn('Unknown command: ', CmdName);
+end;
+----
+
+**Benefit**: Easy to add new commands without modifying core loop.
+
+=== Factory Pattern: Platform Controllers
+
+**Problem**: Need different `IProcessController` per platform.
+
+**Solution**: Factory function selects implementation.
+
+[source,pascal]
+----
+function CreateProcessController: IProcessController;
+begin
+  {$IFDEF LINUX}
+  Result := TLinuxPtraceAdapter.Create;
+  {$ENDIF}
+  {$IFDEF FREEBSD}
+  Result := TFreeBSDPtraceAdapter.Create;
+  {$ENDIF}
+  {$IFDEF WINDOWS}
+  Result := TWindowsDebugAdapter.Create;
+  {$ENDIF}
+  {$IFDEF DARWIN}
+  Result := TMacOSMachAdapter.Create;
+  {$ENDIF}
+end;
+----
+
+**Benefit**: Platform detection centralized; main code platform-agnostic.
+
+== Testing Strategy
+
+=== Unit Tests (Mock Adapters)
+
+Each module has tests in `src/test/pascal/`:
+
+[source,pascal]
+----
+unit test_typesys;
+
+uses
+  fpcunit, pdr_typesys, pdr_ports;
+
+type
+  TMockProcessController = class(TInterfacedObject, IProcessController)
+  private
+    FMemory: array[0..1023] of Byte;
+  public
+    procedure SetMemory(Address: QWord; const Data; Size: Cardinal);
+    function ReadMemory(Address: QWord; Size: Cardinal; out Buffer): Boolean;
+    // ... other methods stubbed
+  end;
+
+  TTestTypeSystem = class(TTestCase)
+  published
+    procedure TestEvaluateInteger;
+    procedure TestEvaluateShortString;
+  end;
+----
+
+**Run**: `pasbuild test -m pdr-core`
+
+=== Integration Tests
+
+Located in `tests/integration/`:
+
+```
+test_01_primitives.pas        # Target program
+test_01_primitives.commands   # PDR commands to run
+test_01_primitives.expected   # Expected output
+```
+
+**Test Script**: `run_tests.sh`
+
+```bash
+#!/bin/bash
+
+# Compile test program
+fpc test_01_primitives.pas
+
+# Generate OPDF
+./tools/target/opdf_generator test_01_primitives
+
+# Run PDR with commands
+./pdr-cli/target/pdr test_01_primitives < test_01_primitives.commands \
+  > actual_output.txt
+
+# Compare with expected
+diff actual_output.txt test_01_primitives.expected
+```
+
+**CI Integration**: `pasbuild test` runs all unit + integration tests.
+
+== Build Commands Reference
+
+=== Development Workflow
+
+```bash
+# Full build (all modules in dependency order)
+pasbuild compile
+
+# Build specific module
+pasbuild compile -m pdr-core
+
+# Run all tests
+pasbuild test
+
+# Run tests for specific module
+pasbuild test -m pdr-core
+
+# View dependency graph
+pasbuild compile -v
+
+# Debug build
+pasbuild compile -p debug
+
+# Release build
+pasbuild compile -p release
+
+# Clean all
+pasbuild clean
+
+# Package for distribution
+pasbuild package
+```
+
+=== Module Dependencies
+
+----
+opdf-lib (no dependencies)
+  ↓
+pdr-core (depends on: opdf-lib)
+  ↓
+pdr-adapters (depends on: pdr-core, opdf-lib)
+  ↓
+pdr-cli (depends on: pdr-adapters, pdr-core, opdf-lib)
+
+tools (depends on: opdf-lib)
+----
+
+PasBuild automatically resolves transitive dependencies.
+
+== Platform Support Matrix
+
+[cols="1,1,1,2,1"]
+|===
+|Platform |Binary Format |Phase |Adapter Module |Complexity
+
+|Linux
+|ELF
+|**Phase 1**
+|pdr_linux_ptrace.pas
+|Low
+
+|FreeBSD
+|ELF
+|**Phase 1**
+|pdr_freebsd_ptrace.pas
+|Low
+
+|Windows
+|PE/COFF
+|**Phase 2**
+|pdr_windows_debug.pas
+|Medium
+
+|macOS
+|Mach-O
+|**Phase 3**
+|pdr_macos_mach.pas
+|High (code signing)
+|===
+
+**32-bit vs 64-bit**: All platforms supported for both (via `IArchAdapter`).
+
+== Key Improvements Over Initial Design
+
+. **PasBuild Integration**: Professional build system with dependency management
+. **Architecture Metadata**: Explicit pointer size and architecture in OPDF header
+. **Hexagonal Architecture**: Clean separation, testability, extensibility
+. **Strategy Pattern**: Extensible type evaluation system
+. **Command Pattern**: Modular CLI command system
+. **32-bit/64-bit Support**: Architecture adapters handle pointer size differences
+. **External-First Approach**: Simpler MVP, embedded support added later
+. **Mock Testing**: Unit tests without requiring real processes
+. **Clear Module Boundaries**: Core, adapters, UI separated
+
+== Next Steps
+
+. **Week 1-2**: Setup repository with PasBuild structure
+. **Week 3**: Implement `ogopdf.pas` with architecture metadata
+. **Week 4**: Create mock adapters and unit test framework
+. **Week 5+**: Begin Phase 1 (Integer MVP) following vertical slice workflow
+
+== References
+
+* PasBuild Multi-Module Tutorial: `/data/devel/opensource/pasbuild/docs/multi-module-tutorial.adoc`
+* Hexagonal Architecture: Alistair Cockburn (2005)
+* OPDF Specification: `docs/opdf-specification.adoc`
+* Implementation Plan: `docs/implementation-plan.adoc`
+* Strategic Analysis: `docs/analysis.adoc`
