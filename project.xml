@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <name>opdebugger</name>
+  <version>0.1.0</version>
+  <author>Graeme Geldenhuys</author>
+  <license>BSD-3-Clause</license>
+  <description>Object Pascal Debug Format (OPDF) and Pascal Debug Reference (PDR) debugger</description>
+
+  <build>
+    <!-- Aggregator project -->
+    <packaging>pom</packaging>
+  </build>
+
+  <!-- Child modules -->
+  <modules>
+    <module>opdf-lib</module>
+    <module>pdr-core</module>
+    <module>pdr-adapters</module>
+    <module>pdr-cli</module>
+    <module>tools</module>
+  </modules>
+</project>

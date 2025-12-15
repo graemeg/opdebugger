@@ -1,0 +1,108 @@
+= OPDF - Object Pascal Debug Format
+:toc: left
+:toclevels: 3
+
+A custom debug information format and debugger designed specifically for Free Pascal Compiler (FPC) and Object Pascal language features.
+
+== Overview
+
+The Object Pascal Debug Format (OPDF) provides native, first-class support for Object Pascal concepts that are poorly represented in DWARF:
+
+* *Properties* with getter/setter methods
+* *String types* (ShortString, AnsiString, UnicodeString)
+* *Dynamic arrays* with correct length display
+* *Class instances* with inherited fields
+* *Method calls* during debugging
+
+== Project Structure
+
+This is a multi-module project built with PasBuild:
+
+* *opdf-lib*: OPDF binary format definitions and I/O library
+* *pdr-core*: PDR debugger core engine (hexagonal architecture)
+* *pdr-adapters*: Platform-specific adapters (ptrace, Windows DebugAPI, etc.)
+* *pdr-cli*: Command-line debugger interface
+* *tools*: Development tools (OPDF generator)
+
+== Building
+
+Requires https://github.com/graemeg/pasbuild[PasBuild]:
+
+[source,bash]
+----
+# Build all modules
+pasbuild compile
+
+# Build specific module
+pasbuild compile -m pdr-core
+
+# Run tests
+pasbuild test
+
+# View dependency graph
+pasbuild compile -v
+----
+
+== Documentation
+
+See `docs/` directory:
+
+* *opdf-specification.adoc*: Complete binary format specification
+* *analysis.adoc*: Strategic analysis and approach comparison
+* *implementation-plan.adoc*: 70-week phased implementation roadmap
+* *design-decisions.adoc*: Architecture and design pattern decisions
+* *data-type-decisions.adoc*: Data type size analysis
+
+== Current Status
+
+*Phase 0*: Foundation (in progress)
+
+* [x] Project structure and build system
+* [ ] Core OPDF data structures
+* [ ] Platform abstraction interfaces
+* [ ] Test framework with mock adapters
+
+== License
+
+BSD 3-Clause License (see LICENSE file)
+
+NOTE: When integrated into FPC compiler, those portions will be licensed under GPL-2.0-or-later to match FPC's licensing.
+
+== Architecture
+
+PDR uses Hexagonal Architecture (Ports and Adapters):
+
+* *Core Domain*: Pure debugging logic, platform-agnostic
+* *Ports*: Interfaces (IProcessController, IDebugInfoReader, IArchAdapter)
+* *Adapters*: Platform-specific implementations
+
+This enables:
+
+* Easy testing with mock adapters
+* Platform independence
+* Support for multiple debug formats (OPDF, DWARF)
+* Multiple UI frontends (CLI, TUI, IDE integration)
+
+== Contributing
+
+This project follows Test-Driven Development (TDD) and vertical slice implementation:
+
+. Write failing test
+. Implement feature
+. Verify test passes
+. Commit
+
+See `docs/implementation-plan.adoc` for detailed workflow.
+
+== Contact
+
+Graeme Geldenhuys
+
+== Acknowledgments
+
+Design influenced by:
+
+* Borland/Embarcadero Delphi debugging experience
+* fpdebug project (https://github.com/graemeg/fpdebug)
+* DWARF debugging standard analysis
+* FPC community feedback

@@ -2,6 +2,9 @@
 target/
 build/
 
+# Generated documentation
+*.html
+
 # FPC compiled units
 *.ppu
 *.o

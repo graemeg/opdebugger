@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <name>pdr-core</name>
+  <version>0.1.0</version>
+  <author>Graeme Geldenhuys</author>
+  <license>BSD-3-Clause</license>
+  <description>PDR debugger core engine (hexagonal architecture domain layer)</description>
+
+  <build>
+    <packaging>library</packaging>
+  </build>
+
+  <!-- Dependencies -->
+  <moduleDependencies>
+    <module>../opdf-lib</module>
+  </moduleDependencies>
+</project>

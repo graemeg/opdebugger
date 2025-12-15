@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <name>pdr-cli</name>
+  <version>0.1.0</version>
+  <author>Graeme Geldenhuys</author>
+  <license>BSD-3-Clause</license>
+  <description>PDR command-line debugger interface</description>
+
+  <build>
+    <packaging>application</packaging>
+    <mainSource>pdr_main.pas</mainSource>
+    <executableName>pdr</executableName>
+  </build>
+
+  <!-- Dependencies -->
+  <moduleDependencies>
+    <module>../pdr-adapters</module>
+    <module>../pdr-core</module>
+    <module>../opdf-lib</module>
+  </moduleDependencies>
+</project>
