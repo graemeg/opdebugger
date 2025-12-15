@@ -5,6 +5,9 @@ build/
 # Generated documentation
 *.html
 
+# Progress tracking (session-specific, not committed)
+PROGRESS.adoc
+
 # FPC compiled units
 *.ppu
 *.o
