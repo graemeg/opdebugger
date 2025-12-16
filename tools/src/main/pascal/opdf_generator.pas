@@ -27,10 +27,20 @@ type
 
   TSymbolArray = array of TSymbolInfo;
 
+  TLineEntry = record
+    Address: QWord;
+    FileName: String;
+    LineNumber: Cardinal;
+    ColumnNumber: Word;
+  end;
+
+  TLineEntryArray = array of TLineEntry;
+
 var
   BinaryPath: String;
   OPDFPath: String;
   Symbols: TSymbolArray;
+  LineEntries: TLineEntryArray;
 
 { Extract symbols from binary using nm }
 function ExtractSymbols(const BinaryPath: String; out Symbols: TSymbolArray): Boolean;
@@ -87,6 +97,126 @@ begin
   end;
 end;
 
+{ Extract DWARF line number information from binary }
+function ExtractLineInfo(const BinaryPath: String; out LineEntries: TLineEntryArray): Boolean;
+var
+  OutputStr: String;
+  Output: TStringList;
+  Line: String;
+  Parts: TStringArray;
+  Entry: TLineEntry;
+  I: Integer;
+  AddrStr, FileLineStr: String;
+  ColonPos: Integer;
+  TempLineNum: LongInt;
+begin
+  Result := False;
+  SetLength(LineEntries, 0);
+
+  WriteLn('[INFO] Extracting DWARF line information using objdump...');
+
+  // Use objdump --dwarf=decodedline to get line number table
+  if not RunCommand('objdump', ['--dwarf=decodedline', BinaryPath], OutputStr) then
+  begin
+    WriteLn('[WARN] Failed to execute objdump for line info (may not have debug symbols)');
+    Exit(True); // Not an error - binary may not have debug info
+  end;
+
+  Output := TStringList.Create;
+  try
+    Output.Text := OutputStr;
+
+    for Line in Output do
+    begin
+      // objdump --dwarf=decodedline format varies, try to parse:
+      // Format examples:
+      //   "test.pas                22   0x401234"
+      //   "test.pas:22 0x401234"
+      //
+      // Strategy: Look for lines with hex addresses (0x...)
+
+      if Pos('0x', Line) = 0 then
+        Continue;
+
+      // Extract the hex address
+      Parts := Line.Split([' ', #9], TStringSplitOptions.ExcludeEmpty);
+      AddrStr := '';
+      FileLineStr := '';
+
+      for I := 0 to High(Parts) do
+      begin
+        if (Pos('0x', Parts[I]) = 1) then
+        begin
+          AddrStr := Parts[I];
+          // File:line should be before the address
+          if I > 0 then
+            FileLineStr := Parts[I - 1];
+          Break;
+        end;
+      end;
+
+      if (AddrStr = '') or (FileLineStr = '') then
+        Continue;
+
+      // Try to parse FileLineStr (could be just a number if filename is earlier)
+      // First check if it's a standalone number
+      if TryStrToInt(FileLineStr, TempLineNum) then
+      begin
+        Entry.LineNumber := TempLineNum;
+        // Line number without filename in same column, search backwards for filename
+        for I := 0 to High(Parts) - 1 do
+        begin
+          // Look for .pas, .pp, .p files
+          if (Pos('.pas', LowerCase(Parts[I])) > 0) or
+             (Pos('.pp', LowerCase(Parts[I])) > 0) or
+             (Pos('.p', LowerCase(Parts[I])) > 0) then
+          begin
+            Entry.FileName := Parts[I];
+            Break;
+          end;
+        end;
+      end
+      else
+      begin
+        // Try parsing as filename:linenum format
+        ColonPos := Pos(':', FileLineStr);
+        if ColonPos > 0 then
+        begin
+          Entry.FileName := Copy(FileLineStr, 1, ColonPos - 1);
+          if not TryStrToInt(Copy(FileLineStr, ColonPos + 1, Length(FileLineStr)), TempLineNum) then
+            Continue;
+          Entry.LineNumber := TempLineNum;
+        end
+        else
+          Continue; // Can't parse this line
+      end;
+
+      // Parse address
+      try
+        Entry.Address := StrToQWord(AddrStr);
+      except
+        Continue; // Invalid address
+      end;
+
+      // Default column to 0 (unknown)
+      Entry.ColumnNumber := 0;
+
+      // Only add entries with valid filename
+      if Entry.FileName <> '' then
+      begin
+        SetLength(LineEntries, Length(LineEntries) + 1);
+        LineEntries[High(LineEntries)] := Entry;
+        WriteLn('[DEBUG] Line info: ', Entry.FileName, ':', Entry.LineNumber, ' -> 0x', IntToHex(Entry.Address, 8));
+      end;
+    end;
+
+    WriteLn('[INFO] Found ', Length(LineEntries), ' line mapping(s)');
+    Result := True;
+  finally
+    Output.Free;
+  end;
+end;
+
 { Determine architecture from binary }
 function DetectArchitecture(const BinaryPath: String): TTargetArch;
 var
@@ -125,7 +255,8 @@ begin
 end;
 
 { Generate OPDF file }
-function GenerateOPDF(const BinaryPath, OPDFPath: String; const Symbols: TSymbolArray): Boolean;
+function GenerateOPDF(const BinaryPath, OPDFPath: String; const Symbols: TSymbolArray;
+                     const LineEntries: TLineEntryArray): Boolean;
 var
   FileStream: TFileStream;
   Writer: TOPDFWriter;
@@ -198,6 +329,19 @@ begin
       end;
     end;
 
+    // Write line number information
+    for I := 0 to High(LineEntries) do
+    begin
+      Writer.WriteLineInfo(
+        LineEntries[I].Address,
+        LineEntries[I].FileName,
+        LineEntries[I].LineNumber,
+        LineEntries[I].ColumnNumber
+      );
+      WriteLn('[DEBUG] Wrote line info: ', LineEntries[I].FileName, ':',
+              LineEntries[I].LineNumber, ' -> 0x', IntToHex(LineEntries[I].Address, 8));
+    end;
+
     // Finalize (updates header with record count)
     Writer.Finalize;
 
@@ -245,8 +389,15 @@ begin
     Halt(1);
   end;
 
+  // Extract line number information
+  if not ExtractLineInfo(BinaryPath, LineEntries) then
+  begin
+    WriteLn('[ERROR] Failed to extract line information');
+    Halt(1);
+  end;
+
   // Generate OPDF
-  if not GenerateOPDF(BinaryPath, OPDFPath, Symbols) then
+  if not GenerateOPDF(BinaryPath, OPDFPath, Symbols, LineEntries) then
   begin
     WriteLn('[ERROR] Failed to generate OPDF file');
     Halt(1);
