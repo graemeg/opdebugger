@@ -39,6 +39,7 @@ type
     destructor Destroy; override;
 
     { IProcessController implementation }
+    function Launch(const BinaryPath: String): Boolean;
     function Attach(PID: Integer): Boolean;
     function Detach: Boolean;
     function Continue: Boolean;
@@ -95,6 +96,84 @@ begin
   if FAttached then
     Detach;
   inherited Destroy;
+end;
+
+function TLinuxPtraceAdapter.Launch(const BinaryPath: String): Boolean;
+var
+  ChildPID: TPid;
+  Status: cInt;
+  Args: array[0..1] of PChar;
+begin
+  Result := False;
+
+  if FAttached then
+  begin
+    WriteLn('[ERROR] Already attached to PID ', FPID);
+    Exit;
+  end;
+
+  if not FileExists(BinaryPath) then
+  begin
+    WriteLn('[ERROR] Binary file not found: ', BinaryPath);
+    Exit;
+  end;
+
+  WriteLn('[INFO] Launching program: ', BinaryPath);
+
+  // Fork a child process
+  ChildPID := FpFork;
+
+  if ChildPID = -1 then
+  begin
+    WriteLn('[ERROR] Failed to fork: ', SysErrorMessage(fpgeterrno));
+    Exit;
+  end;
+
+  if ChildPID = 0 then
+  begin
+    // Child process - enable tracing and exec the target program
+    if ptrace(PTRACE_TRACEME, 0, nil, nil) = -1 then
+    begin
+      WriteLn('[ERROR] Child: Failed to enable tracing');
+      fpExit(1);
+    end;
+
+    // Prepare arguments
+    Args[0] := PChar(BinaryPath);
+    Args[1] := nil;
+
+    // Execute the target program
+    FpExecV(PChar(BinaryPath), @Args[0]);
+
+    // If execv returns, it failed
+    WriteLn('[ERROR] Child: Failed to exec: ', SysErrorMessage(fpgeterrno));
+    fpExit(1);
+  end
+  else
+  begin
+    // Parent process - wait for child to stop at exec
+    WriteLn('[INFO] Child process created with PID ', ChildPID);
+
+    if FpWaitPid(ChildPID, @Status, 0) = -1 then
+    begin
+      WriteLn('[ERROR] Failed to wait for child process: ', SysErrorMessage(fpgeterrno));
+      Exit;
+    end;
+
+    // Check if child stopped due to SIGTRAP (from ptrace)
+    if not WIFSTOPPED(Status) then
+    begin
+      WriteLn('[ERROR] Child process did not stop as expected');
+      Exit;
+    end;
+
+    FPID := ChildPID;
+    FAttached := True;
+
+    WriteLn('[INFO] Child process stopped at entry point');
+    WriteLn('[INFO] Debugger has control (process is paused)');
+    Result := True;
+  end;
 end;
 
 function TLinuxPtraceAdapter.Attach(PID: Integer): Boolean;

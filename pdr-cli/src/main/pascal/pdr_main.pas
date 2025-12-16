@@ -55,8 +55,9 @@ end;
 procedure TCLIDebugger.PrintHelp;
 begin
   WriteLn('PDR Debugger Commands:');
+  WriteLn('  run            - Start program (automatically done on launch)');
   WriteLn('  print <var>    - Print variable value');
-  WriteLn('  attach <pid>   - Attach to process');
+  WriteLn('  attach <pid>   - Attach to running process');
   WriteLn('  detach         - Detach from process');
   WriteLn('  continue       - Continue execution');
   WriteLn('  step           - Single step');
@@ -98,6 +99,9 @@ begin
         WriteLn('Exiting...');
         FRunning := False;
       end;
+
+    'run', 'r':
+      FEngine.Run;
 
     'attach':
       begin
@@ -210,6 +214,16 @@ begin
     Halt(1);
   end;
 
+  WriteLn;
+
+  // Automatically start the program (paused at entry point)
+  if not FEngine.Run then
+  begin
+    WriteLn('[ERROR] Failed to start program');
+    Halt(1);
+  end;
+
+  WriteLn;
   WriteLn('Type "help" for available commands');
   WriteLn;
 

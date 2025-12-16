@@ -190,8 +190,32 @@ end;
 function TDebuggerEngine.Run: Boolean;
 begin
   Result := False;
-  WriteLn('[WARNING] Run not implemented yet');
-  // TODO: Start process from beginning
+
+  if FState <> dsIdle then
+  begin
+    WriteLn('[ERROR] Process already running or attached');
+    Exit;
+  end;
+
+  if FBinaryPath = '' then
+  begin
+    WriteLn('[ERROR] No binary loaded. Use LoadProgram first');
+    Exit;
+  end;
+
+  WriteLn('[INFO] Running program: ', FBinaryPath);
+
+  // Launch the program under debugger control
+  if not FProcessController.Launch(FBinaryPath) then
+  begin
+    WriteLn('[ERROR] Failed to launch program');
+    Exit;
+  end;
+
+  FState := dsPaused;
+  WriteLn('[INFO] Program started and paused at entry point');
+  WriteLn('[INFO] You can now set breakpoints and use "continue" to start execution');
+  Result := True;
 end;
 
 function TDebuggerEngine.Continue: Boolean;

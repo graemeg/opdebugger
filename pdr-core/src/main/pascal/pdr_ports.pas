@@ -99,6 +99,9 @@ type
   IProcessController = interface
     ['{34567890-3456-3456-3456-345678901234}']
 
+    { Launch program under debugger control }
+    function Launch(const BinaryPath: String): Boolean;
+
     { Attach to running process }
     function Attach(PID: Integer): Boolean;
 
