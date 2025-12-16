@@ -357,37 +357,37 @@ end;
 ├─────────────────────────────────────────────────────────────┤
 │ 1. Update Specification                                     │
 │    └─ docs/opdf-specification.adoc                          │
-│                                                              │
+│                                                             │
 │ 2. Add to Shared Library                                    │
 │    ├─ opdf-lib/src/main/pascal/ogopdf.pas                   │
 │    │    └─ Add TDefTypeX record                             │
 │    └─ opdf-lib/src/main/pascal/opdf_io.pas                  │
 │         └─ Add WriteTypeX() method                          │
-│                                                              │
+│                                                             │
 │ 3. Update Generator Tool                                    │
 │    └─ tools/src/main/pascal/opdf_generator.pas              │
 │         └─ Emit Type X for test programs                    │
-│                                                              │
+│                                                             │
 │ 4. Write Integration Test                                   │
 │    ├─ tests/integration/test_typeX.pas (test program)       │
 │    ├─ tests/integration/test_typeX.commands (PDR commands)  │
 │    └─ tests/integration/test_typeX.expected (expected out)  │
-│                                                              │
+│                                                             │
 │ 5. Implement Parser                                         │
 │    └─ pdr-adapters/src/main/pascal/pdr_opdf_adapter.pas     │
 │         └─ Parse recTypeX records                           │
-│                                                              │
+│                                                             │
 │ 6. Implement Evaluator (Strategy)                           │
 │    └─ pdr-core/src/main/pascal/pdr_typesys.pas              │
 │         ├─ Create TTypeXEvaluator : ITypeEvaluator          │
 │         └─ Register evaluator                               │
-│                                                              │
+│                                                             │
 │ 7. Test End-to-End                                          │
 │    ├─ pasbuild test -m pdr-core (unit tests)                │
 │    ├─ pasbuild compile (full build)                         │
 │    └─ ./tests/integration/run_tests.sh test_typeX           │
 │         └─ PASS ✓                                           │
-│                                                              │
+│                                                             │
 │ 8. Document & Commit                                        │
 │    ├─ Update CHANGELOG.adoc                                 │
 │    └─ git commit -m "Add Type X support"                    │
