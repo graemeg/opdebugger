@@ -61,7 +61,8 @@ type
     recProperty      = 10, // Class property
     recMethod        = 11, // Class method/function
     recLocalVar      = 12, // Local variable
-    recParameter     = 13  // Function parameter
+    recParameter     = 13, // Function parameter
+    recLineInfo      = 14  // Source line to address mapping
   );
 
   { Generic Record Header - 5 bytes }
@@ -215,6 +216,15 @@ type
     // Followed by Name (NameLen bytes)
   end;
 
+  { Source Line Information - Maps source code locations to machine addresses }
+  TDefLineInfo = packed record
+    Address: QWord;           // 8 bytes (machine code address)
+    LineNumber: Cardinal;     // 4 bytes (line number in source file)
+    ColumnNumber: Word;       // 2 bytes (column number, 0 if unknown)
+    FileNameLen: TNameLen;    // 2 bytes (length of source file name)
+    // Followed by FileName (FileNameLen bytes)
+  end;
+
 { Helper functions }
 
 { Get architecture name as string }
@@ -257,6 +267,7 @@ begin
     recMethod:     Result := 'Method';
     recLocalVar:   Result := 'LocalVar';
     recParameter:  Result := 'Parameter';
+    recLineInfo:   Result := 'LineInfo';
     else           Result := 'Unknown';
   end;
 end;

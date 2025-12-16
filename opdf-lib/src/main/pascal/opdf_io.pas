@@ -59,6 +59,10 @@ type
                            const Name: String; ReadType, WriteType: TPropertyAccessType;
                            ReadAddr, WriteAddr: QWord);
 
+    { Write source line information }
+    procedure WriteLineInfo(Address: QWord; const FileName: String;
+                           LineNumber: Cardinal; ColumnNumber: Word = 0);
+
     { Finalize - update header with final record count }
     procedure Finalize;
 
@@ -346,6 +350,30 @@ begin
   FStream.Write(RecHeader, SizeOf(RecHeader));
   FStream.Write(Payload, SizeOf(Payload));
   WriteString(Name);
+
+  Inc(FRecordCount);
+end;
+
+procedure TOPDFWriter.WriteLineInfo(Address: QWord; const FileName: String;
+                                    LineNumber: Cardinal; ColumnNumber: Word = 0);
+var
+  RecHeader: TOPDFRecordHeader;
+  Payload: TDefLineInfo;
+begin
+  if not FHeaderWritten then
+    WriteHeader;
+
+  Payload.Address := Address;
+  Payload.LineNumber := LineNumber;
+  Payload.ColumnNumber := ColumnNumber;
+  Payload.FileNameLen := Length(FileName);
+
+  RecHeader.RecType := Ord(recLineInfo);
+  RecHeader.RecSize := SizeOf(TDefLineInfo) + Length(FileName);
+
+  FStream.Write(RecHeader, SizeOf(RecHeader));
+  FStream.Write(Payload, SizeOf(Payload));
+  WriteString(FileName);
 
   Inc(FRecordCount);
 end;
