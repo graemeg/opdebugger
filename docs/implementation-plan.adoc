@@ -946,11 +946,398 @@ nm target | grep MyGlobalInt
 
 === Phase 1 Success Criteria
 
-* [ ] OPDF writer creates valid .opdf files
-* [ ] PDR debugger loads and parses .opdf
-* [ ] PDR attaches to running process on Linux
-* [ ] PDR reads and displays global Integer variable correctly
-* [ ] End-to-end test passes
+* [x] OPDF writer creates valid .opdf files
+* [x] PDR debugger loads and parses .opdf
+* [x] PDR attaches to running process on Linux
+* [x] PDR reads and displays global Integer variable correctly
+* [x] End-to-end test passes
+* [x] Breakpoint management (address-based and variable-based)
+
+== Phase 1.5: Source Line Mapping
+
+**Timeline**: Week 11 (moved from Phase 4 for usability)
+
+**Goal**: Enable setting breakpoints by file and line number (e.g., `break test.pas:22`)
+
+**Rationale**: File:line breakpoints are fundamental for debugger usability and manual testing. Moving this earlier in the timeline enables easier validation of all future features.
+
+=== 1.5.1: OPDF Format Extension
+
+Add new record type for source line information.
+
+**Update**: `opdf-lib/src/main/pascal/ogopdf.pas`
+
+[source,pascal]
+----
+type
+  TOPDFRecordType = (
+    recPrimitive = 1,
+    recShortStr = 2,
+    recAnsiStr = 3,
+    recPointer = 4,
+    recGlobalVar = 5,
+    recClass = 6,
+    recProperty = 7,
+    recLineInfo = 8  // NEW: Source line mapping
+  );
+
+  { Source line to address mapping }
+  TDefLineInfo = packed record
+    Address: QWord;        // Machine code address
+    FileNameLen: Word;     // Length of source file name
+    LineNumber: Cardinal;  // Line number in source file
+    ColumnNumber: Word;    // Column number (0 if unknown)
+  end;
+  // Followed by: FileName (variable length)
+----
+
+Add writer method:
+
+[source,pascal]
+----
+procedure TOPDFWriter.WriteLineInfo(Address: QWord; const FileName: String;
+                                    LineNumber: Cardinal; ColumnNumber: Word = 0);
+var
+  Header: TOPDFRecordHeader;
+  Payload: TDefLineInfo;
+begin
+  Payload.Address := Address;
+  Payload.FileNameLen := Length(FileName);
+  Payload.LineNumber := LineNumber;
+  Payload.ColumnNumber := ColumnNumber;
+
+  Header.RecType := Ord(recLineInfo);
+  Header.RecSize := SizeOf(TDefLineInfo) + Length(FileName);
+
+  FStream.Write(Header, SizeOf(Header));
+  FStream.Write(Payload, SizeOf(Payload));
+  if Length(FileName) > 0 then
+    FStream.Write(FileName[1], Length(FileName));
+
+  Inc(FRecordCount);
+end;
+----
+
+**Tests**:
+
+* [ ] WriteLineInfo generates correct binary format
+* [ ] TOPDFReader can parse LineInfo records
+
+=== 1.5.2: DWARF Line Table Parsing
+
+Enhance opdf_generator to extract line number information from DWARF debug data.
+
+**Update**: `tools/src/main/pascal/opdf_generator.pas`
+
+[source,pascal]
+----
+type
+  TLineEntry = record
+    Address: QWord;
+    FileName: String;
+    LineNumber: Cardinal;
+    ColumnNumber: Word;
+  end;
+  TLineEntryArray = array of TLineEntry;
+
+{ Parse DWARF line number table from binary }
+function ParseDWARFLineTable(const BinaryPath: String): TLineEntryArray;
+var
+  Output: String;
+  Lines: TStringList;
+  I: Integer;
+  Parts: TStringArray;
+  Entry: TLineEntry;
+begin
+  SetLength(Result, 0);
+
+  // Use objdump to extract DWARF line info
+  // objdump --dwarf=decodedline binary
+  if not RunCommand('objdump', ['--dwarf=decodedline', BinaryPath], Output) then
+    Exit;
+
+  Lines := TStringList.Create;
+  try
+    Lines.Text := Output;
+
+    for I := 0 to Lines.Count - 1 do
+    begin
+      // Parse line format: "file.pas:22  0x401234"
+      if ParseLineInfoLine(Lines[I], Entry) then
+      begin
+        SetLength(Result, Length(Result) + 1);
+        Result[High(Result)] := Entry;
+      end;
+    end;
+  finally
+    Lines.Free;
+  end;
+end;
+
+{ Enhanced GenerateOPDF }
+procedure GenerateOPDF(const BinaryPath: String);
+var
+  Writer: TOPDFWriter;
+  LineEntries: TLineEntryArray;
+  I: Integer;
+begin
+  // ... existing code for types and variables ...
+
+  // Add line number information
+  LineEntries := ParseDWARFLineTable(BinaryPath);
+  for I := 0 to High(LineEntries) do
+  begin
+    Writer.WriteLineInfo(
+      LineEntries[I].Address,
+      LineEntries[I].FileName,
+      LineEntries[I].LineNumber,
+      LineEntries[I].ColumnNumber
+    );
+  end;
+
+  // ... finalize ...
+end;
+----
+
+**Tests**:
+
+* [ ] Parse DWARF line table from test binary
+* [ ] Extract correct file:line → address mappings
+* [ ] Generate .opdf with LineInfo records
+
+=== 1.5.3: Debug Info Reader Enhancement
+
+Add line lookup methods to IDebugInfoReader interface.
+
+**Update**: `pdr-core/src/main/pascal/pdr_ports.pas`
+
+[source,pascal]
+----
+type
+  TLineInfo = record
+    Address: QWord;
+    FileName: String;
+    LineNumber: Cardinal;
+    ColumnNumber: Word;
+  end;
+
+  IDebugInfoReader = interface
+    // ... existing methods ...
+
+    { Find address for source line }
+    function FindAddressByLine(const FileName: String; LineNum: Cardinal;
+                              out Address: QWord): Boolean;
+
+    { Find source line for address }
+    function FindLineByAddress(Address: QWord; out LineInfo: TLineInfo): Boolean;
+
+    { Get all line entries for a file }
+    function GetFileLineEntries(const FileName: String): array of TLineInfo;
+  end;
+----
+
+**Update**: `pdr-adapters/src/main/pascal/pdr_opdf_adapter.pas`
+
+[source,pascal]
+----
+type
+  TOPDFReaderAdapter = class(TInterfacedObject, IDebugInfoReader)
+  private
+    FLineInfoList: TFPList; // List of TLineInfo records
+
+    procedure LoadLineInfo;
+  public
+    function FindAddressByLine(const FileName: String; LineNum: Cardinal;
+                              out Address: QWord): Boolean;
+    function FindLineByAddress(Address: QWord; out LineInfo: TLineInfo): Boolean;
+  end;
+
+implementation
+
+function TOPDFReaderAdapter.FindAddressByLine(const FileName: String;
+  LineNum: Cardinal; out Address: QWord): Boolean;
+var
+  I: Integer;
+  Entry: ^TLineInfo;
+  NormalizedFile, NormalizedEntry: String;
+begin
+  Result := False;
+
+  // Normalize file name (handle relative paths, etc.)
+  NormalizedFile := ExtractFileName(FileName);
+
+  for I := 0 to FLineInfoList.Count - 1 do
+  begin
+    Entry := FLineInfoList[I];
+    NormalizedEntry := ExtractFileName(Entry^.FileName);
+
+    if (CompareText(NormalizedFile, NormalizedEntry) = 0) and
+       (Entry^.LineNumber = LineNum) then
+    begin
+      Address := Entry^.Address;
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+----
+
+**Tests**:
+
+* [ ] Load LineInfo records from .opdf
+* [ ] FindAddressByLine returns correct address
+* [ ] FindLineByAddress returns correct file:line
+* [ ] Handle relative/absolute file paths correctly
+
+=== 1.5.4: Engine Support for File:Line Syntax
+
+Extend ParseLocation to recognize and resolve file:line syntax.
+
+**Update**: `pdr-core/src/main/pascal/pdr_engine.pas`
+
+[source,pascal]
+----
+function TDebuggerEngine.ParseLocation(const Location: String;
+  out Address: QWord): Boolean;
+var
+  VarInfo: TVariableInfo;
+  ErrorCode: Integer;
+  ColonPos: Integer;
+  FileName: String;
+  LineNum: Cardinal;
+begin
+  Result := False;
+
+  // Try parsing as file:line (e.g., "test.pas:22")
+  ColonPos := Pos(':', Location);
+  if ColonPos > 0 then
+  begin
+    FileName := Copy(Location, 1, ColonPos - 1);
+    if TryStrToInt(Copy(Location, ColonPos + 1, Length(Location)), LineNum) then
+    begin
+      if FDebugInfoReader.FindAddressByLine(FileName, LineNum, Address) then
+      begin
+        Result := True;
+        Exit;
+      end
+      else
+      begin
+        WriteLn('[ERROR] No code found at ', FileName, ':', LineNum);
+        Exit;
+      end;
+    end;
+  end;
+
+  // Try parsing as hexadecimal address (e.g., "0x401000" or "$401000")
+  if (Pos('0x', LowerCase(Location)) = 1) or (Pos('$', Location) = 1) then
+  begin
+    Val(Location, Address, ErrorCode);
+    if ErrorCode = 0 then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+
+  // Try parsing as decimal address
+  Val(Location, Address, ErrorCode);
+  if ErrorCode = 0 then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  // Try finding as variable name
+  if FDebugInfoReader.FindVariable(Location, VarInfo) then
+  begin
+    Address := VarInfo.Address;
+    Result := True;
+    Exit;
+  end;
+
+  // Could not parse location
+  WriteLn('[ERROR] Could not resolve location: ', Location);
+  WriteLn('[INFO] Location can be: file:line, hex address (0xNNNN), decimal address, or variable name');
+end;
+----
+
+**Tests**:
+
+* [ ] `break test.pas:22` sets breakpoint at correct address
+* [ ] `break ../tests/test.pas:22` handles relative paths
+* [ ] Error message for non-existent file:line combinations
+* [ ] Backwards compatibility with hex/decimal/variable locations
+
+=== 1.5.5: CLI Help and Testing
+
+Update help text and create comprehensive tests.
+
+**Update**: `pdr-cli/src/main/pascal/pdr_main.pas`
+
+[source,pascal]
+----
+procedure TCLIDebugger.PrintHelp;
+begin
+  WriteLn('PDR Debugger Commands:');
+  WriteLn('  print <var>    - Print variable value');
+  WriteLn('  attach <pid>   - Attach to process');
+  WriteLn('  detach         - Detach from process');
+  WriteLn('  continue       - Continue execution');
+  WriteLn('  step           - Single step');
+  WriteLn('  break <loc>    - Set breakpoint at location');
+  WriteLn('    Formats:');
+  WriteLn('      break file.pas:22      - Source file and line number');
+  WriteLn('      break 0x401000         - Hex address');
+  WriteLn('      break MyGlobalInt      - Variable name');
+  WriteLn('  delete <num>   - Remove breakpoint by number');
+  WriteLn('  help           - Show this help');
+  WriteLn('  quit           - Exit debugger');
+  WriteLn;
+end;
+----
+
+**Manual Test**:
+
+[source,bash]
+----
+# Compile test with debug info
+cd tests/integration
+fpc -g test_01_primitives.pas
+
+# Generate OPDF with line info
+../../tools/target/opdf_generator test_01_primitives
+
+# Run test program
+./test_01_primitives &
+TEST_PID=$!
+
+# Run debugger
+../../pdr-cli/target/pdr test_01_primitives
+
+# In debugger:
+(pdr) attach $TEST_PID
+(pdr) break test_01_primitives.pas:22
+(pdr) break MyGlobalInt
+(pdr) continue
+(pdr) print MyGlobalInt
+----
+
+**Expected Output**:
+```
+[INFO] Breakpoint #1 set at 0x401234 (test_01_primitives.pas:22)
+[INFO] Breakpoint #2 set at 0x47D520 (MyGlobalInt)
+```
+
+=== Phase 1.5 Success Criteria
+
+* [ ] OPDF format supports LineInfo records
+* [ ] opdf_generator extracts DWARF line tables
+* [ ] opdf_generator writes LineInfo to .opdf files
+* [ ] Debug info reader can lookup addresses by file:line
+* [ ] Engine ParseLocation recognizes file:line syntax
+* [ ] CLI accepts `break file.pas:22` commands
+* [ ] Manual testing confirms file:line breakpoints work
+* [ ] Help text documents file:line syntax
 
 == Phase 2: String Types
 
