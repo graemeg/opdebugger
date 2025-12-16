@@ -20,6 +20,7 @@ type
   { Pointer types for caching }
   PTypeInfo = ^TTypeInfo;
   PVariableInfo = ^TVariableInfo;
+  PLineInfo = ^TLineInfo;
 
   { OPDF Reader Adapter - implements IDebugInfoReader }
   TOPDFReaderAdapter = class(TInterfacedObject, IDebugInfoReader)
@@ -33,6 +34,7 @@ type
     { Internal dictionaries for fast lookup }
     FTypes: TFPHashList;        // TypeID -> TTypeInfo
     FVariables: TFPHashList;    // Variable name -> TVariableInfo
+    FLineInfo: TFPList;         // List of TLineInfo records
     FLoaded: Boolean;
 
     { Helper methods }
@@ -49,6 +51,10 @@ type
     function GetGlobalVariables: TStringArray;
     function GetTargetArch: TTargetArch;
     function GetPointerSize: Byte;
+    function FindAddressByLine(const FileName: String; LineNum: Cardinal;
+                              out Address: QWord): Boolean;
+    function FindLineByAddress(Address: QWord; out LineInfo: TLineInfo): Boolean;
+    function GetFileLineEntries(const FileName: String): TLineInfoArray;
   end;
 
 implementation
@@ -60,6 +66,7 @@ begin
   inherited Create;
   FTypes := TFPHashList.Create;
   FVariables := TFPHashList.Create;
+  FLineInfo := TFPList.Create;
   FReader := nil;
   FStream := nil;
   FLoaded := False;
@@ -70,6 +77,7 @@ begin
   ClearCache;
   FTypes.Free;
   FVariables.Free;
+  FLineInfo.Free;
   inherited Destroy;
 end;
 
@@ -94,6 +102,13 @@ begin
     Dispose(PVariableInfo(FVariables[I]));
   end;
   FVariables.Clear;
+
+  // Free cached line info
+  for I := 0 to FLineInfo.Count - 1 do
+  begin
+    Dispose(PLineInfo(FLineInfo[I]));
+  end;
+  FLineInfo.Clear;
 
   // Free reader and stream
   FreeAndNil(FReader);
@@ -136,10 +151,13 @@ var
   RecHeader: TOPDFRecordHeader;
   DefPrimitive: TDefPrimitive;
   DefGlobalVar: TDefGlobalVar;
+  DefLineInfo: TDefLineInfo;
   TypeName: String;
   VarName: String;
+  FileName: String;
   PType: PTypeInfo;
   PVar: PVariableInfo;
+  PLine: PLineInfo;
 begin
   Result := False;
 
@@ -231,13 +249,31 @@ begin
           end;
         end;
 
+      recLineInfo:
+        begin
+          if FReader.ReadLineInfo(DefLineInfo, FileName) then
+          begin
+            New(PLine);
+            PLine^.Address := DefLineInfo.Address;
+            PLine^.FileName := FileName;
+            PLine^.LineNumber := DefLineInfo.LineNumber;
+            PLine^.ColumnNumber := DefLineInfo.ColumnNumber;
+
+            FLineInfo.Add(PLine);
+
+            WriteLn('[DEBUG] Loaded line info: ', FileName, ':', DefLineInfo.LineNumber,
+                    ' -> 0x', IntToHex(DefLineInfo.Address, 8));
+          end;
+        end;
+
       else
         // Skip unknown record types
         FReader.SkipRecord(RecHeader);
     end;
   end;
 
-  WriteLn('[INFO] Loaded ', FTypes.Count, ' type(s) and ', FVariables.Count, ' variable(s)');
+  WriteLn('[INFO] Loaded ', FTypes.Count, ' type(s), ', FVariables.Count,
+          ' variable(s), and ', FLineInfo.Count, ' line mapping(s)');
 
   FLoaded := True;
   Result := True;
@@ -346,6 +382,118 @@ begin
     Result := FHeader.PointerSize
   else
     Result := 0;
+end;
+
+function TOPDFReaderAdapter.FindAddressByLine(const FileName: String;
+  LineNum: Cardinal; out Address: QWord): Boolean;
+var
+  I: Integer;
+  Entry: PLineInfo;
+  NormalizedFile, NormalizedEntry: String;
+begin
+  Result := False;
+
+  if not FLoaded then
+    Exit;
+
+  // Normalize file name (compare just the base name, not full path)
+  NormalizedFile := ExtractFileName(FileName);
+
+  for I := 0 to FLineInfo.Count - 1 do
+  begin
+    Entry := PLineInfo(FLineInfo[I]);
+    NormalizedEntry := ExtractFileName(Entry^.FileName);
+
+    if (CompareText(NormalizedFile, NormalizedEntry) = 0) and
+       (Entry^.LineNumber = LineNum) then
+    begin
+      Address := Entry^.Address;
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
+function TOPDFReaderAdapter.FindLineByAddress(Address: QWord;
+  out LineInfo: TLineInfo): Boolean;
+var
+  I: Integer;
+  Entry: PLineInfo;
+  BestEntry: PLineInfo;
+  BestDistance: QWord;
+  Distance: QWord;
+begin
+  Result := False;
+  BestEntry := nil;
+  BestDistance := High(QWord);
+
+  if not FLoaded then
+    Exit;
+
+  // Find the closest line info entry with address <= given address
+  for I := 0 to FLineInfo.Count - 1 do
+  begin
+    Entry := PLineInfo(FLineInfo[I]);
+
+    if Entry^.Address <= Address then
+    begin
+      Distance := Address - Entry^.Address;
+      if Distance < BestDistance then
+      begin
+        BestDistance := Distance;
+        BestEntry := Entry;
+      end;
+    end;
+  end;
+
+  if BestEntry <> nil then
+  begin
+    LineInfo := BestEntry^;
+    Result := True;
+  end;
+end;
+
+function TOPDFReaderAdapter.GetFileLineEntries(const FileName: String): TLineInfoArray;
+var
+  I, Count: Integer;
+  Entry: PLineInfo;
+  NormalizedFile, NormalizedEntry: String;
+begin
+  SetLength(Result, 0);
+
+  if not FLoaded then
+    Exit;
+
+  // Normalize file name
+  NormalizedFile := ExtractFileName(FileName);
+
+  // Count matching entries
+  Count := 0;
+  for I := 0 to FLineInfo.Count - 1 do
+  begin
+    Entry := PLineInfo(FLineInfo[I]);
+    NormalizedEntry := ExtractFileName(Entry^.FileName);
+
+    if CompareText(NormalizedFile, NormalizedEntry) = 0 then
+      Inc(Count);
+  end;
+
+  // Allocate result array
+  SetLength(Result, Count);
+
+  // Fill result array
+  Count := 0;
+  for I := 0 to FLineInfo.Count - 1 do
+  begin
+    Entry := PLineInfo(FLineInfo[I]);
+    NormalizedEntry := ExtractFileName(Entry^.FileName);
+
+    if CompareText(NormalizedFile, NormalizedEntry) = 0 then
+    begin
+      Result[Count] := Entry^;
+      Inc(Count);
+    end;
+  end;
 end;
 
 end.

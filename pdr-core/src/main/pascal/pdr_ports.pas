@@ -70,6 +70,14 @@ type
     IsValid: Boolean;
   end;
 
+  { Source line information }
+  TLineInfo = record
+    Address: QWord;
+    FileName: String;
+    LineNumber: Cardinal;
+    ColumnNumber: Word;
+  end;
+
   { Calling convention types }
   TCallingConvention = (
     ccRegister,    // FPC default (registers then stack)
@@ -81,6 +89,7 @@ type
   { Dynamic array types - declared after record types }
   TStringArray = array of String;
   TVariableValueArray = array of TVariableValue;
+  TLineInfoArray = array of TLineInfo;
 
   {===================================================================}
   { SECONDARY PORTS - Adapters implement these interfaces            }
@@ -142,6 +151,16 @@ type
 
     { Get pointer size }
     function GetPointerSize: Byte;
+
+    { Find address for source line }
+    function FindAddressByLine(const FileName: String; LineNum: Cardinal;
+                              out Address: QWord): Boolean;
+
+    { Find source line for address }
+    function FindLineByAddress(Address: QWord; out LineInfo: TLineInfo): Boolean;
+
+    { Get all line entries for a file }
+    function GetFileLineEntries(const FileName: String): TLineInfoArray;
   end;
 
   { Architecture Adapter Port - Architecture-specific operations }
