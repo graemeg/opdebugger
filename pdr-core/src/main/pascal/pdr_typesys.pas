@@ -15,7 +15,7 @@ unit pdr_typesys;
 interface
 
 uses
-  Classes, SysUtils, Contnrs, ogopdf, pdr_ports;
+  Classes, SysUtils, Contnrs, ogopdf, opdf_demangle, pdr_ports;
 
 type
   { Type Evaluator Interface - Strategy pattern }
@@ -76,7 +76,8 @@ var
   Value: Int64;
   UValue: QWord;
 begin
-  Result.Name := VarInfo.Name;
+  // Use demangled name for display
+  Result.Name := TFPCDemangler.Demangle(VarInfo.Name);
   Result.TypeName := TypeInfo.Name;
   Result.Address := VarInfo.Address;
   Result.IsValid := False;

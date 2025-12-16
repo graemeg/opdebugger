@@ -14,7 +14,7 @@ unit pdr_opdf_adapter;
 interface
 
 uses
-  Classes, SysUtils, Contnrs, ogopdf, opdf_io, pdr_ports;
+  Classes, SysUtils, Contnrs, ogopdf, opdf_io, opdf_demangle, pdr_ports;
 
 type
   { Pointer types for caching }
@@ -224,6 +224,7 @@ begin
             PVar^.TypeID := DefGlobalVar.TypeID;
             PVar^.Address := DefGlobalVar.Address;
 
+            // Store with mangled name for lookup (since OPDF has mangled names)
             FVariables.Add(VarName, PVar);
 
             WriteLn('[DEBUG] Loaded variable: ', VarName, ' at $', IntToHex(DefGlobalVar.Address, 16));
@@ -245,6 +246,9 @@ end;
 function TOPDFReaderAdapter.FindVariable(const Name: String; out VarInfo: TVariableInfo): Boolean;
 var
   PVar: PVariableInfo;
+  I: Integer;
+  DemangledName: String;
+  SearchName: String;
 begin
   Result := False;
 
@@ -254,16 +258,35 @@ begin
     Exit;
   end;
 
+  // First try exact match (for mangled names)
   PVar := PVariableInfo(FVariables.Find(Name));
   if Assigned(PVar) then
   begin
     VarInfo := PVar^;
     Result := True;
-  end
-  else
-  begin
-    WriteLn('[DEBUG] Variable not found: ', Name);
+    Exit;
   end;
+
+  // If not found, try searching by demangled name (case-insensitive)
+  SearchName := LowerCase(Name);
+  for I := 0 to FVariables.Count - 1 do
+  begin
+    PVar := PVariableInfo(FVariables[I]);
+    if Assigned(PVar) then
+    begin
+      // Demangle the variable name and compare
+      DemangledName := TFPCDemangler.Demangle(PVar^.Name);
+      if LowerCase(DemangledName) = SearchName then
+      begin
+        VarInfo := PVar^;
+        Result := True;
+        WriteLn('[DEBUG] Found variable by demangled name: ', Name, ' -> ', PVar^.Name);
+        Exit;
+      end;
+    end;
+  end;
+
+  WriteLn('[DEBUG] Variable not found: ', Name);
 end;
 
 function TOPDFReaderAdapter.FindType(TypeID: TTypeID; out TypeInfo: TTypeInfo): Boolean;
