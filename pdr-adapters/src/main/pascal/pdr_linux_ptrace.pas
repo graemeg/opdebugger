@@ -17,11 +17,23 @@ uses
   SysUtils, BaseUnix, Unix, pdr_ports;
 
 type
+  { Breakpoint information }
+  TBreakpointInfo = record
+    Address: QWord;
+    OriginalData: cLong;  // Original instruction data
+    Active: Boolean;
+  end;
+
   { Linux ptrace implementation of IProcessController }
   TLinuxPtraceAdapter = class(TInterfacedObject, IProcessController)
   private
     FPID: Integer;
     FAttached: Boolean;
+    FBreakpoints: array of TBreakpointInfo;
+
+    { Breakpoint management helpers }
+    function FindBreakpoint(Address: QWord): Integer;
+    function GetOriginalData(Address: QWord): cLong;
   public
     constructor Create;
     destructor Destroy; override;
@@ -122,6 +134,8 @@ begin
 end;
 
 function TLinuxPtraceAdapter.Detach: Boolean;
+var
+  I: Integer;
 begin
   Result := False;
 
@@ -129,6 +143,18 @@ begin
   begin
     WriteLn('[WARN] Not attached to any process');
     Exit(True);
+  end;
+
+  // Remove all breakpoints before detaching
+  if Length(FBreakpoints) > 0 then
+  begin
+    WriteLn('[INFO] Removing all breakpoints before detach');
+    for I := 0 to High(FBreakpoints) do
+    begin
+      if FBreakpoints[I].Active then
+        RemoveBreakpoint(FBreakpoints[I].Address);
+    end;
+    SetLength(FBreakpoints, 0);
   end;
 
   if ptrace(PTRACE_DETACH, FPID, nil, nil) = -1 then
@@ -516,10 +542,37 @@ begin
   Result := True;
 end;
 
+{ Breakpoint management helpers }
+
+function TLinuxPtraceAdapter.FindBreakpoint(Address: QWord): Integer;
+var
+  I: Integer;
+begin
+  Result := -1;
+  for I := 0 to High(FBreakpoints) do
+  begin
+    if FBreakpoints[I].Address = Address then
+      Exit(I);
+  end;
+end;
+
+function TLinuxPtraceAdapter.GetOriginalData(Address: QWord): cLong;
+var
+  Idx: Integer;
+begin
+  Result := 0;
+  Idx := FindBreakpoint(Address);
+  if Idx >= 0 then
+    Result := FBreakpoints[Idx].OriginalData;
+end;
+
 function TLinuxPtraceAdapter.SetBreakpoint(Address: QWord): Boolean;
 var
   Data: cLong;
+  ModifiedData: cLong;
   Trap: Byte;
+  Idx: Integer;
+  BpInfo: TBreakpointInfo;
 begin
   Result := False;
 
@@ -527,6 +580,24 @@ begin
   begin
     WriteLn('[ERROR] Not attached to any process');
     Exit;
+  end;
+
+  // Check if breakpoint already exists
+  Idx := FindBreakpoint(Address);
+  if Idx >= 0 then
+  begin
+    if FBreakpoints[Idx].Active then
+    begin
+      WriteLn('[WARN] Breakpoint already set at $', IntToHex(Address, 16));
+      Exit(True);
+    end
+    else
+    begin
+      // Reactivate existing breakpoint
+      FBreakpoints[Idx].Active := True;
+      WriteLn('[INFO] Reactivated breakpoint at $', IntToHex(Address, 16));
+      Exit(True);
+    end;
   end;
 
   // Read current instruction
@@ -537,22 +608,34 @@ begin
     Exit;
   end;
 
-  // Replace first byte with INT3 (0xCC on x86/x86_64)
-  Trap := $CC;
-  Move(Trap, Data, 1);
+  // Save original instruction
+  BpInfo.Address := Address;
+  BpInfo.OriginalData := Data;
+  BpInfo.Active := True;
 
-  // Write back
-  if ptrace(PTRACE_POKEDATA, FPID, Pointer(PtrUInt(Address)), Pointer(Data)) = -1 then
+  // Create modified data with INT3 (0xCC on x86/x86_64)
+  ModifiedData := Data;
+  Trap := $CC;
+  Move(Trap, ModifiedData, 1);
+
+  // Write breakpoint
+  if ptrace(PTRACE_POKEDATA, FPID, Pointer(PtrUInt(Address)), Pointer(ModifiedData)) = -1 then
   begin
     WriteLn('[ERROR] Failed to set breakpoint: ', SysErrorMessage(fpgeterrno));
     Exit;
   end;
+
+  // Store breakpoint info
+  SetLength(FBreakpoints, Length(FBreakpoints) + 1);
+  FBreakpoints[High(FBreakpoints)] := BpInfo;
 
   WriteLn('[INFO] Breakpoint set at $', IntToHex(Address, 16));
   Result := True;
 end;
 
 function TLinuxPtraceAdapter.RemoveBreakpoint(Address: QWord): Boolean;
+var
+  Idx: Integer;
 begin
   Result := False;
 
@@ -562,8 +645,32 @@ begin
     Exit;
   end;
 
-  // TODO: Implement breakpoint removal (need to save original instruction)
-  WriteLn('[WARN] Breakpoint removal not yet implemented');
+  // Find breakpoint
+  Idx := FindBreakpoint(Address);
+  if Idx < 0 then
+  begin
+    WriteLn('[ERROR] No breakpoint found at $', IntToHex(Address, 16));
+    Exit;
+  end;
+
+  if not FBreakpoints[Idx].Active then
+  begin
+    WriteLn('[WARN] Breakpoint at $', IntToHex(Address, 16), ' already removed');
+    Exit(True);
+  end;
+
+  // Restore original instruction
+  if ptrace(PTRACE_POKEDATA, FPID, Pointer(PtrUInt(Address)),
+            Pointer(FBreakpoints[Idx].OriginalData)) = -1 then
+  begin
+    WriteLn('[ERROR] Failed to remove breakpoint: ', SysErrorMessage(fpgeterrno));
+    Exit;
+  end;
+
+  // Mark as inactive (keep in list for potential reactivation)
+  FBreakpoints[Idx].Active := False;
+
+  WriteLn('[INFO] Breakpoint removed from $', IntToHex(Address, 16));
   Result := True;
 end;
 

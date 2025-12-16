@@ -60,6 +60,8 @@ begin
   WriteLn('  detach         - Detach from process');
   WriteLn('  continue       - Continue execution');
   WriteLn('  step           - Single step');
+  WriteLn('  break <loc>    - Set breakpoint at location (address or variable)');
+  WriteLn('  delete <num>   - Remove breakpoint by number');
   WriteLn('  help           - Show this help');
   WriteLn('  quit           - Exit debugger');
   WriteLn;
@@ -71,6 +73,8 @@ var
   Cmd: String;
   VarValue: TVariableValue;
   PID: Integer;
+  BpHandle: TBreakpointHandle;
+  BpNum: Integer;
 begin
   if Trim(CmdLine) = '' then
     Exit;
@@ -131,6 +135,37 @@ begin
           WriteLn(VarValue.Name, ' = ', VarValue.Value)
         else
           WriteLn('[ERROR] ', VarValue.Value);
+      end;
+
+    'break', 'b':
+      begin
+        if Length(Parts) < 2 then
+        begin
+          WriteLn('[ERROR] Usage: break <location>');
+          WriteLn('[INFO] Location can be: hex address (0xNNNN), decimal address, or variable name');
+          Exit;
+        end;
+
+        BpHandle := FEngine.SetBreakpoint(Parts[1]);
+        // Engine already prints success/error messages
+      end;
+
+    'delete', 'd':
+      begin
+        if Length(Parts) < 2 then
+        begin
+          WriteLn('[ERROR] Usage: delete <breakpoint_number>');
+          Exit;
+        end;
+
+        if not TryStrToInt(Parts[1], BpNum) then
+        begin
+          WriteLn('[ERROR] Invalid breakpoint number: ', Parts[1]);
+          Exit;
+        end;
+
+        FEngine.RemoveBreakpoint(BpNum);
+        // Engine already prints success/error messages
       end;
 
   else
