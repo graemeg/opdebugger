@@ -60,7 +60,11 @@ begin
   WriteLn('  detach         - Detach from process');
   WriteLn('  continue       - Continue execution');
   WriteLn('  step           - Single step');
-  WriteLn('  break <loc>    - Set breakpoint at location (address or variable)');
+  WriteLn('  break <loc>    - Set breakpoint at location');
+  WriteLn('    Location formats:');
+  WriteLn('      file.pas:22        - Source file and line number');
+  WriteLn('      0x401000           - Hex address');
+  WriteLn('      MyGlobalInt        - Variable name');
   WriteLn('  delete <num>   - Remove breakpoint by number');
   WriteLn('  help           - Show this help');
   WriteLn('  quit           - Exit debugger');

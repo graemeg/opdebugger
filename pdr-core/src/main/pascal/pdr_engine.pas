@@ -259,8 +259,36 @@ function TDebuggerEngine.ParseLocation(const Location: String; out Address: QWor
 var
   VarInfo: TVariableInfo;
   ErrorCode: Integer;
+  ColonPos: Integer;
+  FileName: String;
+  LineNum: Cardinal;
+  TempLineNum: LongInt;
 begin
   Result := False;
+
+  // Try parsing as file:line (e.g., "test.pas:22")
+  // Check if there's a colon and it's not at position 2 (which would be a drive letter on Windows)
+  ColonPos := Pos(':', Location);
+  if (ColonPos > 0) and (ColonPos <> 2) then
+  begin
+    FileName := Copy(Location, 1, ColonPos - 1);
+    if TryStrToInt(Copy(Location, ColonPos + 1, Length(Location)), TempLineNum) then
+    begin
+      LineNum := TempLineNum;
+      if FDebugInfoReader.FindAddressByLine(FileName, LineNum, Address) then
+      begin
+        Result := True;
+        WriteLn('[INFO] Resolved ', FileName, ':', LineNum, ' to address 0x', IntToHex(Address, 8));
+        Exit;
+      end
+      else
+      begin
+        WriteLn('[ERROR] No code found at ', FileName, ':', LineNum);
+        WriteLn('[INFO] Make sure the binary was compiled with -g and OPDF file has line information');
+        Exit;
+      end;
+    end;
+  end;
 
   // Try parsing as hexadecimal address (e.g., "0x401000" or "$401000")
   if (Pos('0x', LowerCase(Location)) = 1) or (Pos('$', Location) = 1) then
@@ -292,7 +320,7 @@ begin
 
   // Could not parse location
   WriteLn('[ERROR] Could not resolve location: ', Location);
-  WriteLn('[INFO] Location must be a hex address (0xNNNN), decimal address, or variable name');
+  WriteLn('[INFO] Location can be: file:line, hex address (0xNNNN), decimal address, or variable name');
 end;
 
 function TDebuggerEngine.FindBreakpointByHandle(Handle: TBreakpointHandle): Integer;
