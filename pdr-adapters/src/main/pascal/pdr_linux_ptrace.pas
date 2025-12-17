@@ -846,7 +846,17 @@ begin
     end
     else
     begin
-      // Reactivate existing breakpoint
+      // Reactivate existing breakpoint - write INT3 back to memory
+      Trap := $CC;
+      ModifiedData := FBreakpoints[Idx].OriginalData;
+      Move(Trap, ModifiedData, 1);
+
+      if ptrace(PTRACE_POKEDATA, FPID, Pointer(PtrUInt(Address)), Pointer(ModifiedData)) = -1 then
+      begin
+        WriteLn('[ERROR] Failed to reactivate breakpoint: ', SysErrorMessage(fpgeterrno));
+        Exit(False);
+      end;
+
       FBreakpoints[Idx].Active := True;
       WriteLn('[INFO] Reactivated breakpoint at $', IntToHex(Address, 16));
       Exit(True);

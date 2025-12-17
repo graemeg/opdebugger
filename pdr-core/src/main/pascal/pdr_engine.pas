@@ -359,11 +359,23 @@ begin
   if not FProcessController.Continue then
   begin
     WriteLn('[ERROR] Failed to continue');
-    // Clean up temporary breakpoints
-    for I := 0 to High(TempBreakpoints) do
-      if TempBreakpoints[I] <> -1 then
-        RemoveBreakpoint(TempBreakpoints[I]);
+    // Clean up temporary breakpoints only if still attached
+    if FState = dsPaused then
+    begin
+      for I := 0 to High(TempBreakpoints) do
+        if TempBreakpoints[I] <> -1 then
+          RemoveBreakpoint(TempBreakpoints[I]);
+    end;
     Exit;
+  end;
+
+  // Check if process exited during continue
+  if FProcessController.GetCurrentAddress = 0 then
+  begin
+    WriteLn('[INFO] Process terminated during step');
+    FState := dsTerminated;
+    // Don't try to clean up breakpoints - process is dead
+    Exit(True);
   end;
 
   // Get new address to see which line we're on
