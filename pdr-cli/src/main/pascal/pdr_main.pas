@@ -59,8 +59,9 @@ begin
   WriteLn('  print <var>    - Print variable value');
   WriteLn('  attach <pid>   - Attach to running process');
   WriteLn('  detach         - Detach from process');
-  WriteLn('  continue       - Continue execution');
-  WriteLn('  step           - Single step');
+  WriteLn('  continue, c    - Continue execution');
+  WriteLn('  next, n        - Step to next source line');
+  WriteLn('  step, s        - Single instruction step');
   WriteLn('  break <loc>    - Set breakpoint at location');
   WriteLn('    Location formats:');
   WriteLn('      file.pas:22        - Source file and line number');
@@ -125,6 +126,9 @@ begin
 
     'continue', 'c':
       FEngine.Continue;
+
+    'next', 'n':
+      FEngine.StepLine;
 
     'step', 's':
       FEngine.Step;

@@ -51,6 +51,7 @@ type
     function SetRegisters(const Regs: TRegisters): Boolean;
     function SetBreakpoint(Address: QWord): Boolean;
     function RemoveBreakpoint(Address: QWord): Boolean;
+    function GetCurrentAddress: QWord;
 
     property PID: Integer read FPID;
     property IsAttached: Boolean read FAttached;
@@ -770,7 +771,16 @@ begin
   end;
 
   // Step 4: Re-insert the breakpoint (put INT3 back)
-  if not SetBreakpoint(BreakpointAddr) then
+  // Create modified data with INT3
+  if ptrace(PTRACE_PEEKDATA, FPID, Pointer(PtrUInt(BreakpointAddr)), nil) = -1 then
+  begin
+    WriteLn('[ERROR] Failed to read memory for breakpoint re-insertion');
+    Exit;
+  end;
+
+  // Write INT3 back
+  if ptrace(PTRACE_POKEDATA, FPID, Pointer(PtrUInt(BreakpointAddr)),
+            Pointer(FBreakpoints[Idx].OriginalData and $FFFFFFFFFFFFFF00 or $CC)) = -1 then
   begin
     WriteLn('[ERROR] Failed to re-insert breakpoint');
     Exit;
@@ -907,6 +917,29 @@ begin
 
   WriteLn('[INFO] Breakpoint removed from $', IntToHex(Address, 16));
   Result := True;
+end;
+
+function TLinuxPtraceAdapter.GetCurrentAddress: QWord;
+var
+  Regs: TRegisters;
+begin
+  Result := 0;
+
+  if not FAttached then
+  begin
+    WriteLn('[ERROR] Not attached to any process');
+    Exit;
+  end;
+
+  if not GetRegisters(Regs) then
+    Exit;
+
+  {$IFDEF CPUX86_64}
+  Result := Regs.RIP;
+  {$ENDIF}
+  {$IFDEF CPUI386}
+  Result := Regs.EIP;
+  {$ENDIF}
 end;
 
 end.

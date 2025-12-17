@@ -57,6 +57,7 @@ type
     function Run: Boolean;
     function Continue: Boolean;
     function Step: Boolean;
+    function StepLine: Boolean;
     function StepOver: Boolean;
     function Pause: Boolean;
 
@@ -265,6 +266,110 @@ begin
   end;
 
   WriteLn('[INFO] Step complete');
+  Result := True;
+end;
+
+function TDebuggerEngine.StepLine: Boolean;
+var
+  CurrentAddr: QWord;
+  CurrentLine: TLineInfo;
+  NextLineNum: Cardinal;
+  LineEntries: TLineInfoArray;
+  I: Integer;
+  TempBreakpoints: array of TBreakpointHandle;
+  BreakpointHit: Boolean;
+begin
+  Result := False;
+
+  if FState <> dsPaused then
+  begin
+    WriteLn('[ERROR] Process is not paused');
+    Exit;
+  end;
+
+  // Get current address
+  CurrentAddr := FProcessController.GetCurrentAddress;
+  if CurrentAddr = 0 then
+  begin
+    WriteLn('[ERROR] Failed to get current address');
+    Exit;
+  end;
+
+  // Find current source line
+  if not FDebugInfoReader.FindLineByAddress(CurrentAddr, CurrentLine) then
+  begin
+    WriteLn('[ERROR] No source line found for current address');
+    WriteLn('[INFO] Use "step" for instruction-level stepping');
+    Exit;
+  end;
+
+  WriteLn('[INFO] Current line: ', CurrentLine.FileName, ':', CurrentLine.LineNumber);
+
+  // Get all line entries for this file
+  LineEntries := FDebugInfoReader.GetFileLineEntries(CurrentLine.FileName);
+  if Length(LineEntries) = 0 then
+  begin
+    WriteLn('[ERROR] No line information available for ', CurrentLine.FileName);
+    Exit;
+  end;
+
+  // Find all addresses for lines AFTER the current line
+  // We need to find the actual next executable line
+  SetLength(TempBreakpoints, 0);
+  for I := 0 to High(LineEntries) do
+  begin
+    // Only set breakpoints on lines strictly after current line
+    // and before or equal to the current line + some reasonable limit (e.g., 100 lines)
+    if (LineEntries[I].LineNumber > CurrentLine.LineNumber) and
+       (LineEntries[I].LineNumber <= CurrentLine.LineNumber + 100) then
+    begin
+      // Set temporary breakpoint at this address
+      SetLength(TempBreakpoints, Length(TempBreakpoints) + 1);
+      TempBreakpoints[High(TempBreakpoints)] := SetBreakpoint(IntToHex(LineEntries[I].Address, 1));
+      if TempBreakpoints[High(TempBreakpoints)] = -1 then
+      begin
+        WriteLn('[WARN] Failed to set temporary breakpoint at 0x', IntToHex(LineEntries[I].Address, 16));
+      end
+      else
+      begin
+        WriteLn('[DEBUG] Set temp breakpoint at line ', LineEntries[I].LineNumber,
+                ' (0x', IntToHex(LineEntries[I].Address, 16), ')');
+      end;
+    end;
+  end;
+
+  if Length(TempBreakpoints) = 0 then
+  begin
+    WriteLn('[ERROR] No subsequent lines found (might be at end of program)');
+    WriteLn('[INFO] Current line ', CurrentLine.LineNumber, ' appears to be the last line with debug info');
+    Exit;
+  end;
+
+  WriteLn('[INFO] Stepping to next line...');
+
+  // Continue until we hit one of the temporary breakpoints
+  if not FProcessController.Continue then
+  begin
+    WriteLn('[ERROR] Failed to continue');
+    // Clean up temporary breakpoints
+    for I := 0 to High(TempBreakpoints) do
+      if TempBreakpoints[I] <> -1 then
+        RemoveBreakpoint(TempBreakpoints[I]);
+    Exit;
+  end;
+
+  // Get new address to see which line we're on
+  CurrentAddr := FProcessController.GetCurrentAddress;
+  if FDebugInfoReader.FindLineByAddress(CurrentAddr, CurrentLine) then
+  begin
+    WriteLn('[INFO] Stepped to line: ', CurrentLine.FileName, ':', CurrentLine.LineNumber);
+  end;
+
+  // Remove all temporary breakpoints
+  for I := 0 to High(TempBreakpoints) do
+    if TempBreakpoints[I] <> -1 then
+      RemoveBreakpoint(TempBreakpoints[I]);
+
   Result := True;
 end;
 

@@ -131,6 +131,9 @@ type
 
     { Remove breakpoint }
     function RemoveBreakpoint(Address: QWord): Boolean;
+
+    { Get current instruction pointer }
+    function GetCurrentAddress: QWord;
   end;
 
   { Debug Info Reader Port - Format-specific debug info reading }
@@ -200,6 +203,7 @@ type
     function Run: Boolean;
     function Continue: Boolean;
     function Step: Boolean;
+    function StepLine: Boolean;
     function StepOver: Boolean;
     function Pause: Boolean;
 
