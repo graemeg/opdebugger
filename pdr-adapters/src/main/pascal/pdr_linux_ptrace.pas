@@ -30,6 +30,7 @@ type
     FPID: Integer;
     FAttached: Boolean;
     FBreakpoints: array of TBreakpointInfo;
+    FLastBreakpointAddr: QWord;  // Address of last breakpoint hit (before handling)
 
     { Breakpoint management helpers }
     function FindBreakpoint(Address: QWord): Integer;
@@ -52,6 +53,9 @@ type
     function SetBreakpoint(Address: QWord): Boolean;
     function RemoveBreakpoint(Address: QWord): Boolean;
     function GetCurrentAddress: QWord;
+
+    { Get the address of the last breakpoint that was hit (before handling) }
+    function GetLastBreakpointAddress: QWord;
 
     property PID: Integer read FPID;
     property IsAttached: Boolean read FAttached;
@@ -94,6 +98,7 @@ begin
   inherited Create;
   FPID := -1;
   FAttached := False;
+  FLastBreakpointAddr := 0;
 end;
 
 destructor TLinuxPtraceAdapter.Destroy;
@@ -724,6 +729,9 @@ begin
   BreakpointAddr := Regs.EIP - 1;
   {$ENDIF}
 
+  // Store the breakpoint address for StepLine to use
+  FLastBreakpointAddr := BreakpointAddr;
+
   // Find the breakpoint at this address
   Idx := FindBreakpoint(BreakpointAddr);
   if Idx < 0 then
@@ -940,6 +948,11 @@ begin
   {$IFDEF CPUI386}
   Result := Regs.EIP;
   {$ENDIF}
+end;
+
+function TLinuxPtraceAdapter.GetLastBreakpointAddress: QWord;
+begin
+  Result := FLastBreakpointAddr;
 end;
 
 end.

@@ -288,22 +288,30 @@ begin
   end;
 
   // Get current address
-  CurrentAddr := FProcessController.GetCurrentAddress;
+  // Use last breakpoint address if available (we just handled a breakpoint and RIP moved)
+  // Otherwise use current RIP
+  CurrentAddr := FProcessController.GetLastBreakpointAddress;
+  if CurrentAddr = 0 then
+    CurrentAddr := FProcessController.GetCurrentAddress;
+
   if CurrentAddr = 0 then
   begin
     WriteLn('[ERROR] Failed to get current address');
     Exit;
   end;
 
+  WriteLn('[DEBUG] Current address: 0x', IntToHex(CurrentAddr, 16));
+
   // Find current source line
   if not FDebugInfoReader.FindLineByAddress(CurrentAddr, CurrentLine) then
   begin
-    WriteLn('[ERROR] No source line found for current address');
+    WriteLn('[ERROR] No source line found for current address 0x', IntToHex(CurrentAddr, 16));
     WriteLn('[INFO] Use "step" for instruction-level stepping');
     Exit;
   end;
 
-  WriteLn('[INFO] Current line: ', CurrentLine.FileName, ':', CurrentLine.LineNumber);
+  WriteLn('[INFO] Current line: ', CurrentLine.FileName, ':', CurrentLine.LineNumber,
+          ' (address: 0x', IntToHex(CurrentLine.Address, 16), ')');
 
   // Get all line entries for this file
   LineEntries := FDebugInfoReader.GetFileLineEntries(CurrentLine.FileName);
@@ -325,7 +333,7 @@ begin
     begin
       // Set temporary breakpoint at this address
       SetLength(TempBreakpoints, Length(TempBreakpoints) + 1);
-      TempBreakpoints[High(TempBreakpoints)] := SetBreakpoint(IntToHex(LineEntries[I].Address, 1));
+      TempBreakpoints[High(TempBreakpoints)] := SetBreakpoint('0x' + IntToHex(LineEntries[I].Address, 1));
       if TempBreakpoints[High(TempBreakpoints)] = -1 then
       begin
         WriteLn('[WARN] Failed to set temporary breakpoint at 0x', IntToHex(LineEntries[I].Address, 16));
@@ -359,7 +367,11 @@ begin
   end;
 
   // Get new address to see which line we're on
-  CurrentAddr := FProcessController.GetCurrentAddress;
+  // Use last breakpoint address (temp breakpoint we just hit) instead of current RIP
+  CurrentAddr := FProcessController.GetLastBreakpointAddress;
+  if CurrentAddr = 0 then
+    CurrentAddr := FProcessController.GetCurrentAddress;
+
   if FDebugInfoReader.FindLineByAddress(CurrentAddr, CurrentLine) then
   begin
     WriteLn('[INFO] Stepped to line: ', CurrentLine.FileName, ':', CurrentLine.LineNumber);

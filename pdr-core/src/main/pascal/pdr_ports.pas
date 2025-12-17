@@ -134,6 +134,9 @@ type
 
     { Get current instruction pointer }
     function GetCurrentAddress: QWord;
+
+    { Get address of last breakpoint hit (before handling) }
+    function GetLastBreakpointAddress: QWord;
   end;
 
   { Debug Info Reader Port - Format-specific debug info reading }

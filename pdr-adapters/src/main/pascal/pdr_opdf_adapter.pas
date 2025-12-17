@@ -448,6 +448,17 @@ begin
 
   if BestEntry <> nil then
   begin
+    // Sanity check: if the distance is too large (>1MB), this is probably wrong
+    // The address is likely in a different function or library code
+    if BestDistance > 1024 * 1024 then
+    begin
+      WriteLn('[DEBUG] FindLineByAddress: Address 0x', IntToHex(Address, 16),
+              ' is ', BestDistance, ' bytes past closest line (line ',
+              BestEntry^.LineNumber, ' at 0x', IntToHex(BestEntry^.Address, 16), ')');
+      WriteLn('[DEBUG] This is likely library code, not user code');
+      Exit(False);
+    end;
+
     LineInfo := BestEntry^;
     Result := True;
   end;
