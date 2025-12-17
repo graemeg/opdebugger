@@ -34,6 +34,7 @@ type
     { Breakpoint management helpers }
     function FindBreakpoint(Address: QWord): Integer;
     function GetOriginalData(Address: QWord): cLong;
+    function HandleBreakpointHit: Boolean;
   public
     constructor Create;
     destructor Destroy; override;
@@ -78,6 +79,9 @@ const
   PTRACE_GETEVENTMSG = $4201;
   PTRACE_GETSIGINFO = $4202;
   PTRACE_SETSIGINFO = $4203;
+
+  { Signal numbers }
+  SIGTRAP = 5;
 
 { External ptrace function }
 function ptrace(request: cInt; pid: TPid; addr: Pointer; data: Pointer): cLong; cdecl; external 'c' name 'ptrace';
@@ -278,7 +282,19 @@ begin
   // Check why the process stopped
   if WIFSTOPPED(Status) then
   begin
-    WriteLn('[INFO] Process stopped (signal: ', WSTOPSIG(Status), ')');
+    if WSTOPSIG(Status) = SIGTRAP then
+    begin
+      // Breakpoint hit - handle it properly
+      if not HandleBreakpointHit then
+      begin
+        WriteLn('[ERROR] Failed to handle breakpoint');
+        Exit;
+      end;
+    end
+    else
+    begin
+      WriteLn('[INFO] Process stopped (signal: ', WSTOPSIG(Status), ')');
+    end;
     Result := True;
   end
   else if WIFEXITED(Status) then
@@ -682,6 +698,86 @@ begin
 end;
 
 { Breakpoint management helpers }
+
+function TLinuxPtraceAdapter.HandleBreakpointHit: Boolean;
+var
+  Regs: TRegisters;
+  BreakpointAddr: QWord;
+  Idx: Integer;
+  Status: cInt;
+begin
+  Result := False;
+
+  // Get current registers to find RIP
+  if not GetRegisters(Regs) then
+  begin
+    WriteLn('[ERROR] Failed to get registers after breakpoint');
+    Exit;
+  end;
+
+  {$IFDEF CPUX86_64}
+  // RIP points to the byte AFTER the INT3, so subtract 1
+  BreakpointAddr := Regs.RIP - 1;
+  {$ENDIF}
+  {$IFDEF CPUI386}
+  BreakpointAddr := Regs.EIP - 1;
+  {$ENDIF}
+
+  // Find the breakpoint at this address
+  Idx := FindBreakpoint(BreakpointAddr);
+  if Idx < 0 then
+  begin
+    WriteLn('[WARN] Breakpoint hit at unknown address: 0x', IntToHex(BreakpointAddr, 16));
+    Exit(True);  // Still return success
+  end;
+
+  WriteLn('[INFO] Hit breakpoint at 0x', IntToHex(BreakpointAddr, 16));
+
+  // Step 1: Back up RIP to point to the original instruction
+  {$IFDEF CPUX86_64}
+  Regs.RIP := BreakpointAddr;
+  {$ENDIF}
+  {$IFDEF CPUI386}
+  Regs.EIP := BreakpointAddr;
+  {$ENDIF}
+
+  if not SetRegisters(Regs) then
+  begin
+    WriteLn('[ERROR] Failed to restore instruction pointer');
+    Exit;
+  end;
+
+  // Step 2: Restore the original instruction (remove INT3)
+  if ptrace(PTRACE_POKEDATA, FPID, Pointer(PtrUInt(BreakpointAddr)),
+            Pointer(FBreakpoints[Idx].OriginalData)) = -1 then
+  begin
+    WriteLn('[ERROR] Failed to restore original instruction');
+    Exit;
+  end;
+
+  // Step 3: Single-step over the original instruction
+  if ptrace(PTRACE_SINGLESTEP, FPID, nil, nil) = -1 then
+  begin
+    WriteLn('[ERROR] Failed to single-step over restored instruction');
+    Exit;
+  end;
+
+  // Wait for single-step to complete
+  if FpWaitPid(FPID, @Status, 0) = -1 then
+  begin
+    WriteLn('[ERROR] Failed to wait for single-step');
+    Exit;
+  end;
+
+  // Step 4: Re-insert the breakpoint (put INT3 back)
+  if not SetBreakpoint(BreakpointAddr) then
+  begin
+    WriteLn('[ERROR] Failed to re-insert breakpoint');
+    Exit;
+  end;
+
+  Result := True;
+end;
 
 function TLinuxPtraceAdapter.FindBreakpoint(Address: QWord): Integer;
 var
