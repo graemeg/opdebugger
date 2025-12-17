@@ -133,6 +133,46 @@ begin
   end;
 end;
 
+// Parse DWARF data_member_location attribute
+// Format: "2 byte block: 23 c 	(DW_OP_plus_uconst: 12)"
+// Returns the offset value (12 in the example above)
+function ParseMemberLocation(const LocationStr: String): Cardinal;
+var
+  ParenPos: Integer;
+  ColonPos: Integer;
+  OffsetStr: String;
+  TempOffset: Cardinal;
+begin
+  Result := 0;
+
+  // Look for opening parenthesis with description
+  ParenPos := Pos('(', LocationStr);
+  if ParenPos = 0 then
+  begin
+    // Try to parse as plain number
+    if TryStrToUInt(Trim(LocationStr), TempOffset) then
+      Result := TempOffset;
+    Exit;
+  end;
+
+  // Extract the description: (DW_OP_plus_uconst: 12)
+  // Find the colon AFTER "DW_OP_plus_uconst"
+  ColonPos := Pos('DW_OP_plus_uconst:', LocationStr);
+  if ColonPos > 0 then
+  begin
+    // Move to the colon and then past it
+    ColonPos := ColonPos + Length('DW_OP_plus_uconst:');
+    // Extract the number after the colon
+    OffsetStr := Trim(Copy(LocationStr, ColonPos, Length(LocationStr)));
+    // Remove any trailing characters like parenthesis or tab
+    if Pos(')', OffsetStr) > 0 then
+      OffsetStr := Trim(Copy(OffsetStr, 1, Pos(')', OffsetStr) - 1));
+
+    if TryStrToUInt(OffsetStr, TempOffset) then
+      Result := TempOffset;
+  end;
+end;
+
 { Forward declarations }
 function ExtractTypeInfo(const BinaryPath, VarName: String): TDwarfTypeInfo; forward;
 
@@ -419,14 +459,21 @@ begin
               MemberLine := Output[CurrentMemberLineIndex];
               MemberLineIndent := GetLineIndent(MemberLine);
 
-              if (MemberLineIndent <= ClassEntryIndent) and (Trim(MemberLine)<>'') then Break;
+              // Stop if we hit a line with same indentation as class entry but it's not a child entry (< 2 >)
+              // Child entries have " <2>" or " <3>" prefixes, while same-level entries have " <1>"
+              if (MemberLineIndent <= ClassEntryIndent) and (Trim(MemberLine) <> '') then
+              begin
+                // Check if this is a child entry (depth > 1)
+                if Pos(' <1>', MemberLine) > 0 then
+                  Break;
+              end;
 
               if Pos('DW_TAG_member', MemberLine) > 0 then
               begin
                 NewField.Name := FindDwarfAttributeInEntry(Output, CurrentMemberLineIndex, 'name');
                 NewField.TypeOffset := FindDwarfAttributeInEntry(Output, CurrentMemberLineIndex, 'type');
                 LocStr := FindDwarfAttributeInEntry(Output, CurrentMemberLineIndex, 'data_member_location');
-                if TryStrToInt(LocStr, TempOffset) then NewField.Offset := TempOffset else NewField.Offset := 0;
+                NewField.Offset := ParseMemberLocation(LocStr);
 
                 if NewField.Name <> '' then
                 begin

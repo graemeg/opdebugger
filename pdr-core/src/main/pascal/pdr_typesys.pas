@@ -442,11 +442,20 @@ begin
     FieldInfo.TypeID := TypeInfo.ClassInfo^.Fields[I].TypeID;
     FieldInfo.Address := InstancePtr + TypeInfo.ClassInfo^.Fields[I].Offset;
 
-    // Recursive evaluation
-    FieldValue := TypeSystem.EvaluateVariableInfo(FieldInfo);
-
     if I > 0 then FieldOutput := FieldOutput + ', ';
-    FieldOutput := FieldOutput + FieldInfo.Name + ': ' + FieldValue.Value;
+
+    // Only evaluate if TypeID is known (not 0)
+    if FieldInfo.TypeID <> 0 then
+    begin
+      // Recursive evaluation
+      FieldValue := TypeSystem.EvaluateVariableInfo(FieldInfo);
+      FieldOutput := FieldOutput + FieldInfo.Name + ': ' + FieldValue.Value;
+    end
+    else
+    begin
+      // TypeID not resolved yet, skip detailed evaluation
+      FieldOutput := FieldOutput + FieldInfo.Name + ': <untyped>';
+    end;
   end;
 
   Result.Value := TypeInfo.Name + '(@$' + IntToHex(InstancePtr, 16) +
