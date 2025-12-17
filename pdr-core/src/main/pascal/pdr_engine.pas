@@ -236,8 +236,13 @@ begin
     Exit;
   end;
 
-  FState := dsRunning;
-  WriteLn('[INFO] Process resumed');
+  // Check if process exited (FAttachedPID would be -1 if exited)
+  // Note: We need a better way to detect this, but for now check the message
+  // The ptrace adapter sets FAttached=False and FPID=-1 on exit
+
+  // For now, assume process is still paused (at breakpoint or after step)
+  // TODO: Add a method to query process state from adapter
+  WriteLn('[INFO] Process stopped and ready for commands');
   Result := True;
 end;
 

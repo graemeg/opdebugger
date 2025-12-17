@@ -249,6 +249,9 @@ begin
 end;
 
 function TLinuxPtraceAdapter.Continue: Boolean;
+var
+  Status: cInt;
+  WaitResult: TPid;
 begin
   Result := False;
 
@@ -264,10 +267,40 @@ begin
     Exit;
   end;
 
-  Result := True;
+  // Wait for process to stop (breakpoint, signal, or exit)
+  WaitResult := FpWaitPid(FPID, @Status, 0);
+  if WaitResult = -1 then
+  begin
+    WriteLn('[ERROR] Failed to wait for process: ', SysErrorMessage(fpgeterrno));
+    Exit;
+  end;
+
+  // Check why the process stopped
+  if WIFSTOPPED(Status) then
+  begin
+    WriteLn('[INFO] Process stopped (signal: ', WSTOPSIG(Status), ')');
+    Result := True;
+  end
+  else if WIFEXITED(Status) then
+  begin
+    WriteLn('[INFO] Process exited with code ', WEXITSTATUS(Status));
+    FAttached := False;
+    FPID := -1;
+    Result := True;
+  end
+  else if WIFSIGNALED(Status) then
+  begin
+    WriteLn('[INFO] Process terminated by signal ', WTERMSIG(Status));
+    FAttached := False;
+    FPID := -1;
+    Result := True;
+  end;
 end;
 
 function TLinuxPtraceAdapter.Step: Boolean;
+var
+  Status: cInt;
+  WaitResult: TPid;
 begin
   Result := False;
 
@@ -283,7 +316,34 @@ begin
     Exit;
   end;
 
-  Result := True;
+  // Wait for step to complete
+  WaitResult := FpWaitPid(FPID, @Status, 0);
+  if WaitResult = -1 then
+  begin
+    WriteLn('[ERROR] Failed to wait for step: ', SysErrorMessage(fpgeterrno));
+    Exit;
+  end;
+
+  // Check step result
+  if WIFSTOPPED(Status) then
+  begin
+    WriteLn('[INFO] Step complete');
+    Result := True;
+  end
+  else if WIFEXITED(Status) then
+  begin
+    WriteLn('[INFO] Process exited during step with code ', WEXITSTATUS(Status));
+    FAttached := False;
+    FPID := -1;
+    Result := True;
+  end
+  else if WIFSIGNALED(Status) then
+  begin
+    WriteLn('[INFO] Process terminated during step by signal ', WTERMSIG(Status));
+    FAttached := False;
+    FPID := -1;
+    Result := True;
+  end;
 end;
 
 function TLinuxPtraceAdapter.ReadMemory(Address: QWord; Size: Cardinal; out Buffer): Boolean;
