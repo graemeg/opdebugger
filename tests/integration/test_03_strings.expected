@@ -1,0 +1,8 @@
+Myshortstring = 'Hello'
+Myansistring = 'World'
+Myunicodestring = 'Unicode'
+Mywidestring = 'Wide'
+Emptyshort = ''
+Emptyansi = ''
+Emptyunicode = ''
+Emptywide = ''

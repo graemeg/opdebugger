@@ -30,17 +30,7 @@ begin
   EmptyShort := '';
   EmptyAnsi := '';
   EmptyUnicode := '';
-  EmptyWide := '';
-
-  WriteLn('MyShortString = ', MyShortString);
-  WriteLn('MyAnsiString = ', MyAnsiString);
-  WriteLn('MyUnicodeString = ', MyUnicodeString);
-  WriteLn('MyWideString = ', MyWideString);
-  WriteLn('EmptyShort = ', EmptyShort);
-  WriteLn('EmptyAnsi = ', EmptyAnsi);
-  WriteLn('EmptyUnicode = ', EmptyUnicode);
-  WriteLn('EmptyWide = ', EmptyWide);
-  WriteLn;
+  EmptyWide := '';  // <-- Breakpoint will be here (line 33)
 
   WriteLn('Press Enter to continue...');
   ReadLn;

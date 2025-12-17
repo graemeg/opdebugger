@@ -1,0 +1,11 @@
+break test_03_strings.pas:33
+continue
+print MyShortString
+print MyAnsiString
+print MyUnicodeString
+print MyWideString
+print EmptyShort
+print EmptyAnsi
+print EmptyUnicode
+print EmptyWide
+quit

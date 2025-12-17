@@ -204,7 +204,7 @@ begin
   for I := 0 to Len - 1 do
     Str[I + 1] := Chr(Buffer[I + 1]);
 
-  Result.Value := QuotedStr(Str);
+  Result.Value := '''' + Str + '''';  // Manually add quotes
   Result.IsValid := True;
 end;
 
@@ -247,7 +247,7 @@ begin
   // Nil pointer means empty string
   if StringPtr = 0 then
   begin
-    Result.Value := QuotedStr('');
+    Result.Value := '''''';  // Empty string with quotes
     Result.IsValid := True;
     Exit;
   end;
@@ -285,7 +285,7 @@ begin
   for I := 0 to Len - 1 do
     Str[I + 1] := Chr(DataBuf[I]);
 
-  Result.Value := QuotedStr(Str);
+  Result.Value := '''' + Str + '''';  // Manually add quotes
   Result.IsValid := True;
 end;
 
@@ -329,7 +329,7 @@ begin
   // Nil pointer means empty string
   if StringPtr = 0 then
   begin
-    Result.Value := QuotedStr('');
+    Result.Value := '''''';  // Empty string with quotes
     Result.IsValid := True;
     Exit;
   end;
@@ -367,7 +367,7 @@ begin
   for I := 0 to Len - 1 do
     WideStr[I + 1] := WideChar(PWord(@DataBuf[I * 2])^);
 
-  Result.Value := QuotedStr(UTF8Encode(WideStr));
+  Result.Value := '''' + UTF8Encode(WideStr) + '''';  // Manually add quotes
   Result.IsValid := True;
 end;
 
