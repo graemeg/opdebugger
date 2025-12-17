@@ -133,6 +133,7 @@ type
   end;
 
   TFieldDescriptorArray = array of TFieldDescriptor; // NEW type definition
+  TStringArray = array of String;
 
   { Array Type Definition }
   TDefArray = packed record

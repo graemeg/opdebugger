@@ -96,7 +96,7 @@ type
     function ReadUnicodeString(out Def: TDefUnicodeString; out Name: String): Boolean;
     function ReadPointer(out Def: TDefPointer; out Name: String): Boolean;
     function ReadLineInfo(out Def: TDefLineInfo; out FileName: String): Boolean;
-    function ReadClass(out Def: TDefClass; out Name: String; var Fields: TFieldDescriptorArray; var FieldNames: array of String): Boolean;
+    function ReadClass(out Def: TDefClass; out Name: String; out Fields: TFieldDescriptorArray; out FieldNames: TStringArray): Boolean;
     function ReadProperty(out Def: TDefProperty; out Name: String): Boolean;
 
     { Skip current record (for unsupported types) }
@@ -582,7 +582,7 @@ begin
   Result := True;
 end;
 
-function TOPDFReader.ReadClass(out Def: TDefClass; out Name: String; var Fields: TFieldDescriptorArray; var FieldNames: array of String): Boolean;
+function TOPDFReader.ReadClass(out Def: TDefClass; out Name: String; out Fields: TFieldDescriptorArray; out FieldNames: TStringArray): Boolean;
 var
   I: Cardinal;
   FieldDef: TFieldDescriptor;
@@ -590,6 +590,7 @@ var
 begin
   Result := False;
   SetLength(Fields, 0); // Initialize Fields to empty array
+  SetLength(FieldNames, 0); // Initialize FieldNames to empty array
 
   if FStream.Position + SizeOf(TDefClass) > FStream.Size then
     Exit;
@@ -602,8 +603,10 @@ begin
   SetLength(Name, Def.NameLen);
   if Def.NameLen > 0 then
     FStream.Read(Name[1], Def.NameLen);
+
   // Read field descriptors and names
   SetLength(Fields, Def.FieldCount);
+  SetLength(FieldNames, Def.FieldCount);
   for I := 0 to Def.FieldCount - 1 do
   begin
     if FStream.Position + SizeOf(TFieldDescriptor) > FStream.Size then

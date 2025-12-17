@@ -37,6 +37,7 @@ type
     // New fields for classes:
     ParentTypeOffset: String; // DWARF offset of parent class type, if any
     Fields: TDwarfFieldArray; // Fields for classes
+    DwarfOffset: String;      // DWARF offset of THIS type definition (e.g., "<0xf9>")
   end;
 
   TSymbolInfo = record
@@ -44,7 +45,15 @@ type
     Address: QWord;
     SymType: Char; // 'B' = BSS, 'D' = Data, 'T' = Text
     TypeInfo: TDwarfTypeInfo;
+    TypeOffset: String; // DWARF offset for this symbol's type (e.g., "<0xf9>")
   end;
+
+  { Mapping of DWARF type offsets to assigned TypeIDs }
+  TOffsetToTypeID = record
+    DwarfOffset: String;  // e.g., "<0xb9a>"
+    TypeID: TTypeID;      // e.g., 105
+  end;
+  TOffsetToTypeIDArray = array of TOffsetToTypeID;
 
   TSymbolArray = array of TSymbolInfo;
 
@@ -173,8 +182,51 @@ begin
   end;
 end;
 
+{ Helper functions for offset-to-TypeID mapping }
+
+// Add a mapping entry
+procedure AddOffsetMapping(var OffsetMap: TOffsetToTypeIDArray; const DwarfOffset: String; TypeID: TTypeID);
+var
+  Index: Integer;
+begin
+  if DwarfOffset = '' then Exit;
+
+  // Check if already in map
+  for Index := 0 to High(OffsetMap) do
+  begin
+    if OffsetMap[Index].DwarfOffset = DwarfOffset then
+      Exit; // Already mapped
+  end;
+
+  // Add new entry
+  Index := Length(OffsetMap);
+  SetLength(OffsetMap, Index + 1);
+  OffsetMap[Index].DwarfOffset := DwarfOffset;
+  OffsetMap[Index].TypeID := TypeID;
+end;
+
+// Look up TypeID by DWARF offset
+function ResolveOffsetToTypeID(const OffsetMap: TOffsetToTypeIDArray; const DwarfOffset: String): TTypeID;
+var
+  I: Integer;
+begin
+  Result := 0; // Not found
+
+  if DwarfOffset = '' then Exit;
+
+  for I := 0 to High(OffsetMap) do
+  begin
+    if OffsetMap[I].DwarfOffset = DwarfOffset then
+    begin
+      Result := OffsetMap[I].TypeID;
+      Exit;
+    end;
+  end;
+end;
+
 { Forward declarations }
 function ExtractTypeInfo(const BinaryPath, VarName: String): TDwarfTypeInfo; forward;
+function ExtractTypeByOffset(const BinaryPath, DwarfOffset: String): TDwarfTypeInfo; forward;
 
 { Extract symbols from binary using nm }
 function ExtractSymbols(const BinaryPath: String; out Symbols: TSymbolArray): Boolean;
@@ -368,6 +420,7 @@ begin
   Result.IsSigned := False;
   Result.MaxLength := 0;
   Result.ParentTypeOffset := '';
+  Result.DwarfOffset := '';
   SetLength(Result.Fields, 0);
 
   if not RunCommand('objdump', ['--dwarf=info', BinaryPath], OutputStr) then Exit;
@@ -436,6 +489,9 @@ begin
           WriteLn('[DEBUG] Found type definition line: ', Line);
           FoundEntry := True;
           CurrentOffset := '';
+
+          { Capture the DWARF offset of this type definition }
+          Result.DwarfOffset := '<0x' + HexPart + '>';
 
           if Pos('DW_TAG_class_type', Line) > 0 then
           begin
@@ -541,6 +597,124 @@ begin
   end;
 end;
 
+{ Extract type information directly by DWARF offset }
+function ExtractTypeByOffset(const BinaryPath, DwarfOffset: String): TDwarfTypeInfo;
+var
+  OutputStr: String;
+  Output: TStringList;
+  Line: String;
+  I: Integer;
+  HexPart: String;
+  TempSize: LongInt;
+  TempSizeStr: String;
+  FoundEntry: Boolean;
+  CurrentOffset: String;
+begin
+  // Initialize result
+  Result.Name := '';
+  Result.Kind := dtkUnknown;
+  Result.Size := 0;
+  Result.IsSigned := False;
+  Result.MaxLength := 0;
+  Result.ParentTypeOffset := '';
+  Result.DwarfOffset := '';
+  SetLength(Result.Fields, 0);
+
+  if DwarfOffset = '' then Exit;
+
+  if not RunCommand('objdump', ['--dwarf=info', BinaryPath], OutputStr) then Exit;
+
+  Output := TStringList.Create;
+  try
+    Output.Text := OutputStr;
+
+    { Extract just the hex part from DwarfOffset (e.g., "0xb9a" from "<0xb9a>" or "b9a" from "<b9a>") }
+    HexPart := Copy(DwarfOffset, 2, Length(DwarfOffset) - 2);
+    WriteLn('[DEBUG] Looking up type by offset: ', HexPart);
+
+    { Find the type definition at this offset }
+    { The DWARF output shows offsets as <b9a> (without 0x) or <0xb9a> (with 0x) }
+    for I := 0 to Output.Count - 1 do
+    begin
+      Line := Output[I];
+
+      { Try both formats: <0xb9a> and <b9a> }
+      if (Pos('<' + HexPart + '>:', Line) > 0) or (Pos('<' + Copy(HexPart, 3, Length(HexPart)) + '>:', Line) > 0) then
+      begin
+        WriteLn('[DEBUG] Found type at offset ', HexPart, ': ', Line);
+        Result.DwarfOffset := DwarfOffset;
+
+        if Pos('DW_TAG_base_type', Line) > 0 then
+        begin
+          TempSizeStr := FindDwarfAttributeInEntry(Output, I, 'byte_size');
+          if TryStrToInt(TempSizeStr, TempSize) then
+          begin
+            Result.Size := TempSize;
+            Result.Kind := dtkPrimitive;
+            Result.IsSigned := Pos('signed', FindDwarfAttributeInEntry(Output, I, 'encoding')) > 0;
+            Result.Name := FindDwarfAttributeInEntry(Output, I, 'name');
+            WriteLn('[DEBUG] Extracted primitive type: ', Result.Name, ' (Size=', Result.Size, ')');
+          end;
+          Break;
+        end;
+
+        if Pos('DW_TAG_typedef', Line) > 0 then
+        begin
+          { Check the name of the typedef - if it's a string type, identify it }
+          Result.Name := FindDwarfAttributeInEntry(Output, I, 'name');
+          if Pos('ANSISTRING', UpperCase(Result.Name)) > 0 then
+          begin
+            Result.Kind := dtkAnsiString;
+            Result.Size := 8; { Pointer size }
+            WriteLn('[DEBUG] Detected AnsiString typedef: ', Result.Name);
+            Break;
+          end
+          else if Pos('STRING', UpperCase(Result.Name)) > 0 then
+          begin
+            Result.Kind := dtkUnicodeString;
+            Result.Size := 8; { Pointer size }
+            WriteLn('[DEBUG] Detected String typedef: ', Result.Name);
+            Break;
+          end;
+
+          { Follow the typedef }
+          CurrentOffset := FindDwarfAttributeInEntry(Output, I, 'type');
+          WriteLn('[DEBUG] Typedef found, resolving to: ', CurrentOffset);
+          { Recursively extract the target type }
+          Result := ExtractTypeByOffset(BinaryPath, CurrentOffset);
+          Break;
+        end;
+
+        if Pos('DW_TAG_pointer_type', Line) > 0 then
+        begin
+          { Follow the pointer }
+          CurrentOffset := FindDwarfAttributeInEntry(Output, I, 'type');
+          WriteLn('[DEBUG] Pointer type found, resolving to: ', CurrentOffset);
+          Result := ExtractTypeByOffset(BinaryPath, CurrentOffset);
+          Break;
+        end;
+
+        if Pos('DW_TAG_structure_type', Line) > 0 then
+        begin
+          { Check if it's a string type }
+          if Pos('AnsiString', FindDwarfAttributeInEntry(Output, I, 'name')) > 0 then
+          begin
+            Result.Name := 'AnsiString';
+            Result.Kind := dtkAnsiString;
+            Result.Size := 8; { Pointer size }
+            WriteLn('[DEBUG] Extracted AnsiString type');
+          end;
+          Break;
+        end;
+
+        Break;
+      end;
+    end;
+  finally
+    Output.Free;
+  end;
+end;
+
 { Determine architecture from binary }
 function DetectArchitecture(const BinaryPath: String): TTargetArch;
 var
@@ -582,8 +756,11 @@ var
   BoolTypeID: TTypeID;
   OpdfFields: array of TFieldDescriptor;
   FieldNames: array of String;
+  OffsetMap: TOffsetToTypeIDArray;
 begin
   Result := False;
+  SetLength(OffsetMap, 0);
+
   Arch := DetectArchitecture(BinaryPath);
   if Arch = archUnknown then
   begin
@@ -613,8 +790,55 @@ begin
     Inc(TypeIDCounter);
     Writer.WritePrimitive(BoolTypeID, 'Boolean', 1, False);
 
+    { Extract field types for all classes and add them to the offset map }
     for I := 0 to High(Symbols) do
     begin
+      if Symbols[I].TypeInfo.Kind = dtkClass then
+      begin
+        for J := 0 to High(Symbols[I].TypeInfo.Fields) do
+        begin
+          { For each field, extract its type from DWARF if not already in map }
+          if (Symbols[I].TypeInfo.Fields[J].TypeOffset <> '') and
+             (ResolveOffsetToTypeID(OffsetMap, Symbols[I].TypeInfo.Fields[J].TypeOffset) = 0) then
+          begin
+            { Extract the field type from DWARF }
+            WriteLn('[DEBUG] Extracting field type for: ', Symbols[I].TypeInfo.Fields[J].Name,
+                    ' (offset=', Symbols[I].TypeInfo.Fields[J].TypeOffset, ')');
+
+            { Extract type by its DWARF offset }
+            with ExtractTypeByOffset(BinaryPath, Symbols[I].TypeInfo.Fields[J].TypeOffset) do
+            begin
+              if Kind <> dtkUnknown then
+              begin
+                { Add a type definition for this field type }
+                AddOffsetMapping(OffsetMap, Symbols[I].TypeInfo.Fields[J].TypeOffset, TypeIDCounter);
+
+                { Write the type to OPDF }
+                case Kind of
+                  dtkPrimitive:
+                    Writer.WritePrimitive(TypeIDCounter, Name, Size, IsSigned);
+                  dtkAnsiString:
+                    Writer.WriteAnsiString(TypeIDCounter, Name);
+                  dtkUnicodeString, dtkWideString:
+                    Writer.WriteUnicodeString(TypeIDCounter, Name);
+                else
+                  { Skip other types for now }
+                end;
+
+                WriteLn('[DEBUG]   Added TypeID ', TypeIDCounter, ' for field type: ', Name);
+                Inc(TypeIDCounter);
+              end;
+            end;
+          end;
+        end;
+      end;
+    end;
+
+    for I := 0 to High(Symbols) do
+    begin
+      { Add mapping from DWARF offset to assigned TypeID }
+      AddOffsetMapping(OffsetMap, Symbols[I].TypeInfo.DwarfOffset, TypeIDCounter);
+
       case Symbols[I].TypeInfo.Kind of
         dtkShortString:
         begin
@@ -648,14 +872,15 @@ begin
           for J := 0 to High(Symbols[I].TypeInfo.Fields) do
           begin
             FieldNames[J] := Symbols[I].TypeInfo.Fields[J].Name;
-            OpdfFields[J].FieldTypeID := 0; // Placeholder
+            { Resolve field type ID from DWARF offset }
+            OpdfFields[J].FieldTypeID := ResolveOffsetToTypeID(OffsetMap, Symbols[I].TypeInfo.Fields[J].TypeOffset);
             OpdfFields[J].Offset := Symbols[I].TypeInfo.Fields[J].Offset;
             OpdfFields[J].NameLen := Length(FieldNames[J]);
           end;
 
           Writer.WriteClass(
             TypeIDCounter,
-            0, // Placeholder for ParentTypeID
+            ResolveOffsetToTypeID(OffsetMap, Symbols[I].TypeInfo.ParentTypeOffset), { Resolved ParentTypeID }
             Symbols[I].TypeInfo.Name,
             0, // Placeholder for VMTAddress
             Symbols[I].TypeInfo.Size,
