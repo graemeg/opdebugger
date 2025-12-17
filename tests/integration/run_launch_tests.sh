@@ -37,7 +37,7 @@ fi
 
 # Filter non-deterministic output
 filter_output() {
-    grep -E "(Myint = |MyBoolean = |Stepped to line:|Myshortstring = |Myansistring = |Myunicodestring = |Mywidestring = |Emptyshort = |Emptyansi = |Emptyunicode = |Emptywide = )" | sed 's/^\[INFO\] //' || true
+    grep -E "(Myint = |MyBoolean = |Stepped to line:|Myshortstring = |Myansistring = |Myunicodestring = |Mywidestring = |Emptyshort = |Emptyansi = |Emptyunicode = |Emptywide = |myinstance = |mynilinstance = )" | sed 's/^\[INFO\] //' || true
 }
 
 run_test() {

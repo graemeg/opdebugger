@@ -52,7 +52,8 @@ type
     { Write class definition }
     procedure WriteClass(TypeID: TTypeID; ParentTypeID: TTypeID;
                         const Name: String; VMTAddr: QWord;
-                        InstSize: Cardinal; const Fields: array of TFieldDescriptor);
+                        InstSize: Cardinal; const Fields: array of TFieldDescriptor;
+                        const FieldNames: array of String);
 
     { Write property definition }
     procedure WriteProperty(ClassTypeID: TTypeID; PropTypeID: TTypeID;
@@ -95,6 +96,8 @@ type
     function ReadUnicodeString(out Def: TDefUnicodeString; out Name: String): Boolean;
     function ReadPointer(out Def: TDefPointer; out Name: String): Boolean;
     function ReadLineInfo(out Def: TDefLineInfo; out FileName: String): Boolean;
+    function ReadClass(out Def: TDefClass; out Name: String; var Fields: TFieldDescriptorArray; var FieldNames: array of String): Boolean;
+    function ReadProperty(out Def: TDefProperty; out Name: String): Boolean;
 
     { Skip current record (for unsupported types) }
     procedure SkipRecord(const RecHeader: TOPDFRecordHeader);
@@ -290,13 +293,16 @@ end;
 
 procedure TOPDFWriter.WriteClass(TypeID: TTypeID; ParentTypeID: TTypeID;
                                 const Name: String; VMTAddr: QWord;
-                                InstSize: Cardinal; const Fields: array of TFieldDescriptor);
+                                InstSize: Cardinal; const Fields: array of TFieldDescriptor;
+                                const FieldNames: array of String);
 var
   RecHeader: TOPDFRecordHeader;
   Payload: TDefClass;
   I: Integer;
-  FieldName: String;
 begin
+  if Length(Fields) <> Length(FieldNames) then
+    raise Exception.Create('WriteClass: Fields and FieldNames array lengths must match');
+
   if not FHeaderWritten then
     WriteHeader;
 
@@ -311,18 +317,21 @@ begin
   RecHeader.RecType := Ord(recClass);
   RecHeader.RecSize := SizeOf(TDefClass) + Length(Name);
   for I := 0 to High(Fields) do
-    RecHeader.RecSize := RecHeader.RecSize + SizeOf(TFieldDescriptor) + Fields[I].NameLen;
+    RecHeader.RecSize := RecHeader.RecSize + SizeOf(TFieldDescriptor) + Length(FieldNames[I]);
 
   FStream.Write(RecHeader, SizeOf(RecHeader));
   FStream.Write(Payload, SizeOf(Payload));
   WriteString(Name);
 
-  // Write field descriptors
+  // Write field descriptors and their names
   for I := 0 to High(Fields) do
   begin
+    // Make sure NameLen in descriptor matches the actual name length
+    if Fields[I].NameLen <> Length(FieldNames[I]) then
+      raise Exception.Create('WriteClass: Field name length mismatch');
+      
     FStream.Write(Fields[I], SizeOf(TFieldDescriptor));
-    // Note: Field names are embedded in TFieldDescriptor.NameLen
-    // This is simplified for now - proper implementation would store names separately
+    WriteString(FieldNames[I]);
   end;
 
   Inc(FRecordCount);
@@ -569,6 +578,68 @@ begin
   SetLength(FileName, Def.FileNameLen);
   if Def.FileNameLen > 0 then
     FStream.Read(FileName[1], Def.FileNameLen);
+
+  Result := True;
+end;
+
+function TOPDFReader.ReadClass(out Def: TDefClass; out Name: String; var Fields: TFieldDescriptorArray; var FieldNames: array of String): Boolean;
+var
+  I: Cardinal;
+  FieldDef: TFieldDescriptor;
+  FieldName: String;
+begin
+  Result := False;
+  SetLength(Fields, 0); // Initialize Fields to empty array
+
+  if FStream.Position + SizeOf(TDefClass) > FStream.Size then
+    Exit;
+
+  FStream.Read(Def, SizeOf(Def));
+
+  if FStream.Position + Def.NameLen > FStream.Size then
+    Exit;
+
+  SetLength(Name, Def.NameLen);
+  if Def.NameLen > 0 then
+    FStream.Read(Name[1], Def.NameLen);
+  // Read field descriptors and names
+  SetLength(Fields, Def.FieldCount);
+  for I := 0 to Def.FieldCount - 1 do
+  begin
+    if FStream.Position + SizeOf(TFieldDescriptor) > FStream.Size then
+      Exit; // Incomplete record
+
+    FStream.Read(FieldDef, SizeOf(TFieldDescriptor));
+
+    if FStream.Position + FieldDef.NameLen > FStream.Size then
+      Exit; // Incomplete field descriptor
+
+    SetLength(FieldName, FieldDef.NameLen);
+    if FieldDef.NameLen > 0 then
+      FStream.Read(FieldName[1], FieldDef.NameLen);
+
+    Fields[I] := FieldDef;
+    FieldNames[I] := FieldName;  // Store the field name
+  end;
+
+  Result := True;
+end;
+
+function TOPDFReader.ReadProperty(out Def: TDefProperty; out Name: String): Boolean;
+begin
+  Result := False;
+
+  if FStream.Position + SizeOf(TDefProperty) > FStream.Size then
+    Exit;
+
+  FStream.Read(Def, SizeOf(Def));
+
+  if FStream.Position + Def.NameLen > FStream.Size then
+    Exit;
+
+  SetLength(Name, Def.NameLen);
+  if Def.NameLen > 0 then
+    FStream.Read(Name[1], Def.NameLen);
 
   Result := True;
 end;

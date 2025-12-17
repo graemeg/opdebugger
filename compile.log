@@ -1,0 +1,39 @@
+[INFO] PasBuild 1.1.0-alpha
+[INFO] Copyright (c) 2025 by Graeme Geldenhuys
+
+[INFO] Executing goal: reactor-compile
+[INFO] Building 5 modules in dependency order
+[INFO] Building module 1/5: opdf-lib
+[INFO] Executing goal: process-resources
+[INFO] No resources directory found (src/main/resources), skipping
+[INFO] Executing goal: compile
+[INFO] Compiling project...
+[INFO] Generating bootstrap program for library...
+[INFO] Discovered 3 units
+[INFO] Bootstrap program generated: target/bootstrap_program.pas
+[INFO] Found 3 source file(s)
+[INFO] Build successful (see target/pasbuild-status/compile/fpc.log for details)
+[INFO] Module build successful: opdf-lib
+[INFO] Building module 2/5: pdr-core
+[INFO] Executing goal: process-resources
+[INFO] No resources directory found (src/main/resources), skipping
+[INFO] Executing goal: compile
+[INFO] Compiling project...
+[INFO] Generating bootstrap program for library...
+[INFO] Discovered 4 units
+[INFO] Bootstrap program generated: target/bootstrap_program.pas
+[INFO] Found 4 sour[ERROR] pdr_typesys.pas(27,69) Error: Identifier not found "TTypeSystem"
+[ERROR] pdr_typesys.pas(37,69) Error: Identifier not found "TTypeSystem"
+[ERROR] pdr_typesys.pas(45,69) Error: Identifier not found "TTypeSystem"
+[ERROR] pdr_typesys.pas(53,69) Error: Identifier not found "TTypeSystem"
+[ERROR] pdr_typesys.pas(61,69) Error: Identifier not found "TTypeSystem"
+[ERROR] pdr_typesys.pas(69,69) Error: Identifier not found "TTypeSystem"
+[ERROR] pdr_typesys.pas(93,1) Fatal: There were 6 errors compiling module, stopping
+[ERROR] Fatal: Compilation aborted
+[ERROR] Error: /usr/bin/ppcx64 returned an error exitcode
+[ERROR] Build failed with exit code: 256 (see target/pasbuild-status/compile/fpc.log for details)
+[ERROR] Goal failed: compile
+[ERROR] Module build failece file(s)
+[INFO] Reactor build complete: 1/5 modules built
+d: pdr-core
+[ERROR] Goal failed: reactor-compile

@@ -1,0 +1,5 @@
+break test_04_classes.pas:48
+continue
+print myinstance
+print mynilinstance
+quit

@@ -102,6 +102,7 @@ begin
   FTypeSystem.RegisterEvaluator(TShortStringEvaluator.Create);
   FTypeSystem.RegisterEvaluator(TAnsiStringEvaluator.Create);
   FTypeSystem.RegisterEvaluator(TUnicodeStringEvaluator.Create);
+  FTypeSystem.RegisterEvaluator(TClassEvaluator.Create);
 end;
 
 destructor TDebuggerEngine.Destroy;

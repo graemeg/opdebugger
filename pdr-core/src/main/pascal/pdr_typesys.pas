@@ -18,13 +18,16 @@ uses
   Classes, SysUtils, Contnrs, ogopdf, opdf_demangle, pdr_ports;
 
 type
+  { Forward declarations }
+  TTypeSystem = class;
+
   { Type Evaluator Interface - Strategy pattern }
   ITypeEvaluator = interface
     ['{56789012-5678-5678-5678-567890123456}']
 
     { Evaluate a variable value from memory }
     function Evaluate(const VarInfo: TVariableInfo; const TypeInfo: TTypeInfo;
-      ProcessController: IProcessController): TVariableValue;
+      ProcessController: IProcessController; TypeSystem: TTypeSystem): TVariableValue;
 
     { Check if this evaluator can handle a specific type }
     function CanHandle(const TypeInfo: TTypeInfo): Boolean;
@@ -34,7 +37,7 @@ type
   TPrimitiveEvaluator = class(TInterfacedObject, ITypeEvaluator)
   public
     function Evaluate(const VarInfo: TVariableInfo; const TypeInfo: TTypeInfo;
-      ProcessController: IProcessController): TVariableValue;
+      ProcessController: IProcessController; TypeSystem: TTypeSystem): TVariableValue;
     function CanHandle(const TypeInfo: TTypeInfo): Boolean;
   end;
 
@@ -42,7 +45,7 @@ type
   TShortStringEvaluator = class(TInterfacedObject, ITypeEvaluator)
   public
     function Evaluate(const VarInfo: TVariableInfo; const TypeInfo: TTypeInfo;
-      ProcessController: IProcessController): TVariableValue;
+      ProcessController: IProcessController; TypeSystem: TTypeSystem): TVariableValue;
     function CanHandle(const TypeInfo: TTypeInfo): Boolean;
   end;
 
@@ -50,7 +53,7 @@ type
   TAnsiStringEvaluator = class(TInterfacedObject, ITypeEvaluator)
   public
     function Evaluate(const VarInfo: TVariableInfo; const TypeInfo: TTypeInfo;
-      ProcessController: IProcessController): TVariableValue;
+      ProcessController: IProcessController; TypeSystem: TTypeSystem): TVariableValue;
     function CanHandle(const TypeInfo: TTypeInfo): Boolean;
   end;
 
@@ -58,7 +61,15 @@ type
   TUnicodeStringEvaluator = class(TInterfacedObject, ITypeEvaluator)
   public
     function Evaluate(const VarInfo: TVariableInfo; const TypeInfo: TTypeInfo;
-      ProcessController: IProcessController): TVariableValue;
+      ProcessController: IProcessController; TypeSystem: TTypeSystem): TVariableValue;
+    function CanHandle(const TypeInfo: TTypeInfo): Boolean;
+  end;
+
+  { Class Type Evaluator }
+  TClassEvaluator = class(TInterfacedObject, ITypeEvaluator)
+  public
+    function Evaluate(const VarInfo: TVariableInfo; const TypeInfo: TTypeInfo;
+      ProcessController: IProcessController; TypeSystem: TTypeSystem): TVariableValue;
     function CanHandle(const TypeInfo: TTypeInfo): Boolean;
   end;
 
@@ -92,7 +103,8 @@ begin
 end;
 
 function TPrimitiveEvaluator.Evaluate(const VarInfo: TVariableInfo;
-  const TypeInfo: TTypeInfo; ProcessController: IProcessController): TVariableValue;
+  const TypeInfo: TTypeInfo; ProcessController: IProcessController;
+  TypeSystem: TTypeSystem): TVariableValue;
 var
   Buffer: array[0..7] of Byte;
   Value: Int64;
@@ -167,7 +179,8 @@ begin
 end;
 
 function TShortStringEvaluator.Evaluate(const VarInfo: TVariableInfo;
-  const TypeInfo: TTypeInfo; ProcessController: IProcessController): TVariableValue;
+  const TypeInfo: TTypeInfo; ProcessController: IProcessController;
+  TypeSystem: TTypeSystem): TVariableValue;
 var
   Buffer: array[0..255] of Byte;
   Len: Byte;
@@ -216,7 +229,8 @@ begin
 end;
 
 function TAnsiStringEvaluator.Evaluate(const VarInfo: TVariableInfo;
-  const TypeInfo: TTypeInfo; ProcessController: IProcessController): TVariableValue;
+  const TypeInfo: TTypeInfo; ProcessController: IProcessController;
+  TypeSystem: TTypeSystem): TVariableValue;
 var
   PointerBuf: array[0..7] of Byte;
   StringPtr: QWord;
@@ -298,7 +312,8 @@ begin
 end;
 
 function TUnicodeStringEvaluator.Evaluate(const VarInfo: TVariableInfo;
-  const TypeInfo: TTypeInfo; ProcessController: IProcessController): TVariableValue;
+  const TypeInfo: TTypeInfo; ProcessController: IProcessController;
+  TypeSystem: TTypeSystem): TVariableValue;
 var
   PointerBuf: array[0..7] of Byte;
   StringPtr: QWord;
@@ -371,6 +386,74 @@ begin
   Result.IsValid := True;
 end;
 
+{ TClassEvaluator }
+
+function TClassEvaluator.CanHandle(const TypeInfo: TTypeInfo): Boolean;
+begin
+  Result := (TypeInfo.Category = tcClass);
+end;
+
+function TClassEvaluator.Evaluate(const VarInfo: TVariableInfo;
+  const TypeInfo: TTypeInfo; ProcessController: IProcessController;
+  TypeSystem: TTypeSystem): TVariableValue;
+var
+  PointerBuf: array[0..7] of Byte;
+  InstancePtr: QWord;
+  I: Integer;
+  FieldInfo: TVariableInfo;
+  FieldValue: TVariableValue;
+  FieldOutput: String;
+begin
+  Result.Name := TFPCDemangler.Demangle(VarInfo.Name);
+  Result.TypeName := TypeInfo.Name;
+  Result.Address := VarInfo.Address;
+  Result.IsValid := False;
+
+  // Check if ClassInfo exists
+  if TypeInfo.ClassInfo = nil then
+  begin
+    Result.Value := '<error: no class info>';
+    Exit;
+  end;
+
+  // Read instance pointer (class variable is a pointer to instance)
+  FillChar(PointerBuf, SizeOf(PointerBuf), 0);
+  if not ProcessController.ReadMemory(VarInfo.Address, 8, PointerBuf) then
+  begin
+    Result.Value := '<error: failed to read instance pointer>';
+    Exit;
+  end;
+
+  InstancePtr := PQWord(@PointerBuf)^;
+
+  // Check for nil instance
+  if InstancePtr = 0 then
+  begin
+    Result.Value := 'nil';
+    Result.IsValid := True;
+    Exit;
+  end;
+
+  // Build field output
+  FieldOutput := '';
+  for I := 0 to High(TypeInfo.ClassInfo^.Fields) do
+  begin
+    FieldInfo.Name := TypeInfo.ClassInfo^.Fields[I].Name;
+    FieldInfo.TypeID := TypeInfo.ClassInfo^.Fields[I].TypeID;
+    FieldInfo.Address := InstancePtr + TypeInfo.ClassInfo^.Fields[I].Offset;
+
+    // Recursive evaluation
+    FieldValue := TypeSystem.EvaluateVariableInfo(FieldInfo);
+
+    if I > 0 then FieldOutput := FieldOutput + ', ';
+    FieldOutput := FieldOutput + FieldInfo.Name + ': ' + FieldValue.Value;
+  end;
+
+  Result.Value := TypeInfo.Name + '(@$' + IntToHex(InstancePtr, 16) +
+                  ') { ' + FieldOutput + ' }';
+  Result.IsValid := True;
+end;
+
 { TTypeSystem }
 
 constructor TTypeSystem.Create(AProcessController: IProcessController;
@@ -437,7 +520,7 @@ begin
     Evaluator := FEvaluators[I] as ITypeEvaluator;
     if Evaluator.CanHandle(TypeInfo) then
     begin
-      Result := Evaluator.Evaluate(VarInfo, TypeInfo, FProcessController);
+      Result := Evaluator.Evaluate(VarInfo, TypeInfo, FProcessController, Self);
       Exit;
     end;
   end;

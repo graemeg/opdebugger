@@ -59,6 +59,21 @@ type
     tcClass           // Class type
   );
 
+  TDebuggerField = record
+    Name: String;
+    TypeID: TTypeID;
+    Offset: Cardinal;
+  end;
+  TDebuggerFieldArray = array of TDebuggerField;
+
+  TDebuggerClass = record
+    ParentTypeID: TTypeID;
+    VMTAddress: QWord;
+    InstanceSize: Cardinal;
+    Fields: TDebuggerFieldArray;
+  end;
+  PDebuggerClass = ^TDebuggerClass;
+
   { Type information }
   TTypeInfo = record
     TypeID: TTypeID;
@@ -68,6 +83,10 @@ type
     Category: TTypeCategory;
     // String-specific
     MaxLength: Byte;  // For ShortString: max length (0-255)
+    // Pointer-specific
+    PointerTo: TTypeID; // For pointers: the type ID of the pointed-to type
+    // Class-specific
+    ClassInfo: PDebuggerClass; // For classes: pointer to detailed class info
   end;
 
   { Variable information }

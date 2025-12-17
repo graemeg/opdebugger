@@ -132,6 +132,8 @@ type
     // Followed by Name (NameLen bytes)
   end;
 
+  TFieldDescriptorArray = array of TFieldDescriptor; // NEW type definition
+
   { Array Type Definition }
   TDefArray = packed record
     TypeID: TTypeID;        // 4 bytes

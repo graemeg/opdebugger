@@ -91,6 +91,9 @@ begin
   for I := 0 to FTypes.Count - 1 do
   begin
     TypeInfo := TTypeInfo(FTypes[I]^);
+    // Free ClassInfo if it's a class type
+    if (TypeInfo.Category = tcClass) and (TypeInfo.ClassInfo <> nil) then
+      Dispose(TypeInfo.ClassInfo);
     Dispose(PTypeInfo(FTypes[I]));
   end;
   FTypes.Clear;
@@ -155,12 +158,16 @@ var
   DefUnicodeString: TDefUnicodeString;
   DefGlobalVar: TDefGlobalVar;
   DefLineInfo: TDefLineInfo;
+  DefClass: TDefClass;
+  ClassFields: TFieldDescriptorArray;
+  ClassFieldNames: array of String;
   TypeName: String;
   VarName: String;
   FileName: String;
   PType: PTypeInfo;
   PVar: PVariableInfo;
   PLine: PLineInfo;
+  I: Integer;
 begin
   Result := False;
 
@@ -326,6 +333,40 @@ begin
 
             WriteLn('[DEBUG] Loaded line info: ', FileName, ':', DefLineInfo.LineNumber,
                     ' -> 0x', IntToHex(DefLineInfo.Address, 8));
+          end;
+        end;
+
+      recClass:
+        begin
+          if FReader.ReadClass(DefClass, TypeName, ClassFields, ClassFieldNames) then
+          begin
+            New(PType);
+            PType^.TypeID := DefClass.TypeID;
+            PType^.Name := TypeName;
+            PType^.Size := 8;  // Classes are pointers
+            PType^.IsSigned := False;
+            PType^.Category := tcClass;
+            PType^.MaxLength := 0;
+
+            // Allocate and populate ClassInfo
+            New(PType^.ClassInfo);
+            PType^.ClassInfo^.ParentTypeID := DefClass.ParentTypeID;
+            PType^.ClassInfo^.VMTAddress := DefClass.VMTAddress;
+            PType^.ClassInfo^.InstanceSize := DefClass.InstanceSize;
+
+            // Copy field information
+            SetLength(PType^.ClassInfo^.Fields, DefClass.FieldCount);
+            for I := 0 to DefClass.FieldCount - 1 do
+            begin
+              PType^.ClassInfo^.Fields[I].Name := ClassFieldNames[I];
+              PType^.ClassInfo^.Fields[I].TypeID := ClassFields[I].FieldTypeID;
+              PType^.ClassInfo^.Fields[I].Offset := ClassFields[I].Offset;
+            end;
+
+            FTypes.Add(IntToStr(DefClass.TypeID), PType);
+
+            WriteLn('[DEBUG] Loaded class: ', TypeName, ' (TypeID=', DefClass.TypeID,
+                    ', Fields=', DefClass.FieldCount, ')');
           end;
         end;
 
