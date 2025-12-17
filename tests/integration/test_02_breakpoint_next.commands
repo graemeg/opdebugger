@@ -1,0 +1,8 @@
+break test_02_breakpoint_next.pas:15
+continue
+print MyInt
+next
+print MyInt
+next
+print MyInt
+quit
