@@ -46,12 +46,28 @@ type
   { Breakpoint handle }
   TBreakpointHandle = type Integer;
 
+  { Type category for specialized handling }
+  TTypeCategory = (
+    tcPrimitive,      // Integer, Boolean, Char
+    tcShortString,    // ShortString
+    tcAnsiString,     // AnsiString
+    tcUnicodeString,  // UnicodeString
+    tcWideString,     // WideString (COM-compatible, UTF-16)
+    tcPointer,        // Pointer type
+    tcArray,          // Array type
+    tcRecord,         // Record/Structure
+    tcClass           // Class type
+  );
+
   { Type information }
   TTypeInfo = record
     TypeID: TTypeID;
     Name: String;
     Size: Cardinal;
     IsSigned: Boolean;
+    Category: TTypeCategory;
+    // String-specific
+    MaxLength: Byte;  // For ShortString: max length (0-255)
   end;
 
   { Variable information }

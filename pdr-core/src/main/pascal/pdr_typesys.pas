@@ -38,6 +38,30 @@ type
     function CanHandle(const TypeInfo: TTypeInfo): Boolean;
   end;
 
+  { ShortString Type Evaluator }
+  TShortStringEvaluator = class(TInterfacedObject, ITypeEvaluator)
+  public
+    function Evaluate(const VarInfo: TVariableInfo; const TypeInfo: TTypeInfo;
+      ProcessController: IProcessController): TVariableValue;
+    function CanHandle(const TypeInfo: TTypeInfo): Boolean;
+  end;
+
+  { AnsiString Type Evaluator }
+  TAnsiStringEvaluator = class(TInterfacedObject, ITypeEvaluator)
+  public
+    function Evaluate(const VarInfo: TVariableInfo; const TypeInfo: TTypeInfo;
+      ProcessController: IProcessController): TVariableValue;
+    function CanHandle(const TypeInfo: TTypeInfo): Boolean;
+  end;
+
+  { UnicodeString Type Evaluator }
+  TUnicodeStringEvaluator = class(TInterfacedObject, ITypeEvaluator)
+  public
+    function Evaluate(const VarInfo: TVariableInfo; const TypeInfo: TTypeInfo;
+      ProcessController: IProcessController): TVariableValue;
+    function CanHandle(const TypeInfo: TTypeInfo): Boolean;
+  end;
+
   { Type System - manages type evaluators }
   TTypeSystem = class
   private
@@ -64,9 +88,7 @@ implementation
 
 function TPrimitiveEvaluator.CanHandle(const TypeInfo: TTypeInfo): Boolean;
 begin
-  // Primitive types are 1, 2, 4, or 8 bytes
-  // This is a simple heuristic - in practice we'd check the type category
-  Result := (TypeInfo.Size in [1, 2, 4, 8]);
+  Result := (TypeInfo.Category = tcPrimitive);
 end;
 
 function TPrimitiveEvaluator.Evaluate(const VarInfo: TVariableInfo;
@@ -134,6 +156,218 @@ begin
     end;
   end;
 
+  Result.IsValid := True;
+end;
+
+{ TShortStringEvaluator }
+
+function TShortStringEvaluator.CanHandle(const TypeInfo: TTypeInfo): Boolean;
+begin
+  Result := (TypeInfo.Category = tcShortString);
+end;
+
+function TShortStringEvaluator.Evaluate(const VarInfo: TVariableInfo;
+  const TypeInfo: TTypeInfo; ProcessController: IProcessController): TVariableValue;
+var
+  Buffer: array[0..255] of Byte;
+  Len: Byte;
+  Str: String;
+  I: Integer;
+begin
+  Result.Name := TFPCDemangler.Demangle(VarInfo.Name);
+  Result.TypeName := TypeInfo.Name;
+  Result.Address := VarInfo.Address;
+  Result.IsValid := False;
+
+  // ShortString format: [length byte][data bytes]
+  // Read length byte + max possible data
+  FillChar(Buffer, SizeOf(Buffer), 0);
+
+  if not ProcessController.ReadMemory(VarInfo.Address, TypeInfo.MaxLength + 1, Buffer) then
+  begin
+    Result.Value := '<error: failed to read memory>';
+    Exit;
+  end;
+
+  // First byte is the current length
+  Len := Buffer[0];
+
+  // Sanity check
+  if Len > TypeInfo.MaxLength then
+  begin
+    Result.Value := '<error: invalid length>';
+    Exit;
+  end;
+
+  // Extract string data
+  SetLength(Str, Len);
+  for I := 0 to Len - 1 do
+    Str[I + 1] := Chr(Buffer[I + 1]);
+
+  Result.Value := QuotedStr(Str);
+  Result.IsValid := True;
+end;
+
+{ TAnsiStringEvaluator }
+
+function TAnsiStringEvaluator.CanHandle(const TypeInfo: TTypeInfo): Boolean;
+begin
+  Result := (TypeInfo.Category = tcAnsiString);
+end;
+
+function TAnsiStringEvaluator.Evaluate(const VarInfo: TVariableInfo;
+  const TypeInfo: TTypeInfo; ProcessController: IProcessController): TVariableValue;
+var
+  PointerBuf: array[0..7] of Byte;
+  StringPtr: QWord;
+  HeaderBuf: array[0..15] of Byte;
+  Len: LongInt;
+  DataBuf: array of Byte;
+  Str: String;
+  I: Integer;
+begin
+  Result.Name := TFPCDemangler.Demangle(VarInfo.Name);
+  Result.TypeName := TypeInfo.Name;
+  Result.Address := VarInfo.Address;
+  Result.IsValid := False;
+
+  // AnsiString is a pointer to heap memory
+  // Format: [pointer] -> [length: LongInt at -8][refcount: LongInt at -4][data bytes][null]
+
+  // Read pointer
+  FillChar(PointerBuf, SizeOf(PointerBuf), 0);
+  if not ProcessController.ReadMemory(VarInfo.Address, 8, PointerBuf) then
+  begin
+    Result.Value := '<error: failed to read pointer>';
+    Exit;
+  end;
+
+  StringPtr := PQWord(@PointerBuf)^;
+
+  // Nil pointer means empty string
+  if StringPtr = 0 then
+  begin
+    Result.Value := QuotedStr('');
+    Result.IsValid := True;
+    Exit;
+  end;
+
+  // Read header (length at StringPtr - 8)
+  FillChar(HeaderBuf, SizeOf(HeaderBuf), 0);
+  if not ProcessController.ReadMemory(StringPtr - 8, 8, HeaderBuf) then
+  begin
+    Result.Value := '<error: failed to read string header>';
+    Exit;
+  end;
+
+  Len := PLongInt(@HeaderBuf)^;
+
+  // Sanity check (limit to 64KB)
+  if (Len < 0) or (Len > 65536) then
+  begin
+    Result.Value := '<error: invalid string length>';
+    Exit;
+  end;
+
+  // Read string data
+  SetLength(DataBuf, Len);
+  if Len > 0 then
+  begin
+    if not ProcessController.ReadMemory(StringPtr, Len, DataBuf[0]) then
+    begin
+      Result.Value := '<error: failed to read string data>';
+      Exit;
+    end;
+  end;
+
+  // Convert to Pascal string
+  SetLength(Str, Len);
+  for I := 0 to Len - 1 do
+    Str[I + 1] := Chr(DataBuf[I]);
+
+  Result.Value := QuotedStr(Str);
+  Result.IsValid := True;
+end;
+
+{ TUnicodeStringEvaluator }
+
+function TUnicodeStringEvaluator.CanHandle(const TypeInfo: TTypeInfo): Boolean;
+begin
+  // Handle both UnicodeString and WideString (same UTF-16 layout)
+  Result := (TypeInfo.Category = tcUnicodeString) or (TypeInfo.Category = tcWideString);
+end;
+
+function TUnicodeStringEvaluator.Evaluate(const VarInfo: TVariableInfo;
+  const TypeInfo: TTypeInfo; ProcessController: IProcessController): TVariableValue;
+var
+  PointerBuf: array[0..7] of Byte;
+  StringPtr: QWord;
+  HeaderBuf: array[0..15] of Byte;
+  Len: LongInt;
+  DataBuf: array of Byte;
+  WideStr: UnicodeString;
+  I: Integer;
+begin
+  Result.Name := TFPCDemangler.Demangle(VarInfo.Name);
+  Result.TypeName := TypeInfo.Name;
+  Result.Address := VarInfo.Address;
+  Result.IsValid := False;
+
+  // UnicodeString is a pointer to heap memory (similar to AnsiString but WideChar elements)
+  // Format: [pointer] -> [length: LongInt at -8][refcount: LongInt at -4][WideChar data][null]
+
+  // Read pointer
+  FillChar(PointerBuf, SizeOf(PointerBuf), 0);
+  if not ProcessController.ReadMemory(VarInfo.Address, 8, PointerBuf) then
+  begin
+    Result.Value := '<error: failed to read pointer>';
+    Exit;
+  end;
+
+  StringPtr := PQWord(@PointerBuf)^;
+
+  // Nil pointer means empty string
+  if StringPtr = 0 then
+  begin
+    Result.Value := QuotedStr('');
+    Result.IsValid := True;
+    Exit;
+  end;
+
+  // Read header (length at StringPtr - 8)
+  FillChar(HeaderBuf, SizeOf(HeaderBuf), 0);
+  if not ProcessController.ReadMemory(StringPtr - 8, 8, HeaderBuf) then
+  begin
+    Result.Value := '<error: failed to read string header>';
+    Exit;
+  end;
+
+  Len := PLongInt(@HeaderBuf)^;
+
+  // Sanity check (limit to 32K characters = 64KB)
+  if (Len < 0) or (Len > 32768) then
+  begin
+    Result.Value := '<error: invalid string length>';
+    Exit;
+  end;
+
+  // Read string data (Len * 2 bytes for WideChar)
+  SetLength(DataBuf, Len * 2);
+  if Len > 0 then
+  begin
+    if not ProcessController.ReadMemory(StringPtr, Len * 2, DataBuf[0]) then
+    begin
+      Result.Value := '<error: failed to read string data>';
+      Exit;
+    end;
+  end;
+
+  // Convert to UnicodeString
+  SetLength(WideStr, Len);
+  for I := 0 to Len - 1 do
+    WideStr[I + 1] := WideChar(PWord(@DataBuf[I * 2])^);
+
+  Result.Value := QuotedStr(UTF8Encode(WideStr));
   Result.IsValid := True;
 end;
 

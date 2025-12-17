@@ -150,6 +150,9 @@ var
   RecType: TOPDFRecordType;
   RecHeader: TOPDFRecordHeader;
   DefPrimitive: TDefPrimitive;
+  DefShortString: TDefShortString;
+  DefAnsiString: TDefAnsiString;
+  DefUnicodeString: TDefUnicodeString;
   DefGlobalVar: TDefGlobalVar;
   DefLineInfo: TDefLineInfo;
   TypeName: String;
@@ -226,10 +229,70 @@ begin
             PType^.Name := TypeName;
             PType^.Size := DefPrimitive.SizeInBytes;
             PType^.IsSigned := DefPrimitive.IsSigned <> 0;
+            PType^.Category := tcPrimitive;
+            PType^.MaxLength := 0;
 
             FTypes.Add(IntToStr(DefPrimitive.TypeID), PType);
 
             WriteLn('[DEBUG] Loaded type: ', TypeName, ' (TypeID=', DefPrimitive.TypeID, ')');
+          end;
+        end;
+
+      recShortStr:
+        begin
+          if FReader.ReadShortString(DefShortString, TypeName) then
+          begin
+            New(PType);
+            PType^.TypeID := DefShortString.TypeID;
+            PType^.Name := TypeName;
+            PType^.Size := DefShortString.MaxLength + 1; // Length byte + data
+            PType^.IsSigned := False;
+            PType^.Category := tcShortString;
+            PType^.MaxLength := DefShortString.MaxLength;
+
+            FTypes.Add(IntToStr(DefShortString.TypeID), PType);
+
+            WriteLn('[DEBUG] Loaded type: ShortString[', DefShortString.MaxLength, '] (TypeID=', DefShortString.TypeID, ')');
+          end;
+        end;
+
+      recAnsiStr:
+        begin
+          if FReader.ReadAnsiString(DefAnsiString, TypeName) then
+          begin
+            New(PType);
+            PType^.TypeID := DefAnsiString.TypeID;
+            PType^.Name := TypeName;
+            PType^.Size := 8; // Pointer size (64-bit)
+            PType^.IsSigned := False;
+            PType^.Category := tcAnsiString;
+            PType^.MaxLength := 0;
+
+            FTypes.Add(IntToStr(DefAnsiString.TypeID), PType);
+
+            WriteLn('[DEBUG] Loaded type: AnsiString (TypeID=', DefAnsiString.TypeID, ')');
+          end;
+        end;
+
+      recUnicodeStr:
+        begin
+          if FReader.ReadUnicodeString(DefUnicodeString, TypeName) then
+          begin
+            New(PType);
+            PType^.TypeID := DefUnicodeString.TypeID;
+            PType^.Name := TypeName;
+            PType^.Size := 8; // Pointer size (64-bit)
+            PType^.IsSigned := False;
+            // Distinguish UnicodeString vs WideString by name
+            if Pos('Wide', TypeName) > 0 then
+              PType^.Category := tcWideString
+            else
+              PType^.Category := tcUnicodeString;
+            PType^.MaxLength := 0;
+
+            FTypes.Add(IntToStr(DefUnicodeString.TypeID), PType);
+
+            WriteLn('[DEBUG] Loaded type: ', TypeName, ' (TypeID=', DefUnicodeString.TypeID, ')');
           end;
         end;
 

@@ -92,6 +92,7 @@ type
     function ReadGlobalVar(out Def: TDefGlobalVar; out Name: String): Boolean;
     function ReadShortString(out Def: TDefShortString; out Name: String): Boolean;
     function ReadAnsiString(out Def: TDefAnsiString; out Name: String): Boolean;
+    function ReadUnicodeString(out Def: TDefUnicodeString; out Name: String): Boolean;
     function ReadPointer(out Def: TDefPointer; out Name: String): Boolean;
     function ReadLineInfo(out Def: TDefLineInfo; out FileName: String): Boolean;
 
@@ -501,6 +502,25 @@ begin
   Result := False;
 
   if FStream.Position + SizeOf(TDefAnsiString) > FStream.Size then
+    Exit;
+
+  FStream.Read(Def, SizeOf(Def));
+
+  if FStream.Position + Def.NameLen > FStream.Size then
+    Exit;
+
+  SetLength(Name, Def.NameLen);
+  if Def.NameLen > 0 then
+    FStream.Read(Name[1], Def.NameLen);
+
+  Result := True;
+end;
+
+function TOPDFReader.ReadUnicodeString(out Def: TDefUnicodeString; out Name: String): Boolean;
+begin
+  Result := False;
+
+  if FStream.Position + SizeOf(TDefUnicodeString) > FStream.Size then
     Exit;
 
   FStream.Read(Def, SizeOf(Def));

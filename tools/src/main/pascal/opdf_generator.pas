@@ -19,7 +19,7 @@ uses
   Classes, SysUtils, Process, Math, ogopdf, opdf_io;
 
 type
-  TDwarfTypeKind = (dtkUnknown, dtkPrimitive, dtkShortString, dtkAnsiString);
+  TDwarfTypeKind = (dtkUnknown, dtkPrimitive, dtkShortString, dtkAnsiString, dtkUnicodeString, dtkWideString);
 
   TDwarfTypeInfo = record
     Name: String;
@@ -367,7 +367,7 @@ begin
           Continue;
         end;
 
-        // Check if it's a typedef (might be AnsiString)
+        // Check if it's a typedef (might be AnsiString or UnicodeString)
         if Pos('DW_TAG_typedef', Line) > 0 then
         begin
           // Look ahead for name
@@ -383,9 +383,23 @@ begin
                 Result.Size := 8; // Pointer size
                 Exit;
               end;
+              if Pos('UNICODESTRING', UpperCase(Line)) > 0 then
+              begin
+                Result.Name := 'UnicodeString';
+                Result.Kind := dtkUnicodeString;
+                Result.Size := 8; // Pointer size
+                Exit;
+              end;
+              if Pos('WIDESTRING', UpperCase(Line)) > 0 then
+              begin
+                Result.Name := 'WideString';
+                Result.Kind := dtkWideString;
+                Result.Size := 8; // Pointer size
+                Exit;
+              end;
             end;
           end;
-          Exit; // Not AnsiString, unknown typedef
+          Exit; // Not a known string typedef, unknown typedef
         end;
 
         // Check for base types (primitives)
@@ -574,6 +588,18 @@ begin
           // Write variable
           Writer.WriteGlobalVar(Symbols[I].Name, TypeIDCounter, Symbols[I].Address);
           WriteLn('[DEBUG] Wrote variable: ', Symbols[I].Name, ' (AnsiString)');
+          Inc(TypeIDCounter);
+        end;
+
+        dtkUnicodeString, dtkWideString:
+        begin
+          // Define UnicodeString type (WideString has same layout)
+          Writer.WriteUnicodeString(TypeIDCounter, Symbols[I].Name + '_Type');
+          WriteLn('[DEBUG] Defined type: ', Symbols[I].TypeInfo.Name, ' (TypeID=', TypeIDCounter, ')');
+
+          // Write variable
+          Writer.WriteGlobalVar(Symbols[I].Name, TypeIDCounter, Symbols[I].Address);
+          WriteLn('[DEBUG] Wrote variable: ', Symbols[I].Name, ' (', Symbols[I].TypeInfo.Name, ')');
           Inc(TypeIDCounter);
         end;
 

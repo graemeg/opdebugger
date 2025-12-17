@@ -96,9 +96,12 @@ begin
   FNextHandle := 1;  // Start handle numbering at 1
   SetLength(FBreakpoints, 0);
 
-  // Create type system with primitive evaluator
+  // Create type system and register evaluators
   FTypeSystem := TTypeSystem.Create(FProcessController, FDebugInfoReader);
   FTypeSystem.RegisterEvaluator(TPrimitiveEvaluator.Create);
+  FTypeSystem.RegisterEvaluator(TShortStringEvaluator.Create);
+  FTypeSystem.RegisterEvaluator(TAnsiStringEvaluator.Create);
+  FTypeSystem.RegisterEvaluator(TUnicodeStringEvaluator.Create);
 end;
 
 destructor TDebuggerEngine.Destroy;
