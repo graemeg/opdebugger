@@ -50,6 +50,7 @@ type
 
     { ICommandHandler - Session management }
     function LoadProgram(const BinaryPath: String): Boolean;
+    function SetCommandLineArgs(const Args: array of String): Boolean;
     function Attach(PID: Integer): Boolean;
     function Detach: Boolean;
 
@@ -140,6 +141,11 @@ begin
   FBinaryPath := BinaryPath;
   WriteLn('[INFO] Program loaded successfully');
   Result := True;
+end;
+
+function TDebuggerEngine.SetCommandLineArgs(const Args: array of String): Boolean;
+begin
+  Result := FProcessController.SetCommandLineArgs(Args);
 end;
 
 function TDebuggerEngine.Attach(PID: Integer): Boolean;

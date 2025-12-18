@@ -31,6 +31,7 @@ type
     FAttached: Boolean;
     FBreakpoints: array of TBreakpointInfo;
     FLastBreakpointAddr: QWord;  // Address of last breakpoint hit (before handling)
+    FCommandLineArgs: array of String;  // Command-line arguments for the program
 
     { Breakpoint management helpers }
     function FindBreakpoint(Address: QWord): Integer;
@@ -57,6 +58,9 @@ type
 
     { Get the address of the last breakpoint that was hit (before handling) }
     function GetLastBreakpointAddress: QWord;
+
+    { Set command-line arguments for program }
+    function SetCommandLineArgs(const Args: array of String): Boolean;
 
     property PID: Integer read FPID;
     property IsAttached: Boolean read FAttached;
@@ -113,7 +117,8 @@ function TLinuxPtraceAdapter.Launch(const BinaryPath: String): Boolean;
 var
   ChildPID: TPid;
   Status: cInt;
-  Args: array[0..1] of PChar;
+  Args: array of PChar;
+  I: Integer;
 begin
   Result := False;
 
@@ -149,9 +154,12 @@ begin
       fpExit(1);
     end;
 
-    // Prepare arguments
+    // Prepare arguments - include program name and any command-line arguments
+    SetLength(Args, Length(FCommandLineArgs) + 2);  // +1 for program name, +1 for nil terminator
     Args[0] := PChar(BinaryPath);
-    Args[1] := nil;
+    for I := 0 to High(FCommandLineArgs) do
+      Args[I + 1] := PChar(FCommandLineArgs[I]);
+    Args[Length(Args) - 1] := nil;  // Null-terminate the array
 
     // Execute the target program
     FpExecV(PChar(BinaryPath), @Args[0]);
@@ -987,6 +995,21 @@ end;
 function TLinuxPtraceAdapter.GetLastBreakpointAddress: QWord;
 begin
   Result := FLastBreakpointAddr;
+end;
+
+function TLinuxPtraceAdapter.SetCommandLineArgs(const Args: array of String): Boolean;
+var
+  I: Integer;
+begin
+  { Store the command-line arguments }
+  SetLength(FCommandLineArgs, Length(Args));
+  for I := 0 to High(Args) do
+    FCommandLineArgs[I] := Args[I];
+
+  if Length(Args) > 0 then
+    WriteLn('[INFO] Set command-line arguments: ', String.Join(' ', Args));
+
+  Result := True;
 end;
 
 end.

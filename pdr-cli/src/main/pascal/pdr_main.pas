@@ -28,6 +28,7 @@ type
     FDebugInfoReader: IDebugInfoReader;
     FArchAdapter: IArchAdapter;
     FRunning: Boolean;
+    FCommandLineArgs: array of String;
 
     procedure PrintHelp;
     procedure ProcessCommand(const CmdLine: String);
@@ -35,7 +36,7 @@ type
     constructor Create;
     destructor Destroy; override;
 
-    procedure Run(const BinaryPath: String);
+    procedure Run(const BinaryPath: String; const Args: array of String);
   end;
 
 { TCLIDebugger }
@@ -56,6 +57,7 @@ procedure TCLIDebugger.PrintHelp;
 begin
   WriteLn('PDR Debugger Commands:');
   WriteLn('  run            - Start program (automatically done on launch)');
+  WriteLn('  args <args>    - Set command-line arguments for program');
   WriteLn('  print <var>    - Print variable value');
   WriteLn('  attach <pid>   - Attach to running process');
   WriteLn('  detach         - Detach from process');
@@ -103,6 +105,26 @@ begin
 
     'run', 'r':
       FEngine.Run;
+
+    'args':
+      begin
+        { Collect all arguments after 'args' command }
+        if Length(Parts) > 1 then
+        begin
+          SetLength(FCommandLineArgs, Length(Parts) - 1);
+          for BpNum := 0 to High(FCommandLineArgs) do
+            FCommandLineArgs[BpNum] := Parts[BpNum + 1];
+          FEngine.SetCommandLineArgs(FCommandLineArgs);
+        end
+        else
+        begin
+          WriteLn('[INFO] Usage: args <argument> [<argument> ...]');
+          if Length(FCommandLineArgs) > 0 then
+            WriteLn('[INFO] Current arguments: ', String.Join(' ', FCommandLineArgs))
+          else
+            WriteLn('[INFO] No arguments set');
+        end;
+      end;
 
     'attach':
       begin
@@ -186,13 +208,18 @@ begin
   end;
 end;
 
-procedure TCLIDebugger.Run(const BinaryPath: String);
+procedure TCLIDebugger.Run(const BinaryPath: String; const Args: array of String);
 var
   CmdLine: String;
 begin
   WriteLn('PDR (Pascal Debug Reference) v0.1.0');
   WriteLn('Copyright (c) 2025 Graeme Geldenhuys');
   WriteLn;
+
+  // Store command-line arguments
+  SetLength(FCommandLineArgs, Length(Args));
+  if Length(Args) > 0 then
+    Move(Args[0], FCommandLineArgs[0], Length(Args) * SizeOf(String));
 
   // Create platform-specific adapters
   FProcessController := TLinuxPtraceAdapter.Create;
@@ -217,6 +244,10 @@ begin
     WriteLn('[ERROR] Failed to load program');
     Halt(1);
   end;
+
+  // Set command-line arguments if provided
+  if Length(FCommandLineArgs) > 0 then
+    FEngine.SetCommandLineArgs(FCommandLineArgs);
 
   WriteLn;
 
@@ -244,12 +275,22 @@ end;
 var
   BinaryPath: String;
   CLI: TCLIDebugger;
+  I: Integer;
+  Args: array of String;
 begin
   if ParamCount < 1 then
   begin
-    WriteLn('Usage: pdr <binary>');
+    WriteLn('Usage: pdr <binary> [<argument> ...]');
     WriteLn;
     WriteLn('Debug an Object Pascal program using OPDF debug information.');
+    WriteLn;
+    WriteLn('Arguments:');
+    WriteLn('  <binary>       - Path to the binary to debug');
+    WriteLn('  <argument>     - Command-line arguments to pass to the program');
+    WriteLn;
+    WriteLn('Examples:');
+    WriteLn('  pdr ./myprogram');
+    WriteLn('  pdr ./myprogram arg1 arg2 arg3');
     Halt(1);
   end;
 
@@ -261,9 +302,17 @@ begin
     Halt(1);
   end;
 
+  { Collect command-line arguments (all parameters after the binary path) }
+  if ParamCount > 1 then
+  begin
+    SetLength(Args, ParamCount - 1);
+    for I := 2 to ParamCount do
+      Args[I - 2] := ParamStr(I);
+  end;
+
   CLI := TCLIDebugger.Create;
   try
-    CLI.Run(BinaryPath);
+    CLI.Run(BinaryPath, Args);
   finally
     CLI.Free;
   end;

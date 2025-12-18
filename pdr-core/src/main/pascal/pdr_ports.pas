@@ -190,6 +190,9 @@ type
 
     { Get address of last breakpoint hit (before handling) }
     function GetLastBreakpointAddress: QWord;
+
+    { Set command-line arguments for program }
+    function SetCommandLineArgs(const Args: array of String): Boolean;
   end;
 
   { Debug Info Reader Port - Format-specific debug info reading }
@@ -256,6 +259,7 @@ type
 
     { Session management }
     function LoadProgram(const BinaryPath: String): Boolean;
+    function SetCommandLineArgs(const Args: array of String): Boolean;
     function Attach(PID: Integer): Boolean;
     function Detach: Boolean;
 
