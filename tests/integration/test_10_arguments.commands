@@ -1,4 +1,6 @@
+args arg1 arg2 arg3
+run
 break test_10_arguments.pas:28
 continue
-print ParamCount
+print ArgCount
 quit

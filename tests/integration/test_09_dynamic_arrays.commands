@@ -1,3 +1,4 @@
+run
 break test_09_dynamic_arrays.pas:28
 continue
 print DynIntArray

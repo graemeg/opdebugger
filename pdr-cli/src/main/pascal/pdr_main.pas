@@ -245,17 +245,29 @@ begin
     Halt(1);
   end;
 
-  // Set command-line arguments if provided
+  // Set command-line arguments if provided at CLI
   if Length(FCommandLineArgs) > 0 then
+  begin
     FEngine.SetCommandLineArgs(FCommandLineArgs);
+    WriteLn('[INFO] Command-line arguments set: ', String.Join(' ', FCommandLineArgs));
+  end;
 
   WriteLn;
 
-  // Automatically start the program (paused at entry point)
-  if not FEngine.Run then
+  // Only auto-run if arguments were provided at CLI startup
+  // Otherwise, let user set them via 'args' command before 'run'
+  if Length(FCommandLineArgs) > 0 then
   begin
-    WriteLn('[ERROR] Failed to start program');
-    Halt(1);
+    WriteLn('[INFO] Starting program...');
+    if not FEngine.Run then
+    begin
+      WriteLn('[ERROR] Failed to start program');
+      Halt(1);
+    end;
+  end
+  else
+  begin
+    WriteLn('[INFO] No arguments provided. Use "args" command to set them, then "run"');
   end;
 
   WriteLn;

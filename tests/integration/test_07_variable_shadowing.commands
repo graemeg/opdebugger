@@ -1,3 +1,4 @@
+run
 break test_07_variable_shadowing.pas:13
 continue
 print Counter

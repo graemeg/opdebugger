@@ -9,13 +9,15 @@ uses
 var
   I: Integer;
   AllArgs: String;
+  ArgCount: Integer;
 
 begin
-  WriteLn('Program received ', ParamCount, ' arguments:');
+  ArgCount := ParamCount;
+  WriteLn('Program received ', ArgCount, ' arguments:');
 
   { Print all arguments }
   AllArgs := '';
-  for I := 1 to ParamCount do
+  for I := 1 to ArgCount do
   begin
     WriteLn('  Arg[', I, ']: ', ParamStr(I));
     if I > 1 then
