@@ -488,11 +488,23 @@ end;
 function TTypeSystem.EvaluateVariable(const VarName: String): TVariableValue;
 var
   VarInfo: TVariableInfo;
+  RIP: QWord;
 begin
   Result.Name := VarName;
   Result.IsValid := False;
 
-  // Find variable in debug info
+  { Try scope-aware lookup first if process is running }
+  RIP := FProcessController.GetCurrentAddress;
+  if RIP <> 0 then
+  begin
+    if FDebugInfoReader.FindVariableWithScope(VarName, RIP, VarInfo) then
+    begin
+      Result := EvaluateVariableInfo(VarInfo);
+      Exit;
+    end;
+  end;
+
+  { Fall back to simple global variable lookup }
   if not FDebugInfoReader.FindVariable(VarName, VarInfo) then
   begin
     Result.Value := '<error: variable not found>';

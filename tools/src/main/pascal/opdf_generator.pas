@@ -66,6 +66,25 @@ type
 
   TLineEntryArray = array of TLineEntry;
 
+  { Local variable/parameter information }
+  TDwarfLocalVariable = record
+    Name: String;
+    TypeOffset: String;        // DWARF offset for variable's type
+    LocationExpr: String;      // DWARF location expression (e.g., "2 byte block: 76 e8")
+    IsParameter: Boolean;      // True if it's a function parameter
+  end;
+  TDwarfLocalVariableArray = array of TDwarfLocalVariable;
+
+  { Function/Subprogram information }
+  TDwarfSubprogram = record
+    Name: String;
+    LowPC: QWord;              // Start address
+    HighPC: QWord;             // End address
+    Locals: TDwarfLocalVariableArray;
+  end;
+
+  TDwarfSubprogramArray = array of TDwarfSubprogram;
+
 var
   BinaryPath: String;
   OPDFPath: String;
@@ -805,6 +824,109 @@ begin
         Result := False;
       end;
     end;
+  end;
+end;
+
+{ Extract function subprograms and their local variables from DWARF }
+function ExtractSubprograms(const BinaryPath: String; out Subprograms: TDwarfSubprogramArray): Boolean;
+var
+  Process: TProcess;
+  Output: TStringList;
+  I, J: Integer;
+  CurrentSubprogram: TDwarfSubprogram;
+  Line: String;
+  SubprogramCount: Integer;
+  InSubprogram: Boolean;
+  LowPCStr, HighPCStr: String;
+  LocationExpr: String;
+  LocationType: Byte;
+  LocationData: ShortInt;
+begin
+  Result := False;
+  SetLength(Subprograms, 0);
+
+  Process := TProcess.Create(nil);
+  Output := TStringList.Create;
+  try
+    { Extract DWARF debug info for subprograms }
+    Process.Executable := 'objdump';
+    Process.Parameters.Add('-W');
+    Process.Parameters.Add('--dwarf=info');
+    Process.Parameters.Add(BinaryPath);
+    Process.Options := Process.Options + [poUsePipes, poStderrToOutPut];
+
+    try
+      Process.Execute;
+      Output.LoadFromStream(Process.Output);
+    except
+      Exit;
+    end;
+
+    SubprogramCount := 0;
+    InSubprogram := False;
+
+    for I := 0 to Output.Count - 1 do
+    begin
+      Line := Output[I];
+
+      { Look for DW_TAG_subprogram entries }
+      if Pos('DW_TAG_subprogram', Line) > 0 then
+      begin
+        if InSubprogram and (SubprogramCount > 0) then
+          Inc(SubprogramCount); // Save previous subprogram
+
+        FillChar(CurrentSubprogram, SizeOf(CurrentSubprogram), 0);
+        InSubprogram := True;
+
+        { Extract subprogram name }
+        LowPCStr := FindDwarfAttributeInEntry(Output, I, 'DW_AT_name');
+        if LowPCStr <> '' then
+          CurrentSubprogram.Name := LowPCStr;
+
+        { Extract low_pc (start address) }
+        LowPCStr := FindDwarfAttributeInEntry(Output, I, 'DW_AT_low_pc');
+        if LowPCStr <> '' then
+        begin
+          try
+            CurrentSubprogram.LowPC := StrToQWord(LowPCStr);
+          except
+            // Skip this subprogram if we can't parse the address
+            InSubprogram := False;
+          end;
+        end;
+
+        { Extract high_pc (end address) }
+        HighPCStr := FindDwarfAttributeInEntry(Output, I, 'DW_AT_high_pc');
+        if HighPCStr <> '' then
+        begin
+          try
+            CurrentSubprogram.HighPC := StrToQWord(HighPCStr);
+          except
+          end;
+        end;
+
+        Inc(SubprogramCount);
+      end;
+
+      { Extract local variables and parameters within the subprogram }
+      if InSubprogram and ((Pos('DW_TAG_formal_parameter', Line) > 0) or (Pos('DW_TAG_variable', Line) > 0)) then
+      begin
+        { In a real implementation, we would extract variable name, type, and location here }
+        { For MVP, we're just collecting the infrastructure }
+      end;
+
+      { End of subprogram entry }
+      if InSubprogram and (Pos('DW_TAG_', Line) > 0) and (Pos('DW_TAG_subprogram', Line) = 0) then
+      begin
+        InSubprogram := False;
+      end;
+    end;
+
+    Result := True;
+
+  finally
+    Output.Free;
+    Process.Free;
   end;
 end;
 

@@ -187,6 +187,10 @@ type
     { Find variable by name }
     function FindVariable(const Name: String; out VarInfo: TVariableInfo): Boolean;
 
+    { Find variable with scope awareness (checks locals first, then globals) }
+    function FindVariableWithScope(const Name: String; RIP: QWord;
+                                   out VarInfo: TVariableInfo): Boolean;
+
     { Find type by ID }
     function FindType(TypeID: TTypeID; out TypeInfo: TTypeInfo): Boolean;
 

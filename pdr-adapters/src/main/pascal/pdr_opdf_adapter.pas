@@ -22,6 +22,26 @@ type
   PVariableInfo = ^TVariableInfo;
   PLineInfo = ^TLineInfo;
 
+  { Function scope information }
+  TFunctionScope = record
+    ScopeID: Cardinal;      // low_pc address of function (unique identifier)
+    LowPC: QWord;           // Start address of function
+    HighPC: QWord;          // End address of function
+    Name: String;           // Function name
+  end;
+  PFunctionScope = ^TFunctionScope;
+
+  { Local variable information }
+  TLocalVariableInfo = record
+    Name: String;           // Variable name
+    TypeID: TTypeID;        // Type identifier
+    ScopeID: Cardinal;      // Function scope ID
+    LocationExpr: Byte;     // Location expression type (1=RBP-relative)
+    LocationData: ShortInt; // RBP offset (signed)
+  end;
+  PLocalVariableInfo = ^TLocalVariableInfo;
+  TLocalVariableArray = array of TLocalVariableInfo;
+
   { OPDF Reader Adapter - implements IDebugInfoReader }
   TOPDFReaderAdapter = class(TInterfacedObject, IDebugInfoReader)
   private
@@ -32,14 +52,18 @@ type
     FHeader: TOPDFHeader;
 
     { Internal dictionaries for fast lookup }
-    FTypes: TFPHashList;        // TypeID -> TTypeInfo
-    FVariables: TFPHashList;    // Variable name -> TVariableInfo
-    FLineInfo: TFPList;         // List of TLineInfo records
+    FTypes: TFPHashList;            // TypeID -> TTypeInfo
+    FVariables: TFPHashList;        // Variable name -> TVariableInfo
+    FLineInfo: TFPList;             // List of TLineInfo records
+    FFunctionScopes: TFPList;       // List of TFunctionScope records
+    FLocalVariables: TFPHashList;   // ScopeID -> TList of TLocalVariableInfo
     FLoaded: Boolean;
 
     { Helper methods }
     procedure ClearCache;
     function FindOPDFFile(const BinaryPath: String): String;
+    function GetCurrentFunctionScope(RIP: QWord): Cardinal;
+    function FindLocalVariablesInScope(ScopeID: Cardinal): TLocalVariableArray;
   public
     constructor Create;
     destructor Destroy; override;
@@ -47,6 +71,8 @@ type
     { IDebugInfoReader implementation }
     function Load(const BinaryPath: String): Boolean;
     function FindVariable(const Name: String; out VarInfo: TVariableInfo): Boolean;
+    function FindVariableWithScope(const Name: String; RIP: QWord;
+                                   out VarInfo: TVariableInfo): Boolean;
     function FindType(TypeID: TTypeID; out TypeInfo: TTypeInfo): Boolean;
     function GetGlobalVariables: TStringArray;
     function GetTargetArch: TTargetArch;
@@ -67,6 +93,8 @@ begin
   FTypes := TFPHashList.Create;
   FVariables := TFPHashList.Create;
   FLineInfo := TFPList.Create;
+  FFunctionScopes := TFPList.Create;
+  FLocalVariables := TFPHashList.Create;
   FReader := nil;
   FStream := nil;
   FLoaded := False;
@@ -78,14 +106,17 @@ begin
   FTypes.Free;
   FVariables.Free;
   FLineInfo.Free;
+  FFunctionScopes.Free;
+  FLocalVariables.Free;
   inherited Destroy;
 end;
 
 procedure TOPDFReaderAdapter.ClearCache;
 var
-  I: Integer;
+  I, J: Integer;
   TypeInfo: TTypeInfo;
   VarInfo: TVariableInfo;
+  LocalList: TFPList;
 begin
   // Free cached type info
   for I := 0 to FTypes.Count - 1 do
@@ -112,6 +143,23 @@ begin
     Dispose(PLineInfo(FLineInfo[I]));
   end;
   FLineInfo.Clear;
+
+  // Free function scopes
+  for I := 0 to FFunctionScopes.Count - 1 do
+  begin
+    Dispose(PFunctionScope(FFunctionScopes[I]));
+  end;
+  FFunctionScopes.Clear;
+
+  // Free local variables (stored in lists)
+  for I := 0 to FLocalVariables.Count - 1 do
+  begin
+    LocalList := TFPList(FLocalVariables[I]);
+    for J := 0 to LocalList.Count - 1 do
+      Dispose(PLocalVariableInfo(LocalList[J]));
+    LocalList.Free;
+  end;
+  FLocalVariables.Clear;
 
   // Free reader and stream
   FreeAndNil(FReader);
@@ -158,15 +206,20 @@ var
   DefUnicodeString: TDefUnicodeString;
   DefGlobalVar: TDefGlobalVar;
   DefLineInfo: TDefLineInfo;
+  DefLocalVar: TDefLocalVar;
   DefClass: TDefClass;
   ClassFields: TFieldDescriptorArray;
   ClassFieldNames: array of String;
   TypeName: String;
   VarName: String;
   FileName: String;
+  LocationData: ShortInt;
   PType: PTypeInfo;
   PVar: PVariableInfo;
   PLine: PLineInfo;
+  PLocal: PLocalVariableInfo;
+  PScope: PFunctionScope;
+  LocalList: TFPList;
   I: Integer;
 begin
   Result := False;
@@ -356,8 +409,26 @@ begin
 
       recLocalVar:
         begin
-          { Local variables are skipped for now (MVP - will implement scope management in Phase 4B) }
-          FReader.SkipRecord(RecHeader);
+          if FReader.ReadLocalVar(DefLocalVar, LocationData, VarName) then
+          begin
+            { Get or create local variables list for this scope }
+            LocalList := TFPList(FLocalVariables.Find(IntToStr(DefLocalVar.ScopeID)));
+            if not Assigned(LocalList) then
+            begin
+              LocalList := TFPList.Create;
+              FLocalVariables.Add(IntToStr(DefLocalVar.ScopeID), LocalList);
+            end;
+
+            { Add local variable to scope's list }
+            New(PLocal);
+            PLocal^.Name := VarName;
+            PLocal^.TypeID := DefLocalVar.TypeID;
+            PLocal^.ScopeID := DefLocalVar.ScopeID;
+            PLocal^.LocationExpr := DefLocalVar.LocationExpr;
+            PLocal^.LocationData := LocationData;
+
+            LocalList.Add(PLocal);
+          end;
         end;
 
       else
@@ -416,6 +487,53 @@ begin
   end;
 
   WriteLn('[DEBUG] Variable not found: ', Name);
+end;
+
+{ Find variable with scope awareness - checks local variables first, then globals }
+function TOPDFReaderAdapter.FindVariableWithScope(const Name: String; RIP: QWord;
+                                                  out VarInfo: TVariableInfo): Boolean;
+var
+  ScopeID: Cardinal;
+  Locals: TLocalVariableArray;
+  I: Integer;
+  LocalVar: TLocalVariableInfo;
+  SearchName: String;
+  DemangledName: String;
+begin
+  Result := False;
+
+  if not FLoaded then
+  begin
+    WriteLn('[ERROR] OPDF file not loaded');
+    Exit;
+  end;
+
+  SearchName := LowerCase(Name);
+
+  { Try to find in local variables first }
+  ScopeID := GetCurrentFunctionScope(RIP);
+  if ScopeID <> 0 then
+  begin
+    Locals := FindLocalVariablesInScope(ScopeID);
+    for I := 0 to High(Locals) do
+    begin
+      LocalVar := Locals[I];
+      { Case-insensitive comparison }
+      if LowerCase(LocalVar.Name) = SearchName then
+      begin
+        { Found local variable - convert to VarInfo }
+        VarInfo.Name := LocalVar.Name;
+        VarInfo.TypeID := LocalVar.TypeID;
+        { Local variables have stack-based addressing }
+        VarInfo.Address := 0; { Will be computed from RBP + LocationData }
+        Result := True;
+        Exit;
+      end;
+    end;
+  end;
+
+  { Fall back to global variables }
+  Result := FindVariable(Name, VarInfo);
 end;
 
 function TOPDFReaderAdapter.FindType(TypeID: TTypeID; out TypeInfo: TTypeInfo): Boolean;
@@ -592,6 +710,51 @@ begin
       Inc(Count);
     end;
   end;
+end;
+
+{ Find function scope containing a given RIP (instruction pointer) }
+function TOPDFReaderAdapter.GetCurrentFunctionScope(RIP: QWord): Cardinal;
+var
+  I: Integer;
+  FuncScope: PFunctionScope;
+begin
+  Result := 0;
+
+  if not FLoaded then
+    Exit;
+
+  { Search for function scope containing RIP }
+  for I := 0 to FFunctionScopes.Count - 1 do
+  begin
+    FuncScope := PFunctionScope(FFunctionScopes[I]);
+    if (RIP >= FuncScope^.LowPC) and (RIP < FuncScope^.HighPC) then
+    begin
+      Result := FuncScope^.ScopeID;
+      Exit;
+    end;
+  end;
+end;
+
+{ Find all local variables in a given scope }
+function TOPDFReaderAdapter.FindLocalVariablesInScope(ScopeID: Cardinal): TLocalVariableArray;
+var
+  LocalList: TFPList;
+  I: Integer;
+begin
+  SetLength(Result, 0);
+
+  if not FLoaded then
+    Exit;
+
+  { Get list of locals for this scope }
+  LocalList := TFPList(FLocalVariables.Find(IntToStr(ScopeID)));
+  if not Assigned(LocalList) then
+    Exit;
+
+  { Copy locals to result array }
+  SetLength(Result, LocalList.Count);
+  for I := 0 to LocalList.Count - 1 do
+    Result[I] := PLocalVariableInfo(LocalList[I])^;
 end;
 
 end.
