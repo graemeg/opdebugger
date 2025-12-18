@@ -274,7 +274,8 @@ begin
             Continue;
 
           CleanName := Symbol.Name;
-          if Pos('U_$P$', CleanName) = 1 then
+          { Extract user variable name from mangled prefix }
+          if (Pos('U_$P$', CleanName) = 1) or (Pos('TC_$P$', CleanName) = 1) then
           begin
             I := Pos('_$$_', CleanName);
             if I > 0 then

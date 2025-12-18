@@ -37,7 +37,11 @@ fi
 
 # Filter non-deterministic output
 filter_output() {
-    grep -E "(Myglobalint = |Myboolean = |Stepped to line:|Myshortstring = |Myansistring = |Myunicodestring = |Mywidestring = |Emptyshort = |Emptyansi = |Emptyunicode = |Emptywide = |myinstance = |mynilinstance = |Myinstance = |Mybaseinstance = |Instance = |Baseinstance = )" | sed 's/^\[INFO\] //' || true
+    # Only match debugger output from print commands and step messages
+    # Matches: Myglobalint = 42, Myboolean = True, Instance = ..., etc.
+    # Matches: [INFO] Stepped to line: ..., stepped to line: ...
+    # But NOT program output like: MyGlobalInt = 42, MyBoolean = TRUE, Test Program, etc.
+    grep -E "^(([A-Z][a-z]+ = )|(\[INFO\] )?[Ss]tepped to line:)" | sed 's/^\[INFO\] //' || true
 }
 
 run_test() {
@@ -73,10 +77,13 @@ run_test() {
         return 0
     fi
 
-    # Compare
+    # Compare (case-insensitive for Pascal, address-normalized)
     echo "  [4/4] Comparing output..."
     if [ -f "$test_base.expected" ]; then
-        if diff -u "$test_base.expected" "$test_base.actual" > "$test_base.diff"; then
+        # Normalize addresses in both files (replace hex addresses with placeholder)
+        # Then convert to lowercase for case-insensitive comparison
+        if diff -u <(sed -E 's/@\$[0-9A-Fa-f]+/@$<addr>/g' "$test_base.expected" | tr '[:upper:]' '[:lower:]') \
+                   <(sed -E 's/@\$[0-9A-Fa-f]+/@$<addr>/g' "$test_base.actual" | tr '[:upper:]' '[:lower:]') > "$test_base.diff"; then
             echo -e "${GREEN}  ✓ PASSED${NC}"
             ((PASSED++))
             return 0

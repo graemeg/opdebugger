@@ -240,8 +240,6 @@ begin
             PType^.MaxLength := 0;
 
             FTypes.Add(IntToStr(DefPrimitive.TypeID), PType);
-
-            WriteLn('[DEBUG] Loaded type: ', TypeName, ' (TypeID=', DefPrimitive.TypeID, ')');
           end;
         end;
 
@@ -258,8 +256,6 @@ begin
             PType^.MaxLength := DefShortString.MaxLength;
 
             FTypes.Add(IntToStr(DefShortString.TypeID), PType);
-
-            WriteLn('[DEBUG] Loaded type: ShortString[', DefShortString.MaxLength, '] (TypeID=', DefShortString.TypeID, ')');
           end;
         end;
 
@@ -276,8 +272,6 @@ begin
             PType^.MaxLength := 0;
 
             FTypes.Add(IntToStr(DefAnsiString.TypeID), PType);
-
-            WriteLn('[DEBUG] Loaded type: AnsiString (TypeID=', DefAnsiString.TypeID, ')');
           end;
         end;
 
@@ -298,8 +292,6 @@ begin
             PType^.MaxLength := 0;
 
             FTypes.Add(IntToStr(DefUnicodeString.TypeID), PType);
-
-            WriteLn('[DEBUG] Loaded type: ', TypeName, ' (TypeID=', DefUnicodeString.TypeID, ')');
           end;
         end;
 
@@ -314,8 +306,6 @@ begin
 
             // Store with mangled name for lookup (since OPDF has mangled names)
             FVariables.Add(VarName, PVar);
-
-            WriteLn('[DEBUG] Loaded variable: ', VarName, ' at $', IntToHex(DefGlobalVar.Address, 16));
           end;
         end;
 
@@ -330,9 +320,6 @@ begin
             PLine^.ColumnNumber := DefLineInfo.ColumnNumber;
 
             FLineInfo.Add(PLine);
-
-            WriteLn('[DEBUG] Loaded line info: ', FileName, ':', DefLineInfo.LineNumber,
-                    ' -> 0x', IntToHex(DefLineInfo.Address, 8));
           end;
         end;
 
@@ -364,9 +351,6 @@ begin
             end;
 
             FTypes.Add(IntToStr(DefClass.TypeID), PType);
-
-            WriteLn('[DEBUG] Loaded class: ', TypeName, ' (TypeID=', DefClass.TypeID,
-                    ', Fields=', DefClass.FieldCount, ')');
           end;
         end;
 
@@ -420,7 +404,6 @@ begin
       begin
         VarInfo := PVar^;
         Result := True;
-        WriteLn('[DEBUG] Found variable by demangled name: ', Name, ' -> ', PVar^.Name);
         Exit;
       end;
     end;
@@ -555,13 +538,7 @@ begin
     // Sanity check: if the distance is too large (>1MB), this is probably wrong
     // The address is likely in a different function or library code
     if BestDistance > 1024 * 1024 then
-    begin
-      WriteLn('[DEBUG] FindLineByAddress: Address 0x', IntToHex(Address, 16),
-              ' is ', BestDistance, ' bytes past closest line (line ',
-              BestEntry^.LineNumber, ' at 0x', IntToHex(BestEntry^.Address, 16), ')');
-      WriteLn('[DEBUG] This is likely library code, not user code');
       Exit(False);
-    end;
 
     LineInfo := BestEntry^;
     Result := True;

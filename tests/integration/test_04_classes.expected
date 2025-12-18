@@ -1,2 +1,2 @@
-myinstance = TMyClass(@$[0-9A-Fa-f]+) { finteger: 42, fboolean: True, fansistring: 'Hello from a class' }
+myinstance = TMyClass(@$<addr>) { finteger: 42, fboolean: True, fansistring: 'Hello from a class' }
 mynilinstance = nil

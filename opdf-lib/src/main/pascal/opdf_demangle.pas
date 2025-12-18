@@ -42,12 +42,14 @@ begin
   // FPC mangled names typically start with patterns like:
   // U_$P$ - unit global variables
   // U_$ - unit symbols
+  // TC_$P$ - compiler table constants
   // VMT_$ - virtual method tables
   // INIT_$ - initialization records
   // IID_$ - interface IDs
   // RTTI_$ - RTTI information
   Result := (Pos('U_$P$', Name) = 1) or
             (Pos('U_$', Name) = 1) or
+            (Pos('TC_$P$', Name) = 1) or
             (Pos('VMT_$', Name) = 1) or
             (Pos('INIT_$', Name) = 1) or
             (Pos('IID_$', Name) = 1) or

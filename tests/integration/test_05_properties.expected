@@ -1,2 +1,2 @@
-Instance = TDERIVEDCLASS(@$[0-9A-F]+) { FDERIVEDVALUE: True, FDERIVEDSTRING: 'Derived class string', BASESTRING: 'Base class string', DERIVEDSTRING: 'Derived class string' }
-Baseinstance = TBASECLASS(@$[0-9A-F]+) { FBASEVALUE: 100, FBASESTRING: 'Base class string' }
+Instance = TDERIVEDCLASS(@$<addr>) { FDERIVEDVALUE: True, FDERIVEDSTRING: 'Derived class string', BASESTRING: 'Base class string', DERIVEDSTRING: 'Derived class string' }
+Baseinstance = TBASECLASS(@$<addr>) { FBASEVALUE: 100, FBASESTRING: 'Base class string' }
