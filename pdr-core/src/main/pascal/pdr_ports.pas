@@ -128,6 +128,13 @@ type
     ColumnNumber: Word;
   end;
 
+  { Function information for callstack }
+  TFunctionInfo = record
+    Name: String;
+    LowPC: QWord;
+    HighPC: QWord;
+  end;
+
   { Calling convention types }
   TCallingConvention = (
     ccRegister,    // FPC default (registers then stack)
@@ -140,6 +147,7 @@ type
   TStringArray = array of String;
   TVariableValueArray = array of TVariableValue;
   TLineInfoArray = array of TLineInfo;
+  TFunctionInfoArray = array of TFunctionInfo;
 
   {===================================================================}
   { SECONDARY PORTS - Adapters implement these interfaces            }
@@ -230,6 +238,9 @@ type
 
     { Get all line entries for a file }
     function GetFileLineEntries(const FileName: String): TLineInfoArray;
+
+    { Find function by address }
+    function FindFunctionByAddress(Address: QWord; out FuncInfo: TFunctionInfo): Boolean;
   end;
 
   { Architecture Adapter Port - Architecture-specific operations }
@@ -278,7 +289,7 @@ type
     { Inspection }
     function EvaluateExpression(const Expr: String): TVariableValue;
     function GetLocalVariables: TVariableValueArray;
-    function GetCallStack: TStringArray;
+    function GetCallStack(Limit: Integer = 0): TStringArray;
 
     { State query }
     function GetState: TDebuggerState;

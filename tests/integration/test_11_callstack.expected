@@ -1,0 +1,4 @@
+[CALLSTACK]
+#0 LEVEL3 at test_11_callstack.pas:10
+#1 LEVEL1 at test_11_callstack.pas:25
+#2 main at test_11_callstack.pas:35

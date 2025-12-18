@@ -69,7 +69,7 @@ type
     { ICommandHandler - Inspection }
     function EvaluateExpression(const Expr: String): TVariableValue;
     function GetLocalVariables: TVariableValueArray;
-    function GetCallStack: TStringArray;
+    function GetCallStack(Limit: Integer = 0): TStringArray;
 
     { ICommandHandler - State query }
     function GetState: TDebuggerState;
@@ -658,11 +658,116 @@ begin
   // TODO: Get local variables from current stack frame
 end;
 
-function TDebuggerEngine.GetCallStack: TStringArray;
+function TDebuggerEngine.GetCallStack(Limit: Integer = 0): TStringArray;
+var
+  Regs: TRegisters;
+  FramePtr: QWord;
+  RetAddr: QWord;
+  FrameCount: Integer;
+  FuncInfo: TFunctionInfo;
+  LineInfo: TLineInfo;
+  FrameStr: String;
+  FrameBuffer: array[0..15] of QWord;
+  BytesRead: Cardinal;
+  I: Integer;
 begin
   SetLength(Result, 0);
-  WriteLn('[WARNING] GetCallStack not implemented yet');
-  // TODO: Walk stack frames using frame pointer
+  FrameCount := 0;
+
+  { Get current registers }
+  if not FProcessController.GetRegisters(Regs) then
+  begin
+    WriteLn('[DEBUG] Failed to get registers for callstack');
+    Exit;
+  end;
+
+  {$IFDEF CPUX86_64}
+  { Start with current RBP }
+  FramePtr := Regs.RBP;
+  RetAddr := Regs.RIP;
+
+  { Walk the stack frames }
+  while (FramePtr <> 0) and ((Limit = 0) or (FrameCount < Limit)) do
+  begin
+    { Find function by return address }
+    if FDebugInfoReader.FindFunctionByAddress(RetAddr, FuncInfo) then
+    begin
+      { Try to get line information }
+      if FDebugInfoReader.FindLineByAddress(RetAddr, LineInfo) then
+      begin
+        FrameStr := Format('#%d %s at %s:%d (0x%016X)',
+          [FrameCount, FuncInfo.Name, ExtractFileName(LineInfo.FileName),
+           LineInfo.LineNumber, RetAddr]);
+      end
+      else
+      begin
+        FrameStr := Format('#%d %s (0x%016X)', [FrameCount, FuncInfo.Name, RetAddr]);
+      end;
+    end
+    else
+    begin
+      FrameStr := Format('#%d <unknown> (0x%016X)', [FrameCount, RetAddr]);
+    end;
+
+    SetLength(Result, FrameCount + 1);
+    Result[FrameCount] := FrameStr;
+    Inc(FrameCount);
+
+    { Read the next frame pointer and return address }
+    { On x86_64: [RBP] = old RBP, [RBP+8] = return address }
+    if not FProcessController.ReadMemory(FramePtr, 16, FrameBuffer) then
+      Break;
+
+    { Next frame's base pointer }
+    FramePtr := FrameBuffer[0];
+    { Return address for next frame }
+    RetAddr := FrameBuffer[1];
+  end;
+  {$ENDIF}
+
+  {$IFDEF CPUI386}
+  { Start with current EBP }
+  FramePtr := Regs.EBP;
+  RetAddr := Regs.EIP;
+
+  { Walk the stack frames (same logic as x86_64, but with 32-bit values) }
+  while (FramePtr <> 0) and ((Limit = 0) or (FrameCount < Limit)) do
+  begin
+    { Find function by return address }
+    if FDebugInfoReader.FindFunctionByAddress(RetAddr, FuncInfo) then
+    begin
+      { Try to get line information }
+      if FDebugInfoReader.FindLineByAddress(RetAddr, LineInfo) then
+      begin
+        FrameStr := Format('#%d %s at %s:%d (0x%08X)',
+          [FrameCount, FuncInfo.Name, ExtractFileName(LineInfo.FileName),
+           LineInfo.LineNumber, RetAddr]);
+      end
+      else
+      begin
+        FrameStr := Format('#%d %s (0x%08X)', [FrameCount, FuncInfo.Name, RetAddr]);
+      end;
+    end
+    else
+    begin
+      FrameStr := Format('#%d <unknown> (0x%08X)', [FrameCount, RetAddr]);
+    end;
+
+    SetLength(Result, FrameCount + 1);
+    Result[FrameCount] := FrameStr;
+    Inc(FrameCount);
+
+    { Read the next frame pointer and return address (32-bit) }
+    { On i386: [EBP] = old EBP, [EBP+4] = return address }
+    if not FProcessController.ReadMemory(FramePtr, 8, FrameBuffer) then
+      Break;
+
+    { Next frame's base pointer }
+    FramePtr := Cardinal(FrameBuffer[0]);
+    { Return address for next frame }
+    RetAddr := Cardinal(FrameBuffer[1]);
+  end;
+  {$ENDIF}
 end;
 
 { State query }

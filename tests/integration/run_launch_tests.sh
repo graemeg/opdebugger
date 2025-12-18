@@ -38,11 +38,15 @@ fi
 # Filter non-deterministic output
 filter_output() {
     # Remove the debugger prompt (pdr) from each line, then filter
-    # Only match debugger output from print commands and step messages
+    # Only match debugger output from print commands, callstack, and step messages
     # Matches: Myglobalint = 42, Myboolean = True, Instance = ..., etc.
     # Matches: [INFO] Stepped to line: ..., stepped to line: ...
+    # Matches: [CALLSTACK], #0 ..., #1 ..., etc.
     # But NOT program output like: MyGlobalInt = 42, MyBoolean = TRUE, Test Program, etc.
-    sed 's/^(pdr) //' | grep -E "^(([A-Z][a-z]+ = )|(\[INFO\] )?[Ss]tepped to line:)" | sed 's/^\[INFO\] //' || true
+    sed 's/^(pdr) //' | \
+    sed -E 's/ \(0x[0-9A-Fa-f ]+\)//' | \
+    grep -E "^(([A-Z][a-z]+ = )|(\[INFO\] )?[Ss]tepped to line:|\\[CALLSTACK\\]|#[0-9]+ )" | \
+    sed 's/^\[INFO\] //' || true
 }
 
 run_test() {

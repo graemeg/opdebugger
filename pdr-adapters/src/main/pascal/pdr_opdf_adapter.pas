@@ -81,6 +81,7 @@ type
                               out Address: QWord): Boolean;
     function FindLineByAddress(Address: QWord; out LineInfo: TLineInfo): Boolean;
     function GetFileLineEntries(const FileName: String): TLineInfoArray;
+    function FindFunctionByAddress(Address: QWord; out FuncInfo: TFunctionInfo): Boolean;
   end;
 
 implementation
@@ -802,6 +803,35 @@ begin
   SetLength(Result, LocalList.Count);
   for I := 0 to LocalList.Count - 1 do
     Result[I] := PLocalVariableInfo(LocalList[I])^;
+end;
+
+{ Find function by address }
+function TOPDFReaderAdapter.FindFunctionByAddress(Address: QWord; out FuncInfo: TFunctionInfo): Boolean;
+var
+  I: Integer;
+  FuncScope: PFunctionScope;
+begin
+  Result := False;
+  FuncInfo.Name := '';
+  FuncInfo.LowPC := 0;
+  FuncInfo.HighPC := 0;
+
+  if not FLoaded then
+    Exit;
+
+  { Find function scope containing the address }
+  for I := 0 to FFunctionScopes.Count - 1 do
+  begin
+    FuncScope := PFunctionScope(FFunctionScopes[I]);
+    if (Address >= FuncScope^.LowPC) and (Address < FuncScope^.HighPC) then
+    begin
+      FuncInfo.Name := FuncScope^.Name;
+      FuncInfo.LowPC := FuncScope^.LowPC;
+      FuncInfo.HighPC := FuncScope^.HighPC;
+      Result := True;
+      Exit;
+    end;
+  end;
 end;
 
 end.

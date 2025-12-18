@@ -59,6 +59,8 @@ begin
   WriteLn('  run            - Start program (automatically done on launch)');
   WriteLn('  args <args>    - Set command-line arguments for program');
   WriteLn('  print <var>    - Print variable value');
+  WriteLn('  callstack [n]  - Show call stack (limit to n frames, 0 for all)');
+  WriteLn('  cs [n]         - Alias for callstack');
   WriteLn('  attach <pid>   - Attach to running process');
   WriteLn('  detach         - Detach from process');
   WriteLn('  continue, c    - Continue execution');
@@ -83,6 +85,9 @@ var
   PID: Integer;
   BpHandle: TBreakpointHandle;
   BpNum: Integer;
+  Limit: Integer;
+  CallStack: TStringArray;
+  I: Integer;
 begin
   if Trim(CmdLine) = '' then
     Exit;
@@ -200,6 +205,37 @@ begin
 
         FEngine.RemoveBreakpoint(BpNum);
         // Engine already prints success/error messages
+      end;
+
+    'callstack', 'cs':
+      begin
+        { Initialize limit to 0 (no limit) }
+        Limit := 0;
+
+        { Parse optional limit parameter }
+        if Length(Parts) > 1 then
+        begin
+          if not TryStrToInt(Parts[1], Limit) or (Limit < 0) then
+          begin
+            WriteLn('[ERROR] Invalid limit: ', Parts[1]);
+            WriteLn('[INFO] Usage: callstack [n] where n >= 0 (0 = no limit)');
+            Exit;
+          end;
+        end;
+
+        { Get call stack with optional limit }
+        CallStack := FEngine.GetCallStack(Limit);
+
+        if Length(CallStack) = 0 then
+        begin
+          WriteLn('[INFO] No call stack available');
+        end
+        else
+        begin
+          WriteLn('[CALLSTACK]');
+          for I := 0 to High(CallStack) do
+            WriteLn(CallStack[I]);
+        end;
       end;
 
   else
