@@ -14,7 +14,7 @@ unit opdf_demangle;
 interface
 
 uses
-  Classes, SysUtils;
+  SysUtils;
 
 type
   { Symbol demangler for FPC-style name mangling }
