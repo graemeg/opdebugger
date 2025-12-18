@@ -1,0 +1,4 @@
+break test_10_arguments.pas:28
+continue
+print ParamCount
+quit
