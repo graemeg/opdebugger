@@ -154,8 +154,8 @@ begin
       Exit;
     end;
 
-    // Special formatting for Boolean
-    if (TypeInfo.Size = 1) and (Pos('Bool', TypeInfo.Name) > 0) then
+    // Special formatting for Boolean (case-insensitive check)
+    if (TypeInfo.Size = 1) and (Pos('BOOL', UpperCase(TypeInfo.Name)) > 0) then
     begin
       if UValue <> 0 then
         Result.Value := 'True'

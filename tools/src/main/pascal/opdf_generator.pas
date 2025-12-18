@@ -545,6 +545,30 @@ begin
 
           if Pos('DW_TAG_typedef', Line) > 0 then
           begin
+            { Check the name of the typedef - if it's a string type, identify it }
+            Result.Name := FindDwarfAttributeInEntry(Output, I, 'name');
+            if Pos('ANSISTRING', UpperCase(Result.Name)) > 0 then
+            begin
+              Result.Kind := dtkAnsiString;
+              Result.Size := 8; { Pointer size }
+              WriteLn('[DEBUG] Detected AnsiString typedef: ', Result.Name);
+              Break;
+            end
+            else if Pos('STRING', UpperCase(Result.Name)) > 0 then
+            begin
+              Result.Kind := dtkUnicodeString;
+              Result.Size := 8; { Pointer size }
+              WriteLn('[DEBUG] Detected String/Unicode typedef: ', Result.Name);
+              Break;
+            end
+            else if Pos('WIDESTRING', UpperCase(Result.Name)) > 0 then
+            begin
+              Result.Kind := dtkWideString;
+              Result.Size := 8; { Pointer size }
+              WriteLn('[DEBUG] Detected WideString typedef: ', Result.Name);
+              Break;
+            end;
+
             CurrentOffset := FindDwarfAttributeInEntry(Output, I, 'type');
             WriteLn('[DEBUG] Typedef found, resolving to new offset: ', CurrentOffset);
             Break;

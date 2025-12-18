@@ -1,3 +1,5 @@
+break test_01_primitives.pas:23
+continue
 print MyGlobalInt
 print MyBoolean
 quit
