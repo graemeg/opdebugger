@@ -205,6 +205,7 @@ var
   DefAnsiString: TDefAnsiString;
   DefUnicodeString: TDefUnicodeString;
   DefGlobalVar: TDefGlobalVar;
+  DefArray: TDefArray;
   DefLineInfo: TDefLineInfo;
   DefFunctionScope: TDefFunctionScope;
   DefLocalVar: TDefLocalVar;
@@ -450,6 +451,26 @@ begin
             WriteLn('[DEBUG] Loaded function scope: ', FunctionName,
                     ' [$', IntToHex(DefFunctionScope.LowPC, 8), ' - $',
                     IntToHex(DefFunctionScope.HighPC, 8), ']');
+          end;
+        end;
+
+      recArray:
+        begin
+          if FReader.ReadArray(DefArray, TypeName) then
+          begin
+            New(PType);
+            PType^.TypeID := DefArray.TypeID;
+            PType^.Name := TypeName;
+            PType^.Size := 0;  // Arrays have variable size
+            PType^.IsSigned := False;
+            PType^.Category := tcArray;
+            PType^.MaxLength := 0;
+            PType^.ElementTypeID := DefArray.ElementTypeID;
+            PType^.IsDynamic := DefArray.IsDynamic <> 0;
+            PType^.Dimensions := DefArray.Dimensions;
+            SetLength(PType^.Bounds, 0);  // Array bounds to be filled if static
+
+            FTypes.Add(IntToStr(DefArray.TypeID), PType);
           end;
         end;
 

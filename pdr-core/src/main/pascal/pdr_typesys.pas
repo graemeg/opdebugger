@@ -73,6 +73,22 @@ type
     function CanHandle(const TypeInfo: TTypeInfo): Boolean;
   end;
 
+  { Static Array Type Evaluator }
+  TStaticArrayEvaluator = class(TInterfacedObject, ITypeEvaluator)
+  public
+    function Evaluate(const VarInfo: TVariableInfo; const TypeInfo: TTypeInfo;
+      ProcessController: IProcessController; TypeSystem: TTypeSystem): TVariableValue;
+    function CanHandle(const TypeInfo: TTypeInfo): Boolean;
+  end;
+
+  { Dynamic Array Type Evaluator }
+  TDynamicArrayEvaluator = class(TInterfacedObject, ITypeEvaluator)
+  public
+    function Evaluate(const VarInfo: TVariableInfo; const TypeInfo: TTypeInfo;
+      ProcessController: IProcessController; TypeSystem: TTypeSystem): TVariableValue;
+    function CanHandle(const TypeInfo: TTypeInfo): Boolean;
+  end;
+
   { Type System - manages type evaluators }
   TTypeSystem = class
   private
@@ -460,6 +476,178 @@ begin
 
   Result.Value := TypeInfo.Name + '(@$' + IntToHex(InstancePtr, 16) +
                   ') { ' + FieldOutput + ' }';
+  Result.IsValid := True;
+end;
+
+{ TStaticArrayEvaluator }
+
+function TStaticArrayEvaluator.CanHandle(const TypeInfo: TTypeInfo): Boolean;
+begin
+  Result := (TypeInfo.Category = tcArray) and not TypeInfo.IsDynamic;
+end;
+
+function TStaticArrayEvaluator.Evaluate(const VarInfo: TVariableInfo;
+  const TypeInfo: TTypeInfo; ProcessController: IProcessController;
+  TypeSystem: TTypeSystem): TVariableValue;
+var
+  I, ElementCount, MaxElements: Integer;
+  ElementSize: Cardinal;
+  ElementTypeInfo: TTypeInfo;
+  ElementVarInfo: TVariableInfo;
+  ElementValue: TVariableValue;
+  ElementOutput: String;
+  BoundsStr: String;
+begin
+  Result.Name := TFPCDemangler.Demangle(VarInfo.Name);
+  Result.TypeName := TypeInfo.Name;
+  Result.Address := VarInfo.Address;
+  Result.IsValid := False;
+
+  { Get element type information }
+  if not TypeSystem.FDebugInfoReader.FindType(TypeInfo.ElementTypeID, ElementTypeInfo) then
+  begin
+    Result.Value := '<error: element type not found>';
+    Exit;
+  end;
+
+  { Calculate number of elements from bounds }
+  if (Length(TypeInfo.Bounds) = 0) or (TypeInfo.Dimensions = 0) then
+  begin
+    Result.Value := '<error: no array bounds>';
+    Exit;
+  end;
+
+  ElementCount := Integer(TypeInfo.Bounds[0].UpperBound - TypeInfo.Bounds[0].LowerBound + 1);
+  if ElementCount < 0 then ElementCount := 0;
+
+  { Limit to first 10 elements for display }
+  MaxElements := 10;
+  if ElementCount > MaxElements then
+    MaxElements := ElementCount;
+
+  { Build bounds string }
+  BoundsStr := '[' + IntToStr(TypeInfo.Bounds[0].LowerBound) + '..' +
+               IntToStr(TypeInfo.Bounds[0].UpperBound) + ']';
+
+  ElementSize := ElementTypeInfo.Size;
+  if ElementSize = 0 then ElementSize := 1;
+
+  { Read and format elements }
+  ElementOutput := '';
+  for I := 0 to MaxElements - 1 do
+  begin
+    ElementVarInfo.Name := 'Element' + IntToStr(I);
+    ElementVarInfo.TypeID := TypeInfo.ElementTypeID;
+    ElementVarInfo.Address := VarInfo.Address + (I * ElementSize);
+    ElementVarInfo.LocationExpr := 0;
+    ElementVarInfo.LocationData := 0;
+
+    if I > 0 then ElementOutput := ElementOutput + ', ';
+
+    ElementValue := TypeSystem.EvaluateVariableInfo(ElementVarInfo);
+    ElementOutput := ElementOutput + ElementValue.Value;
+  end;
+
+  if ElementCount > MaxElements then
+    ElementOutput := ElementOutput + ', ...';
+
+  Result.Value := 'array' + BoundsStr + ' of ' + ElementTypeInfo.Name +
+                  ' = [' + ElementOutput + ']';
+  Result.IsValid := True;
+end;
+
+{ TDynamicArrayEvaluator }
+
+function TDynamicArrayEvaluator.CanHandle(const TypeInfo: TTypeInfo): Boolean;
+begin
+  Result := (TypeInfo.Category = tcArray) and TypeInfo.IsDynamic;
+end;
+
+function TDynamicArrayEvaluator.Evaluate(const VarInfo: TVariableInfo;
+  const TypeInfo: TTypeInfo; ProcessController: IProcessController;
+  TypeSystem: TTypeSystem): TVariableValue;
+var
+  PointerBuf: array[0..7] of Byte;
+  LengthBuf: array[0..3] of Byte;
+  ArrayPtr: QWord;
+  ArrayLength: LongInt;
+  I, MaxElements: Integer;
+  ElementSize: Cardinal;
+  ElementTypeInfo: TTypeInfo;
+  ElementVarInfo: TVariableInfo;
+  ElementValue: TVariableValue;
+  ElementOutput: String;
+begin
+  Result.Name := TFPCDemangler.Demangle(VarInfo.Name);
+  Result.TypeName := TypeInfo.Name;
+  Result.Address := VarInfo.Address;
+  Result.IsValid := False;
+
+  { Read pointer to array data }
+  FillChar(PointerBuf, SizeOf(PointerBuf), 0);
+  if not ProcessController.ReadMemory(VarInfo.Address, 8, PointerBuf) then
+  begin
+    Result.Value := '<error: failed to read array pointer>';
+    Exit;
+  end;
+
+  ArrayPtr := PQWord(@PointerBuf)^;
+
+  { Nil array }
+  if ArrayPtr = 0 then
+  begin
+    Result.Value := 'nil';
+    Result.IsValid := True;
+    Exit;
+  end;
+
+  { Read array length (stored at ArrayPtr - 4) }
+  FillChar(LengthBuf, SizeOf(LengthBuf), 0);
+  if not ProcessController.ReadMemory(ArrayPtr - 4, 4, LengthBuf) then
+  begin
+    Result.Value := '<error: failed to read array length>';
+    Exit;
+  end;
+
+  ArrayLength := PLongInt(@LengthBuf)^;
+  if ArrayLength < 0 then ArrayLength := 0;
+
+  { Get element type information }
+  if not TypeSystem.FDebugInfoReader.FindType(TypeInfo.ElementTypeID, ElementTypeInfo) then
+  begin
+    Result.Value := '<error: element type not found>';
+    Exit;
+  end;
+
+  ElementSize := ElementTypeInfo.Size;
+  if ElementSize = 0 then ElementSize := 1;
+
+  { Limit to first 10 elements for display }
+  MaxElements := 10;
+  if ArrayLength < MaxElements then
+    MaxElements := ArrayLength;
+
+  { Read and format elements }
+  ElementOutput := '';
+  for I := 0 to MaxElements - 1 do
+  begin
+    ElementVarInfo.Name := 'Element' + IntToStr(I);
+    ElementVarInfo.TypeID := TypeInfo.ElementTypeID;
+    ElementVarInfo.Address := ArrayPtr + (I * ElementSize);
+    ElementVarInfo.LocationExpr := 0;
+    ElementVarInfo.LocationData := 0;
+
+    if I > 0 then ElementOutput := ElementOutput + ', ';
+
+    ElementValue := TypeSystem.EvaluateVariableInfo(ElementVarInfo);
+    ElementOutput := ElementOutput + ElementValue.Value;
+  end;
+
+  if ArrayLength > MaxElements then
+    ElementOutput := ElementOutput + ', ...';
+
+  Result.Value := 'array of ' + ElementTypeInfo.Name + ' (Length=' +
+                  IntToStr(ArrayLength) + ') = [' + ElementOutput + ']';
   Result.IsValid := True;
 end;
 

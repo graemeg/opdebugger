@@ -1,0 +1,6 @@
+break test_08_static_arrays.pas:38
+continue
+print IntArray
+print CharArray
+print StringArray
+quit

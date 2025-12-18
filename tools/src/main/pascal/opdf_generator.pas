@@ -19,7 +19,7 @@ uses
   Classes, SysUtils, Process, Math, ogopdf, opdf_io;
 
 type
-  TDwarfTypeKind = (dtkUnknown, dtkPrimitive, dtkShortString, dtkAnsiString, dtkUnicodeString, dtkWideString, dtkClass);
+  TDwarfTypeKind = (dtkUnknown, dtkPrimitive, dtkShortString, dtkAnsiString, dtkUnicodeString, dtkWideString, dtkClass, dtkArray);
 
   TDwarfFieldInfo = record
     Name: String;
@@ -38,6 +38,11 @@ type
     ParentTypeOffset: String; // DWARF offset of parent class type, if any
     Fields: TDwarfFieldArray; // Fields for classes
     DwarfOffset: String;      // DWARF offset of THIS type definition (e.g., "<0xf9>")
+    // Array-specific fields:
+    ElementTypeOffset: String; // DWARF offset of array element type
+    IsDynamicArray: Boolean;   // True for dynamic arrays (pointer-based)
+    Dimensions: Byte;          // Number of dimensions (usually 1)
+    Bounds: TArrayBounds;      // Array dimension bounds
   end;
 
   TSymbolInfo = record
@@ -437,6 +442,7 @@ var
   NewField: TDwarfFieldInfo;
   CurrentOffset: String;
   FoundEntry: Boolean;
+  FollowedPointer: Boolean;
 begin
   // Initialize
   Result.Name := '';
@@ -446,7 +452,12 @@ begin
   Result.MaxLength := 0;
   Result.ParentTypeOffset := '';
   Result.DwarfOffset := '';
+  Result.ElementTypeOffset := '';
+  Result.IsDynamicArray := False;
+  Result.Dimensions := 0;
+  SetLength(Result.Bounds, 0);
   SetLength(Result.Fields, 0);
+  FollowedPointer := False;
 
   if not RunCommand('objdump', ['--dwarf=info', BinaryPath], OutputStr) then Exit;
 
@@ -602,6 +613,7 @@ begin
           if Pos('DW_TAG_pointer_type', Line) > 0 then
           begin
             CurrentOffset := FindDwarfAttributeInEntry(Output, I, 'type');
+            FollowedPointer := True;
             WriteLn('[DEBUG] Pointer type found, resolving to new offset: ', CurrentOffset);
             Break;
           end;
@@ -634,7 +646,18 @@ begin
             end;
             Break;
           end;
-          
+
+          if Pos('DW_TAG_array_type', Line) > 0 then
+          begin
+            Result.Kind := dtkArray;
+            Result.Name := FindDwarfAttributeInEntry(Output, I, 'name');
+            Result.ElementTypeOffset := FindDwarfAttributeInEntry(Output, I, 'type');
+            Result.Dimensions := 1;  // Start with 1, can be extended for multi-dimensional
+            Result.IsDynamicArray := FollowedPointer;  // Dynamic if wrapped in pointer
+            WriteLn('[DEBUG] Detected Array: ElementType=', Result.ElementTypeOffset, ' Dynamic=', FollowedPointer);
+            Break;
+          end;
+
           Break;
         end;
       end;
@@ -1000,6 +1023,7 @@ var
   BoolTypeID: TTypeID;
   OpdfFields: array of TFieldDescriptor;
   FieldNames: array of String;
+  Bounds: TArrayBounds;
   OffsetMap: TOffsetToTypeIDArray;
   Subprograms: TDwarfSubprogramArray;
   LocationType: Byte;
@@ -1133,6 +1157,32 @@ begin
             Symbols[I].TypeInfo.Size,
             OpdfFields,
             FieldNames
+          );
+          Writer.WriteGlobalVar(Symbols[I].Name, TypeIDCounter, Symbols[I].Address);
+          Inc(TypeIDCounter);
+        end;
+        dtkArray:
+        begin
+          { Resolve element type ID from DWARF offset }
+          SetLength(Bounds, 1);
+          if Length(Symbols[I].TypeInfo.Bounds) > 0 then
+          begin
+            Bounds[0].LowerBound := Symbols[I].TypeInfo.Bounds[0].LowerBound;
+            Bounds[0].UpperBound := Symbols[I].TypeInfo.Bounds[0].UpperBound;
+          end
+          else
+          begin
+            Bounds[0].LowerBound := 0;
+            Bounds[0].UpperBound := 0;
+          end;
+
+          Writer.WriteArray(
+            TypeIDCounter,
+            ResolveOffsetToTypeID(OffsetMap, Symbols[I].TypeInfo.ElementTypeOffset),
+            Symbols[I].TypeInfo.Name,
+            Symbols[I].TypeInfo.Dimensions,
+            Symbols[I].TypeInfo.IsDynamicArray,
+            Bounds
           );
           Writer.WriteGlobalVar(Symbols[I].Name, TypeIDCounter, Symbols[I].Address);
           Inc(TypeIDCounter);

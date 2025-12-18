@@ -17,6 +17,13 @@ uses
   Classes, SysUtils, ogopdf;
 
 type
+  { Array dimension bounds - Int64 for future-proofing }
+  TArrayBound = record
+    LowerBound: Int64;
+    UpperBound: Int64;
+  end;
+
+  TArrayBounds = array of TArrayBound;
   { OPDF Writer - Generates OPDF binary output }
   TOPDFWriter = class
   private
@@ -67,6 +74,11 @@ type
     procedure WriteLineInfo(Address: QWord; const FileName: String;
                            LineNumber: Cardinal; ColumnNumber: Word = 0);
 
+    { Write array type definition }
+    procedure WriteArray(TypeID: TTypeID; ElementTypeID: TTypeID;
+                        const Name: String; Dimensions: Byte;
+                        IsDynamic: Boolean; const Bounds: TArrayBounds);
+
     { Write function scope information }
     procedure WriteFunctionScope(ScopeID: Cardinal; LowPC, HighPC: QWord;
                                 const FunctionName: String);
@@ -103,6 +115,7 @@ type
     function ReadAnsiString(out Def: TDefAnsiString; out Name: String): Boolean;
     function ReadUnicodeString(out Def: TDefUnicodeString; out Name: String): Boolean;
     function ReadPointer(out Def: TDefPointer; out Name: String): Boolean;
+    function ReadArray(out Def: TDefArray; out Name: String): Boolean;
     function ReadLineInfo(out Def: TDefLineInfo; out FileName: String): Boolean;
     function ReadFunctionScope(out Def: TDefFunctionScope; out FunctionName: String): Boolean;
     function ReadClass(out Def: TDefClass; out Name: String; out Fields: TFieldDescriptorArray; out FieldNames: TStringArray): Boolean;
@@ -273,6 +286,48 @@ begin
   FStream.Write(RecHeader, SizeOf(RecHeader));
   FStream.Write(Payload, SizeOf(Payload));
   WriteString(Name);
+
+  Inc(FRecordCount);
+end;
+
+procedure TOPDFWriter.WriteArray(TypeID: TTypeID; ElementTypeID: TTypeID;
+                                const Name: String; Dimensions: Byte;
+                                IsDynamic: Boolean; const Bounds: TArrayBounds);
+var
+  RecHeader: TOPDFRecordHeader;
+  Payload: TDefArray;
+  I: Integer;
+begin
+  if not FHeaderWritten then
+    WriteHeader;
+
+  Payload.TypeID := TypeID;
+  Payload.ElementTypeID := ElementTypeID;
+  Payload.Dimensions := Dimensions;
+  Payload.NameLen := Length(Name);
+
+  if IsDynamic then
+    Payload.IsDynamic := 1
+  else
+    Payload.IsDynamic := 0;
+
+  RecHeader.RecType := Ord(recArray);
+  RecHeader.RecSize := SizeOf(TDefArray) + Length(Name);
+
+  { Add bounds information for static arrays }
+  if not IsDynamic and (Length(Bounds) > 0) then
+    RecHeader.RecSize := RecHeader.RecSize + (Length(Bounds) * SizeOf(TArrayBound));
+
+  FStream.Write(RecHeader, SizeOf(RecHeader));
+  FStream.Write(Payload, SizeOf(Payload));
+  WriteString(Name);
+
+  { Write bounds for static arrays }
+  if not IsDynamic and (Length(Bounds) > 0) then
+  begin
+    for I := 0 to High(Bounds) do
+      FStream.Write(Bounds[I], SizeOf(TArrayBound));
+  end;
 
   Inc(FRecordCount);
 end;
@@ -632,6 +687,25 @@ begin
   Result := False;
 
   if FStream.Position + SizeOf(TDefPointer) > FStream.Size then
+    Exit;
+
+  FStream.Read(Def, SizeOf(Def));
+
+  if FStream.Position + Def.NameLen > FStream.Size then
+    Exit;
+
+  SetLength(Name, Def.NameLen);
+  if Def.NameLen > 0 then
+    FStream.Read(Name[1], Def.NameLen);
+
+  Result := True;
+end;
+
+function TOPDFReader.ReadArray(out Def: TDefArray; out Name: String): Boolean;
+begin
+  Result := False;
+
+  if FStream.Position + SizeOf(TDefArray) > FStream.Size then
     Exit;
 
   FStream.Read(Def, SizeOf(Def));

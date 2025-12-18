@@ -75,6 +75,14 @@ type
   PDebuggerClass = ^TDebuggerClass;
 
   { Type information }
+  { Array dimension bounds }
+  TArrayBound = record
+    LowerBound: Int64;
+    UpperBound: Int64;
+  end;
+
+  TArrayBounds = array of TArrayBound;
+
   TTypeInfo = record
     TypeID: TTypeID;
     Name: String;
@@ -87,6 +95,11 @@ type
     PointerTo: TTypeID; // For pointers: the type ID of the pointed-to type
     // Class-specific
     ClassInfo: PDebuggerClass; // For classes: pointer to detailed class info
+    // Array-specific
+    ElementTypeID: TTypeID;  // Type of array elements
+    IsDynamic: Boolean;      // True for dynamic arrays (pointer-based)
+    Dimensions: Byte;        // Number of dimensions (1-4)
+    Bounds: TArrayBounds;    // Array bounds for each dimension
   end;
 
   { Variable information }
