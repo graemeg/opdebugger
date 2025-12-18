@@ -206,6 +206,7 @@ var
   DefUnicodeString: TDefUnicodeString;
   DefGlobalVar: TDefGlobalVar;
   DefLineInfo: TDefLineInfo;
+  DefFunctionScope: TDefFunctionScope;
   DefLocalVar: TDefLocalVar;
   DefClass: TDefClass;
   ClassFields: TFieldDescriptorArray;
@@ -213,6 +214,7 @@ var
   TypeName: String;
   VarName: String;
   FileName: String;
+  FunctionName: String;
   LocationData: ShortInt;
   PType: PTypeInfo;
   PVar: PVariableInfo;
@@ -356,6 +358,8 @@ begin
             PVar^.Name := VarName;
             PVar^.TypeID := DefGlobalVar.TypeID;
             PVar^.Address := DefGlobalVar.Address;
+            PVar^.LocationExpr := 0;      // Global variables don't have location expressions
+            PVar^.LocationData := 0;
 
             // Store with mangled name for lookup (since OPDF has mangled names)
             FVariables.Add(VarName, PVar);
@@ -431,6 +435,24 @@ begin
           end;
         end;
 
+      recFunctionScope:
+        begin
+          if FReader.ReadFunctionScope(DefFunctionScope, FunctionName) then
+          begin
+            { Add function scope to cache }
+            New(PScope);
+            PScope^.ScopeID := DefFunctionScope.ScopeID;
+            PScope^.LowPC := DefFunctionScope.LowPC;
+            PScope^.HighPC := DefFunctionScope.HighPC;
+            PScope^.Name := FunctionName;
+
+            FFunctionScopes.Add(PScope);
+            WriteLn('[DEBUG] Loaded function scope: ', FunctionName,
+                    ' [$', IntToHex(DefFunctionScope.LowPC, 8), ' - $',
+                    IntToHex(DefFunctionScope.HighPC, 8), ']');
+          end;
+        end;
+
       else
         // Skip unknown record types
         FReader.SkipRecord(RecHeader);
@@ -438,7 +460,8 @@ begin
   end;
 
   WriteLn('[INFO] Loaded ', FTypes.Count, ' type(s), ', FVariables.Count,
-          ' variable(s), and ', FLineInfo.Count, ' line mapping(s)');
+          ' variable(s), ', FFunctionScopes.Count, ' function scope(s), and ',
+          FLineInfo.Count, ' line mapping(s)');
 
   FLoaded := True;
   Result := True;
@@ -524,9 +547,12 @@ begin
         { Found local variable - convert to VarInfo }
         VarInfo.Name := LocalVar.Name;
         VarInfo.TypeID := LocalVar.TypeID;
-        { Local variables have stack-based addressing }
         VarInfo.Address := 0; { Will be computed from RBP + LocationData }
+        VarInfo.LocationExpr := LocalVar.LocationExpr;
+        VarInfo.LocationData := LocalVar.LocationData;
         Result := True;
+        WriteLn('[DEBUG] Found local var: ', LocalVar.Name, ' LocationExpr=', LocalVar.LocationExpr,
+                ' LocationData=', LocalVar.LocationData);
         Exit;
       end;
     end;

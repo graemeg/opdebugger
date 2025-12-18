@@ -1,4 +1,4 @@
-break test_06_local_variables.pas:16
+break test_06_local_variables.pas:13
 continue
 print A
 print B

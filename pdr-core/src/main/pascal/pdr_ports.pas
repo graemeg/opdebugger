@@ -94,6 +94,8 @@ type
     Name: String;
     TypeID: TTypeID;
     Address: QWord;
+    LocationExpr: Byte;      // For stack-based: 0=global, 1=RBP-relative
+    LocationData: SmallInt;  // For stack-based: RBP offset
   end;
 
   { Variable value (evaluated) }

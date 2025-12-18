@@ -62,7 +62,8 @@ type
     recMethod        = 11, // Class method/function
     recLocalVar      = 12, // Local variable
     recParameter     = 13, // Function parameter
-    recLineInfo      = 14  // Source line to address mapping
+    recLineInfo      = 14, // Source line to address mapping
+    recFunctionScope = 15  // Function scope (for local variable resolution)
   );
 
   { Generic Record Header - 5 bytes }
@@ -228,6 +229,15 @@ type
     // Followed by FileName (FileNameLen bytes)
   end;
 
+  { Function Scope Definition }
+  TDefFunctionScope = packed record
+    ScopeID: Cardinal;        // 4 bytes (function's low_pc)
+    LowPC: QWord;             // 8 bytes (function start address)
+    HighPC: QWord;            // 8 bytes (function end address)
+    NameLen: TNameLen;        // 2 bytes (length of function name)
+    // Followed by Name (NameLen bytes)
+  end;
+
 { Helper functions }
 
 { Get architecture name as string }
@@ -271,6 +281,7 @@ begin
     recLocalVar:   Result := 'LocalVar';
     recParameter:  Result := 'Parameter';
     recLineInfo:   Result := 'LineInfo';
+    recFunctionScope: Result := 'FunctionScope';
     else           Result := 'Unknown';
   end;
 end;

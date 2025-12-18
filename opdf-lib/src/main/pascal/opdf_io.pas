@@ -67,6 +67,10 @@ type
     procedure WriteLineInfo(Address: QWord; const FileName: String;
                            LineNumber: Cardinal; ColumnNumber: Word = 0);
 
+    { Write function scope information }
+    procedure WriteFunctionScope(ScopeID: Cardinal; LowPC, HighPC: QWord;
+                                const FunctionName: String);
+
     { Finalize - update header with final record count }
     procedure Finalize;
 
@@ -100,6 +104,7 @@ type
     function ReadUnicodeString(out Def: TDefUnicodeString; out Name: String): Boolean;
     function ReadPointer(out Def: TDefPointer; out Name: String): Boolean;
     function ReadLineInfo(out Def: TDefLineInfo; out FileName: String): Boolean;
+    function ReadFunctionScope(out Def: TDefFunctionScope; out FunctionName: String): Boolean;
     function ReadClass(out Def: TDefClass; out Name: String; out Fields: TFieldDescriptorArray; out FieldNames: TStringArray): Boolean;
     function ReadProperty(out Def: TDefProperty; out Name: String): Boolean;
 
@@ -419,6 +424,30 @@ begin
   Inc(FRecordCount);
 end;
 
+procedure TOPDFWriter.WriteFunctionScope(ScopeID: Cardinal; LowPC, HighPC: QWord;
+                                        const FunctionName: String);
+var
+  RecHeader: TOPDFRecordHeader;
+  Payload: TDefFunctionScope;
+begin
+  if not FHeaderWritten then
+    WriteHeader;
+
+  Payload.ScopeID := ScopeID;
+  Payload.LowPC := LowPC;
+  Payload.HighPC := HighPC;
+  Payload.NameLen := Length(FunctionName);
+
+  RecHeader.RecType := Ord(recFunctionScope);
+  RecHeader.RecSize := SizeOf(TDefFunctionScope) + Length(FunctionName);
+
+  FStream.Write(RecHeader, SizeOf(RecHeader));
+  FStream.Write(Payload, SizeOf(Payload));
+  WriteString(FunctionName);
+
+  Inc(FRecordCount);
+end;
+
 procedure TOPDFWriter.Finalize;
 var
   Header: TOPDFHeader;
@@ -632,6 +661,25 @@ begin
   SetLength(FileName, Def.FileNameLen);
   if Def.FileNameLen > 0 then
     FStream.Read(FileName[1], Def.FileNameLen);
+
+  Result := True;
+end;
+
+function TOPDFReader.ReadFunctionScope(out Def: TDefFunctionScope; out FunctionName: String): Boolean;
+begin
+  Result := False;
+
+  if FStream.Position + SizeOf(TDefFunctionScope) > FStream.Size then
+    Exit;
+
+  FStream.Read(Def, SizeOf(Def));
+
+  if FStream.Position + Def.NameLen > FStream.Size then
+    Exit;
+
+  SetLength(FunctionName, Def.NameLen);
+  if Def.NameLen > 0 then
+    FStream.Read(FunctionName[1], Def.NameLen);
 
   Result := True;
 end;

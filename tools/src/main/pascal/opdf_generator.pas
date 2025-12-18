@@ -99,6 +99,7 @@ var
   CurrentIndex: Integer;
   EntryIndent: Integer;
   LineIndent: Integer;
+  SearchAttr: String;
 begin
   Result := '';
   CurrentIndex := StartLineIndex;
@@ -132,8 +133,12 @@ begin
     if (LineIndent <= EntryIndent) and (Trim(Line) <> '') then
       Break;
 
-    // Look for the attribute
-    if Pos('DW_AT_' + AttributeName, Line) > 0 then
+    // Look for the attribute - handle both with and without 'DW_AT_' prefix
+    SearchAttr := AttributeName;
+    if Pos('DW_AT_', SearchAttr) = 0 then
+      SearchAttr := 'DW_AT_' + SearchAttr;
+
+    if Pos(SearchAttr, Line) > 0 then
     begin
       if Pos(':', Line) > 0 then
       begin
@@ -818,7 +823,12 @@ begin
       HexStr := Trim(Copy(HexStr, 4, 2)); // Extract the offset bytes
 
       try
+        { Parse the hex byte and interpret as SLEB128 signed byte }
         LocationData := StrToInt('$' + HexStr);
+        { For single-byte SLEB128, sign bit is at position 6, not 7 }
+        { If bit 6 is set, the value is negative, so subtract 128 }
+        if LocationData >= 64 then
+          LocationData := LocationData - 128;
         Result := True;
       except
         Result := False;
@@ -830,103 +840,149 @@ end;
 { Extract function subprograms and their local variables from DWARF }
 function ExtractSubprograms(const BinaryPath: String; out Subprograms: TDwarfSubprogramArray): Boolean;
 var
-  Process: TProcess;
   Output: TStringList;
-  I, J: Integer;
-  CurrentSubprogram: TDwarfSubprogram;
-  Line: String;
-  SubprogramCount: Integer;
-  InSubprogram: Boolean;
-  LowPCStr, HighPCStr: String;
-  LocationExpr: String;
-  LocationType: Byte;
-  LocationData: ShortInt;
+  OutputStr: String;
+  I, J, SubprogIdx: Integer;
+  Line, NameStr, LowPCStr, HighPCStr, LocationStr: String;
+  SubprogramStack: array of TDwarfSubprogram;
+  CurrentIndent, LineIndent: Integer;
+  LocalVar: TDwarfLocalVariable;
+  VarCount: Integer;
 begin
   Result := False;
   SetLength(Subprograms, 0);
+  SetLength(SubprogramStack, 0);
 
-  Process := TProcess.Create(nil);
   Output := TStringList.Create;
   try
     { Extract DWARF debug info for subprograms }
-    Process.Executable := 'objdump';
-    Process.Parameters.Add('-W');
-    Process.Parameters.Add('--dwarf=info');
-    Process.Parameters.Add(BinaryPath);
-    Process.Options := Process.Options + [poUsePipes, poStderrToOutPut];
-
-    try
-      Process.Execute;
-      Output.LoadFromStream(Process.Output);
-    except
+    if not RunCommand('objdump', ['-W', '--dwarf=info', BinaryPath], OutputStr) then
+    begin
+      WriteLn('[WARN] objdump failed, skipping local variable extraction');
+      Result := True; { Not fatal - continues without locals }
       Exit;
     end;
 
-    SubprogramCount := 0;
-    InSubprogram := False;
+    Output.Text := OutputStr;
+    WriteLn('[INFO] Extracting DW_TAG_subprogram entries from DWARF...');
 
-    for I := 0 to Output.Count - 1 do
+    I := 0;
+    while I < Output.Count do
     begin
       Line := Output[I];
+      LineIndent := GetLineIndent(Line);
 
       { Look for DW_TAG_subprogram entries }
       if Pos('DW_TAG_subprogram', Line) > 0 then
       begin
-        if InSubprogram and (SubprogramCount > 0) then
-          Inc(SubprogramCount); // Save previous subprogram
-
-        FillChar(CurrentSubprogram, SizeOf(CurrentSubprogram), 0);
-        InSubprogram := True;
+        SubprogIdx := Length(SubprogramStack);
+        SetLength(SubprogramStack, SubprogIdx + 1);
+        FillChar(SubprogramStack[SubprogIdx], SizeOf(TDwarfSubprogram), 0);
 
         { Extract subprogram name }
-        LowPCStr := FindDwarfAttributeInEntry(Output, I, 'DW_AT_name');
-        if LowPCStr <> '' then
-          CurrentSubprogram.Name := LowPCStr;
+        NameStr := FindDwarfAttributeInEntry(Output, I, 'DW_AT_name');
+        if NameStr <> '' then
+          SubprogramStack[SubprogIdx].Name := NameStr;
 
         { Extract low_pc (start address) }
         LowPCStr := FindDwarfAttributeInEntry(Output, I, 'DW_AT_low_pc');
         if LowPCStr <> '' then
         begin
           try
-            CurrentSubprogram.LowPC := StrToQWord(LowPCStr);
+            SubprogramStack[SubprogIdx].LowPC := StrToQWord(LowPCStr);
           except
-            // Skip this subprogram if we can't parse the address
-            InSubprogram := False;
+            WriteLn('[DEBUG] Could not parse low_pc for: ', NameStr);
+            SetLength(SubprogramStack, SubprogIdx); { Remove this subprogram }
+            I := I + 1;
+            Continue;
           end;
         end;
 
-        { Extract high_pc (end address) }
+        { Extract high_pc (end address or size) }
         HighPCStr := FindDwarfAttributeInEntry(Output, I, 'DW_AT_high_pc');
         if HighPCStr <> '' then
         begin
           try
-            CurrentSubprogram.HighPC := StrToQWord(HighPCStr);
+            SubprogramStack[SubprogIdx].HighPC := StrToQWord(HighPCStr);
+            { If high_pc looks like a size rather than address, add to low_pc }
+            if SubprogramStack[SubprogIdx].HighPC < $1000 then
+              SubprogramStack[SubprogIdx].HighPC := SubprogramStack[SubprogIdx].LowPC +
+                                                     SubprogramStack[SubprogIdx].HighPC;
           except
+            WriteLn('[DEBUG] Could not parse high_pc for: ', NameStr);
           end;
         end;
 
-        Inc(SubprogramCount);
-      end;
+        WriteLn('[DEBUG] Found subprogram: ', SubprogramStack[SubprogIdx].Name,
+                ' at $', IntToHex(SubprogramStack[SubprogIdx].LowPC, 16));
 
-      { Extract local variables and parameters within the subprogram }
-      if InSubprogram and ((Pos('DW_TAG_formal_parameter', Line) > 0) or (Pos('DW_TAG_variable', Line) > 0)) then
-      begin
-        { In a real implementation, we would extract variable name, type, and location here }
-        { For MVP, we're just collecting the infrastructure }
-      end;
+        CurrentIndent := LineIndent;
+        VarCount := 0;
+        J := I + 1;
 
-      { End of subprogram entry }
-      if InSubprogram and (Pos('DW_TAG_', Line) > 0) and (Pos('DW_TAG_subprogram', Line) = 0) then
-      begin
-        InSubprogram := False;
-      end;
+        { Extract local variables and parameters from this subprogram }
+        while J < Output.Count do
+        begin
+          Line := Output[J];
+
+          { Stop if we hit the end of children marker (Abbrev Number: 0) }
+          if Pos('Abbrev Number: 0', Line) > 0 then
+            Break;
+
+          { Also stop if we hit a sibling entry (starts with <1> or <0>) while we're in <2> territory }
+          if ((Pos('<1>', Line) > 0) or (Pos('<0>', Line) > 0)) and (Pos('DW_TAG_', Line) > 0) then
+            Break;
+
+          { Extract DW_TAG_formal_parameter and DW_TAG_variable }
+          if (Pos('DW_TAG_formal_parameter', Line) > 0) or (Pos('DW_TAG_variable', Line) > 0) then
+          begin
+            FillChar(LocalVar, SizeOf(LocalVar), 0);
+            LocalVar.IsParameter := (Pos('DW_TAG_formal_parameter', Line) > 0);
+
+            { Extract variable name }
+            LocalVar.Name := FindDwarfAttributeInEntry(Output, J, 'DW_AT_name');
+
+            { Extract type reference (DW_AT_type is DWARF offset to type) }
+            LocalVar.TypeOffset := FindDwarfAttributeInEntry(Output, J, 'DW_AT_type');
+
+            { Extract location expression }
+            LocalVar.LocationExpr := FindDwarfAttributeInEntry(Output, J, 'DW_AT_location');
+
+            if LocalVar.Name <> '' then
+            begin
+              SetLength(SubprogramStack[SubprogIdx].Locals, VarCount + 1);
+              SubprogramStack[SubprogIdx].Locals[VarCount] := LocalVar;
+
+              if LocalVar.IsParameter then
+                WriteLn('[DEBUG]   Parameter: ', LocalVar.Name, ' Type=', LocalVar.TypeOffset,
+                        ' Loc=', LocalVar.LocationExpr)
+              else
+                WriteLn('[DEBUG]   Local: ', LocalVar.Name, ' Type=', LocalVar.TypeOffset,
+                        ' Loc=', LocalVar.LocationExpr);
+
+              Inc(VarCount);
+            end;
+          end;
+
+          Inc(J);
+        end;
+
+        I := J;
+      end
+      else
+        Inc(I);
     end;
 
+    { Copy subprogram stack to output }
+    SetLength(Subprograms, Length(SubprogramStack));
+    for I := 0 to High(SubprogramStack) do
+      Subprograms[I] := SubprogramStack[I];
+
+    WriteLn('[INFO] Extracted ', Length(Subprograms), ' subprogram(s) with local variables');
     Result := True;
 
   finally
     Output.Free;
-    Process.Free;
   end;
 end;
 
@@ -938,13 +994,16 @@ var
   Writer: TOPDFWriter;
   Arch: TTargetArch;
   PointerSize: Byte;
-  I, J: Integer;
+  I, J, K: Integer;
   TypeIDCounter: TTypeID;
   LongIntTypeID: TTypeID;
   BoolTypeID: TTypeID;
   OpdfFields: array of TFieldDescriptor;
   FieldNames: array of String;
   OffsetMap: TOffsetToTypeIDArray;
+  Subprograms: TDwarfSubprogramArray;
+  LocationType: Byte;
+  LocationData: ShortInt;
 begin
   Result := False;
   SetLength(OffsetMap, 0);
@@ -1086,6 +1145,56 @@ begin
             Writer.WriteGlobalVar(Symbols[I].Name, LongIntTypeID, Symbols[I].Address);
         end;
       end;
+    end;
+
+    { Extract and write local variables from subprograms }
+    SetLength(Subprograms, 0);
+    if ExtractSubprograms(BinaryPath, Subprograms) then
+    begin
+      { First, write function scope records }
+      for I := 0 to High(Subprograms) do
+      begin
+        Writer.WriteFunctionScope(
+          Cardinal(Subprograms[I].LowPC),
+          Subprograms[I].LowPC,
+          Subprograms[I].HighPC,
+          Subprograms[I].Name
+        );
+        WriteLn('[DEBUG] Wrote function scope: ', Subprograms[I].Name,
+                ' [$', IntToHex(Cardinal(Subprograms[I].LowPC), 8), ' - $',
+                IntToHex(Cardinal(Subprograms[I].HighPC), 8), ']');
+      end;
+
+      { Then, write local variables for each subprogram }
+      for I := 0 to High(Subprograms) do
+      begin
+        { Write each local variable in the subprogram }
+        for J := 0 to High(Subprograms[I].Locals) do
+        begin
+          { Parse location expression to get type and offset }
+          if ParseLocationExpression(Subprograms[I].Locals[J].LocationExpr, LocationType, LocationData) then
+          begin
+            { Resolve type ID from DWARF offset }
+            K := ResolveOffsetToTypeID(OffsetMap, Subprograms[I].Locals[J].TypeOffset);
+            if K = 0 then
+              K := LongIntTypeID; { Default to LongInt if type not found }
+
+            { Write local variable with function's low_pc as ScopeID }
+            Writer.WriteLocalVar(
+              Subprograms[I].Locals[J].Name,
+              K,
+              Cardinal(Subprograms[I].LowPC),
+              LocationType,
+              LocationData
+            );
+
+            WriteLn('[DEBUG] Wrote local var: ', Subprograms[I].Locals[J].Name,
+                    ' in scope $', IntToHex(Cardinal(Subprograms[I].LowPC), 8));
+          end;
+        end;
+      end;
+
+      WriteLn('[INFO] Wrote ', Length(Subprograms), ' function scope(s) with local variables');
     end;
 
     for I := 0 to High(LineEntries) do

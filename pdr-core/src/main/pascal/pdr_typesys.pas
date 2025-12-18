@@ -520,6 +520,8 @@ var
   TypeInfo: TTypeInfo;
   I: Integer;
   Evaluator: ITypeEvaluator;
+  ComputedVarInfo: TVariableInfo;
+  RBP: QWord;
 begin
   Result.Name := VarInfo.Name;
   Result.IsValid := False;
@@ -533,7 +535,22 @@ begin
   end;
 
   Result.TypeName := TypeInfo.Name;
-  Result.Address := VarInfo.Address;
+
+  { Compute actual address for stack-based variables }
+  ComputedVarInfo := VarInfo;
+  if (VarInfo.LocationExpr = 1) then { RBP-relative }
+  begin
+    RBP := FProcessController.GetFrameBasePointer;
+    if RBP <> 0 then
+    begin
+      ComputedVarInfo.Address := RBP + VarInfo.LocationData;
+      WriteLn('[DEBUG] Computed address for ', VarInfo.Name, ': RBP=$',
+              IntToHex(RBP, 16), ' + ', VarInfo.LocationData, ' = $',
+              IntToHex(ComputedVarInfo.Address, 16));
+    end;
+  end;
+
+  Result.Address := ComputedVarInfo.Address;
 
   // Find appropriate evaluator
   for I := 0 to FEvaluators.Count - 1 do
@@ -541,7 +558,7 @@ begin
     Evaluator := FEvaluators[I] as ITypeEvaluator;
     if Evaluator.CanHandle(TypeInfo) then
     begin
-      Result := Evaluator.Evaluate(VarInfo, TypeInfo, FProcessController, Self);
+      Result := Evaluator.Evaluate(ComputedVarInfo, TypeInfo, FProcessController, Self);
       Exit;
     end;
   end;

@@ -1,0 +1,7 @@
+break test_07_variable_shadowing.pas:13
+continue
+print Counter
+break test_07_variable_shadowing.pas:21
+continue
+print Counter
+quit
