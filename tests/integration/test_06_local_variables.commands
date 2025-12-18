@@ -1,0 +1,7 @@
+break test_06_local_variables.pas:16
+continue
+print A
+print B
+print Sum
+print Product
+quit

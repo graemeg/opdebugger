@@ -53,6 +53,7 @@ type
     function SetBreakpoint(Address: QWord): Boolean;
     function RemoveBreakpoint(Address: QWord): Boolean;
     function GetCurrentAddress: QWord;
+    function GetFrameBasePointer: QWord;
 
     { Get the address of the last breakpoint that was hit (before handling) }
     function GetLastBreakpointAddress: QWord;
@@ -957,6 +958,29 @@ begin
   {$ENDIF}
   {$IFDEF CPUI386}
   Result := Regs.EIP;
+  {$ENDIF}
+end;
+
+function TLinuxPtraceAdapter.GetFrameBasePointer: QWord;
+var
+  Regs: TRegisters;
+begin
+  Result := 0;
+
+  if not FAttached then
+  begin
+    WriteLn('[ERROR] Not attached to any process');
+    Exit;
+  end;
+
+  if not GetRegisters(Regs) then
+    Exit;
+
+  {$IFDEF CPUX86_64}
+  Result := Regs.RBP;
+  {$ENDIF}
+  {$IFDEF CPUI386}
+  Result := Regs.EBP;
   {$ENDIF}
 end;
 

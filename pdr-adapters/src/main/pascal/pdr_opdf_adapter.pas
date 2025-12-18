@@ -354,6 +354,12 @@ begin
           end;
         end;
 
+      recLocalVar:
+        begin
+          { Local variables are skipped for now (MVP - will implement scope management in Phase 4B) }
+          FReader.SkipRecord(RecHeader);
+        end;
+
       else
         // Skip unknown record types
         FReader.SkipRecord(RecHeader);

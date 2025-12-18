@@ -48,6 +48,9 @@ type
     { Write symbol definitions }
     procedure WriteGlobalVar(const VarName: String; TypeID: TTypeID;
                            Address: QWord);
+    procedure WriteLocalVar(const VarName: String; TypeID: TTypeID;
+                          ScopeID: Cardinal; LocationExpr: Byte;
+                          LocationData: ShortInt);
 
     { Write class definition }
     procedure WriteClass(TypeID: TTypeID; ParentTypeID: TTypeID;
@@ -91,6 +94,7 @@ type
     { Read specific record types }
     function ReadPrimitive(out Def: TDefPrimitive; out Name: String): Boolean;
     function ReadGlobalVar(out Def: TDefGlobalVar; out Name: String): Boolean;
+    function ReadLocalVar(out Def: TDefLocalVar; out LocationData: ShortInt; out Name: String): Boolean;
     function ReadShortString(out Def: TDefShortString; out Name: String): Boolean;
     function ReadAnsiString(out Def: TDefAnsiString; out Name: String): Boolean;
     function ReadUnicodeString(out Def: TDefUnicodeString; out Name: String): Boolean;
@@ -291,6 +295,32 @@ begin
   Inc(FRecordCount);
 end;
 
+procedure TOPDFWriter.WriteLocalVar(const VarName: String; TypeID: TTypeID;
+                                  ScopeID: Cardinal; LocationExpr: Byte;
+                                  LocationData: ShortInt);
+var
+  RecHeader: TOPDFRecordHeader;
+  Payload: TDefLocalVar;
+begin
+  if not FHeaderWritten then
+    WriteHeader;
+
+  Payload.TypeID := TypeID;
+  Payload.ScopeID := ScopeID;
+  Payload.LocationExpr := LocationExpr;
+  Payload.NameLen := Length(VarName);
+
+  RecHeader.RecType := Ord(recLocalVar);
+  RecHeader.RecSize := SizeOf(TDefLocalVar) + SizeOf(ShortInt) + Length(VarName);
+
+  FStream.Write(RecHeader, SizeOf(RecHeader));
+  FStream.Write(Payload, SizeOf(Payload));
+  FStream.Write(LocationData, SizeOf(ShortInt));
+  WriteString(VarName);
+
+  Inc(FRecordCount);
+end;
+
 procedure TOPDFWriter.WriteClass(TypeID: TTypeID; ParentTypeID: TTypeID;
                                 const Name: String; VMTAddr: QWord;
                                 InstSize: Cardinal; const Fields: array of TFieldDescriptor;
@@ -476,6 +506,30 @@ begin
     Exit;
 
   FStream.Read(Def, SizeOf(Def));
+
+  if FStream.Position + Def.NameLen > FStream.Size then
+    Exit;
+
+  SetLength(Name, Def.NameLen);
+  if Def.NameLen > 0 then
+    FStream.Read(Name[1], Def.NameLen);
+
+  Result := True;
+end;
+
+function TOPDFReader.ReadLocalVar(out Def: TDefLocalVar; out LocationData: ShortInt; out Name: String): Boolean;
+begin
+  Result := False;
+
+  if FStream.Position + SizeOf(TDefLocalVar) > FStream.Size then
+    Exit;
+
+  FStream.Read(Def, SizeOf(Def));
+
+  if FStream.Position + SizeOf(ShortInt) > FStream.Size then
+    Exit;
+
+  FStream.Read(LocationData, SizeOf(ShortInt));
 
   if FStream.Position + Def.NameLen > FStream.Size then
     Exit;

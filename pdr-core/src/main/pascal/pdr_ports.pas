@@ -170,6 +170,9 @@ type
     { Get current instruction pointer }
     function GetCurrentAddress: QWord;
 
+    { Get frame base pointer (RBP) for stack frame access }
+    function GetFrameBasePointer: QWord;
+
     { Get address of last breakpoint hit (before handling) }
     function GetLastBreakpointAddress: QWord;
   end;

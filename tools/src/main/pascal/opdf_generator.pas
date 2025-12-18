@@ -767,6 +767,47 @@ begin
   end;
 end;
 
+{ Parse location expression from DWARF format "2 byte block: 76 XX"
+  Returns LocationType (1 for RBP-relative) and LocationData (signed offset) }
+function ParseLocationExpression(const DwarfLocStr: String;
+                                out LocationType: Byte;
+                                out LocationData: ShortInt): Boolean;
+var
+  Lines: TStringList;
+  HexStr: String;
+  I: Integer;
+begin
+  Result := False;
+  LocationType := 0;
+  LocationData := 0;
+
+  // Look for "N byte block:" pattern
+  if Pos('byte block:', DwarfLocStr) = 0 then
+    Exit;
+
+  // Extract the hex bytes after "byte block:"
+  I := Pos('byte block:', DwarfLocStr);
+  if I > 0 then
+  begin
+    HexStr := Trim(Copy(DwarfLocStr, I + 11, MaxInt));
+
+    // For RBP-relative addressing (DW_OP_breg6), format is "76 XX"
+    // where 76 is the opcode and XX is the signed offset
+    if (Length(HexStr) >= 5) and (Copy(HexStr, 1, 2) = '76') then
+    begin
+      LocationType := 1; // RBP-relative
+      HexStr := Trim(Copy(HexStr, 4, 2)); // Extract the offset bytes
+
+      try
+        LocationData := StrToInt('$' + HexStr);
+        Result := True;
+      except
+        Result := False;
+      end;
+    end;
+  end;
+end;
+
 { Generate OPDF file }
 function GenerateOPDF(const BinaryPath, OPDFPath: String; const Symbols: TSymbolArray;
                      const LineEntries: TLineEntryArray): Boolean;
