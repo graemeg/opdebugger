@@ -14,7 +14,7 @@ unit pdr_opdf_adapter;
 interface
 
 uses
-  Classes, SysUtils, Contnrs, ogopdf, opdf_io, opdf_demangle, pdr_ports;
+  Classes, SysUtils, Contnrs, ogopdf, opdf_io, opdf_demangle, elf_reader, pdr_ports;
 
 type
   { Pointer types for caching }
@@ -48,7 +48,7 @@ type
     FBinaryPath: String;
     FOPDFPath: String;
     FReader: TOPDFReader;
-    FStream: TFileStream;
+    FStream: TStream;
     FHeader: TOPDFHeader;
 
     { Internal dictionaries for fast lookup }
@@ -225,6 +225,7 @@ var
   PScope: PFunctionScope;
   LocalList: TFPList;
   I: Integer;
+  ELFStream: TMemoryStream;
 begin
   Result := False;
 
@@ -233,25 +234,40 @@ begin
 
   FBinaryPath := BinaryPath;
 
-  // Find OPDF file
-  FOPDFPath := FindOPDFFile(BinaryPath);
-  if FOPDFPath = '' then
+  // Try to extract .opdf section from ELF binary first
+  if TELFSectionReader.IsELFBinary(BinaryPath) then
   begin
-    WriteLn('[ERROR] OPDF file not found for binary: ', BinaryPath);
-    Exit;
+    ELFStream := TELFSectionReader.ExtractSection(BinaryPath, '.opdf');
+    if Assigned(ELFStream) then
+    begin
+      WriteLn('[INFO] Loading embedded OPDF section from: ', BinaryPath);
+      FStream := ELFStream; { FStream owns the TMemoryStream }
+      FOPDFPath := BinaryPath;
+      FReader := TOPDFReader.Create(FStream);
+    end;
   end;
 
-  WriteLn('[INFO] Loading OPDF file: ', FOPDFPath);
-
-  // Open OPDF file
-  try
-    FStream := TFileStream.Create(FOPDFPath, fmOpenRead or fmShareDenyWrite);
-    FReader := TOPDFReader.Create(FStream);
-  except
-    on E: Exception do
+  // Fall back to external .opdf file
+  if not Assigned(FStream) then
+  begin
+    FOPDFPath := FindOPDFFile(BinaryPath);
+    if FOPDFPath = '' then
     begin
-      WriteLn('[ERROR] Failed to open OPDF file: ', E.Message);
+      WriteLn('[ERROR] OPDF data not found for binary: ', BinaryPath);
       Exit;
+    end;
+
+    WriteLn('[INFO] Loading OPDF file: ', FOPDFPath);
+
+    try
+      FStream := TFileStream.Create(FOPDFPath, fmOpenRead or fmShareDenyWrite);
+      FReader := TOPDFReader.Create(FStream);
+    except
+      on E: Exception do
+      begin
+        WriteLn('[ERROR] Failed to open OPDF file: ', E.Message);
+        Exit;
+      end;
     end;
   end;
 
