@@ -1,0 +1,266 @@
+= OPDF Project Progress Tracker
+:toc: left
+:toclevels: 3
+:date: 2026-02-16
+
+== Overview
+
+This document tracks the implementation progress of the Object Pascal Debug Format (OPDF) project, covering both the standalone debugger toolchain and the FPC compiler integration.
+
+**Repository**: `/data/devel/opdebugger` (standalone debugger + opdf-lib) +
+**FPC Branch**: `feature/opdf-support` in `/data/devel/fpc-3.3.1/src`
+
+== Standalone Debugger Toolchain
+
+=== Phase 0: Foundation
+
+* [x] Project structure (PasBuild multi-module)
+* [x] OPDF shared library (`opdf-lib/`: ogopdf.pas, opdf_io.pas)
+* [x] Hexagonal architecture ports and adapters (pdr_ports.pas)
+* [x] FPC symbol demangling (opdf_demangle.pas)
+* [x] OPDF generator tool (extracts debug info from DWARF binaries)
+
+=== Phase 1: Integer MVP
+
+* [x] Primitive type definitions (ordinals, booleans)
+* [x] Global variable support
+* [x] Breakpoint management (INT3 injection/restoration)
+* [x] `file:line` breakpoint syntax
+* [x] Debugger engine with state machine (pdr_engine.pas)
+* [x] Linux ptrace adapter (pdr_linux_ptrace.pas)
+* [x] CLI debugger interface (pdr_main.pas)
+* [x] Integration test infrastructure (run_tests.sh, run_launch_tests.sh)
+
+=== Phase 1.5: Source Line Mapping
+
+* [x] DWARF line table parsing in opdf_generator
+* [x] Line info records in OPDF format
+* [x] `break file.pas:line` resolution in debugger
+* [x] `run` command for direct program launching
+
+=== Phase 2: String Types
+
+* [x] ShortString evaluator (length byte + char data)
+* [x] AnsiString evaluator (heap-allocated with refcount header)
+* [x] UnicodeString evaluator (UTF-16 to UTF-8 conversion)
+* [x] WideString evaluator
+
+=== Phase 3: Classes and Properties
+
+* [x] Class type definitions in OPDF
+* [x] TClassEvaluator with recursive field evaluation
+* [x] Property support
+* [x] Inheritance and nil-pointer handling
+
+=== Phase 4A: Local Variables
+
+* [x] Function scope records in OPDF
+* [x] Stack-based variable lookup (RBP-relative addressing)
+* [x] Variable shadowing and scope management
+
+=== Phase 4B: Array Types
+
+* [x] Static array bounds and element access
+* [x] Dynamic array length and element access
+
+=== Phase 4C: Command-Line Arguments and Call Stack
+
+* [x] Command-line argument passing to debugged programs
+* [x] Call stack introspection (`backtrace`/`callstack` command)
+* [x] Frame traversal
+
+=== Phase 5: Platform Expansion (not started)
+
+* [ ] Windows support (debug API adapter)
+* [ ] macOS support (Mach ports adapter)
+* [ ] FreeBSD support
+
+== FPC Compiler Integration
+
+Integration of OPDF generation directly into the Free Pascal Compiler, eliminating the need for the standalone opdf_generator tool.
+
+=== Phase 1A: Build System Integration
+
+* [x] Copy opdf-lib sources into FPC compiler directory
+* [x] Verify opdf-lib units compile within FPC build context
+
+=== Phase 1B: Debug Format Registration
+
+* [x] Add `dbg_opdf` to `tdbg` enumeration (systems.inc)
+* [x] Add `-gO` flag parsing in options.pas (`Interpret_G_l`)
+* [ ] Add `-gO` to compiler help output (`-h`)
+
+=== Phase 1C: Type Mapper
+
+* [x] Create tpdf_type_mapper.pas with TTypeMapper class
+* [x] Type ID allocation using global sequence approach
+* [x] Fix Word underflow bug in GetTypeID (changed to Longint/Cardinal)
+
+=== Phase 1D: OPDF Writer Skeleton
+
+* [x] Create dbgopdf.pas with TOPDFDebugWriter class
+* [x] Extend TDebugInfo base class
+* [x] Register via `dbg_opdf_info` constant
+* [x] Add to x86_64/cputarg.pas and i386/cputarg.pas
+
+=== Phase 1E: Working Type and Symbol Emission
+
+* [x] Initialize defnumberlist/deftowritelist (required by base class)
+* [x] Create output .opdf file stream in inserttypeinfo
+* [x] appenddef_ord: Write primitive types with name, size, signedness
+* [x] appendsym_staticvar: Write global variables with type IDs
+* [x] insertmoduleinfo: Finalize OPDF output
+* [x] Verified: `ppcx64 -gO` produces valid .opdf with types and variables
+* [ ] Verify .opdf works end-to-end with PDR debugger
+
+=== Phase 1F: Line Information (BLOCKED - architectural decision needed)
+
+* [ ] Implement insertlineinfo
+* [ ] Source file and line number mapping
+* [ ] Address resolution
+
+**Status**: Blocked. The current external-file approach cannot resolve code addresses because `insertlineinfo` is called before assembly/linking. The DWARF/Stabs writers solve this by emitting into asm lists that go through the assembler/linker relocation process.
+
+**Decision required**: Pivot to embedding OPDF data inside the binary (as an ELF section) instead of an external file. This would allow using the same label-based address resolution that DWARF and Stabs use. See <<Embedding Decision>> below.
+
+=== Phase 2+: Remaining Type Handlers (not started)
+
+These stub implementations in dbgopdf.pas need fleshing out:
+
+* [ ] appenddef_float - Float type records
+* [ ] appenddef_enum - Enumeration type records
+* [ ] appenddef_string - String type records (Short, Ansi, Unicode, Wide)
+* [ ] appenddef_pointer - Pointer type records
+* [ ] appenddef_array - Array type records
+* [ ] appenddef_record - Record type records
+* [ ] appenddef_object - Class/object type records
+* [ ] appendsym_localvar - Local variable records
+* [ ] appendsym_paravar - Parameter variable records
+* [ ] appendsym_fieldvar - Field variable records
+* [ ] appendsym_property - Property records
+
+== Current Work Item
+
+**Embedding OPDF in binary (ELF section)** — Pivoting from external .opdf file to embedded section.
+
+[[Embedding Decision]]
+=== Embedding Decision: External File vs ELF Section
+
+==== Problem
+
+The FPC `TDebugInfo` infrastructure is designed around emitting debug data into asm lists that flow through the assembler and linker. All existing debug formats (DWARF, Stabs, CodeView) work this way. The external .opdf file approach fights this architecture and makes line information impossible without a post-link fixup step.
+
+==== Decision
+
+Pivot to embedding OPDF data inside the binary as a custom ELF section (`.opdf`). This aligns with FPC's debug writer infrastructure and enables:
+
+* Label-based address resolution through the assembler/linker
+* Line information support (critical for a working debugger)
+* Single-file distribution (no separate .opdf file to manage)
+* The OPDF specification already planned for embedded storage
+
+==== Implementation Tasks
+
+* [ ] Define OPDF ELF section name and structure
+* [ ] Register a new asm list for OPDF data emission
+* [ ] Rewrite TOPDFDebugWriter to emit tai_const values into asm list
+* [ ] Implement insertlineinfo with label insertion and line records
+* [ ] Update PDR debugger to read OPDF section from ELF binary
+* [ ] Update OPDF specification to document embedded storage format
+* [ ] Update test infrastructure to work with embedded OPDF
+
+== Architecture Summary
+
+=== Standalone Debugger (~6,873 lines)
+
+----
+opdf-lib/      → 1,302 lines (core format, I/O, demangling)
+pdr-core/      → 1,903 lines (engine, type system, ports)
+pdr-adapters/  → 2,008 lines (Linux ptrace, OPDF reader, arch adapters)
+pdr-cli/       →   367 lines (command-line interface)
+tools/         → 1,293 lines (OPDF generator from DWARF)
+----
+
+=== FPC Integration (~900 lines across 6 files)
+
+----
+dbgopdf.pas          → OPDF debug writer (TOPDFDebugWriter)
+tpdf_type_mapper.pas → Type ID allocation
+ogopdf.pas           → OPDF format definitions (from opdf-lib)
+opdf_io.pas          → OPDF binary reader/writer (from opdf-lib)
+opdf_demangle.pas    → FPC symbol demangling (from opdf-lib)
+systems.inc          → dbg_opdf enum entry
+options.pas          → -gO flag handling
+x86_64/cputarg.pas   → dbgopdf registration
+i386/cputarg.pas     → dbgopdf registration
+----
+
+=== Test Programs (13 integration tests)
+
+----
+test_01_primitives.pas      → Integer and Boolean variables
+test_01_loop.pas            → Loop and breakpoint testing
+test_02_breakpoint_next.pas → Break and next commands
+test_03_strings.pas         → All string types
+test_04_classes.pas         → Class instances and fields
+test_05_properties.pas      → Properties with getters/setters
+test_06_local_variables.pas → Stack-based locals
+test_07_variable_shadowing.pas → Scope resolution
+test_08_static_arrays.pas   → Static array bounds
+test_09_dynamic_arrays.pas  → Dynamic array length/elements
+test_10_arguments.pas       → Function arguments
+test_11_callstack.pas       → Stack traces
+test_bool_only.pas          → Boolean type testing
+----
+
+== Quick Reference
+
+=== Build Commands
+
+[source,bash]
+----
+# Build all modules (standalone debugger)
+cd /data/devel/opdebugger
+pasbuild compile
+
+# Build FPC compiler with OPDF support
+cd /data/devel/fpc-3.3.1/src
+make -C compiler cycle
+----
+
+=== Testing
+
+[source,bash]
+----
+# Compile test with FPC OPDF support (use ppcx64 directly, not fpc driver)
+/data/devel/fpc-3.3.1/src/compiler/ppcx64 -gO test_01_primitives.pas
+
+# Compile test with DWARF + opdf_generator (current working approach)
+cd tests/integration
+fpc -g test_01_primitives.pas
+../../tools/target/opdf_generator test_01_primitives
+
+# Run debugger
+../../pdr-cli/target/pdr test_01_primitives
+
+# Run automated test suite
+bash run_launch_tests.sh
+bash run_launch_tests.sh test_01_primitives  # single test
+----
+
+=== Debugger Commands
+
+[source]
+----
+run                          Start program (pauses at entry)
+break file.pas:22            Set breakpoint by file:line
+break 0x401000               Set breakpoint by hex address
+break MyVar                  Set breakpoint by variable name
+continue / c                 Resume execution
+next / n                     Step to next source line
+step / s                     Single instruction step
+print <var>                  Print variable value
+callstack / cs               Show call stack
+delete <num>                 Remove breakpoint
+quit                         Exit debugger
+----
