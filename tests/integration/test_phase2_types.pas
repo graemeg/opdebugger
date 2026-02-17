@@ -75,7 +75,7 @@ begin
 end;
 
 { Test procedure with locals and params }
-procedure TestLocalsAndParams(AValue: Integer; const AName: AnsiString; var AResult: Integer);
+procedure TestLocalsAndParams(AValue: Integer; const AName: AnsiString; var AResult: Integer; out AOut: string);
 var
   LocalInt: Integer;
   LocalStr: ShortString;
@@ -88,7 +88,8 @@ begin
   { Use the variables to prevent optimization }
   if Length(LocalStr) > 0 then
     AResult := AResult + Round(LocalFloat);
-  WriteLn('TestLocalsAndParams: AValue=', AValue, ' AName=', AName, ' Result=', AResult);
+  AOut := 'Graeme';
+  WriteLn('TestLocalsAndParams: AValue=', AValue, ' AName=', AName, ' Result=', AResult, ' AOut=', AOut);
 end;
 
 var
@@ -124,7 +125,7 @@ var
 
   { For procedure test }
   ResultVal: Integer;
-
+  ResultOut: string;
 begin
   { Float types }
   MySingle := 1.5;
@@ -168,7 +169,7 @@ begin
 
   { Procedure with locals and params }
   ResultVal := 0;
-  TestLocalsAndParams(7, 'test', ResultVal);
+  TestLocalsAndParams(7, 'test', ResultVal, ResultOut);
 
   WriteLn('Phase 2 type test complete');  { breakpoint line }
   WriteLn('Single=', MySingle:0:2, ' Double=', MyDouble:0:6);
@@ -179,7 +180,8 @@ begin
   WriteLn('DynArr[1]=', MyDynArr[1]);
   WriteLn('Point=(', MyPoint.X, ',', MyPoint.Y, ')');
   WriteLn('Shape.Name=', MyShape.Name);
-  WriteLn('Result=', ResultVal);
+  WriteLn('Result var=', ResultVal);
+  WriteLn('Result out=', ResultOut);
 
   { Cleanup }
   MyShape.Free;
