@@ -63,7 +63,9 @@ type
     recLocalVar      = 12, // Local variable
     recParameter     = 13, // Function parameter
     recLineInfo      = 14, // Source line to address mapping
-    recFunctionScope = 15  // Function scope (for local variable resolution)
+    recFunctionScope = 15, // Function scope (for local variable resolution)
+    recInterface     = 16, // Interface definition (COM/CORBA)
+    recEnum          = 17  // Enumeration type with member names
   );
 
   { Generic Record Header - 5 bytes }
@@ -238,6 +240,53 @@ type
     // Followed by Name (NameLen bytes)
   end;
 
+  { Enum Type Definition }
+  TDefEnum = packed record
+    TypeID: TTypeID;          // 4 bytes
+    SizeInBytes: Byte;        // 1 byte (storage size: 1, 2, or 4)
+    MemberCount: Cardinal;    // 4 bytes
+    NameLen: TNameLen;        // 2 bytes
+    // Followed by Name (NameLen bytes)
+    // Followed by MemberCount × TEnumMember
+  end;
+
+  { Enum Member - value + name }
+  TEnumMember = packed record
+    Value: Int64;             // 8 bytes (supports full range)
+    NameLen: TNameLen;        // 2 bytes
+    // Followed by Name (NameLen bytes)
+  end;
+
+  { Interface Type }
+  TInterfaceType = (
+    itfCOM      = 0,
+    itfCORBA    = 1,
+    itfDispatch = 2
+  );
+
+  { Interface Type Definition }
+  TDefInterface = packed record
+    TypeID: TTypeID;          // 4 bytes
+    ParentTypeID: TTypeID;    // 4 bytes (parent interface, 0 if root)
+    IntfType: Byte;           // 1 byte (TInterfaceType)
+    GUID: TGUID;              // 16 bytes (zeroed for CORBA)
+    MethodCount: Cardinal;    // 4 bytes
+    NameLen: TNameLen;        // 2 bytes
+    // Followed by Name (NameLen bytes)
+    // Followed by MethodCount × TInterfaceMethodDescriptor
+  end;
+
+  { Interface Method Descriptor }
+  TInterfaceMethodDescriptor = packed record
+    ReturnTypeID: TTypeID;    // 4 bytes (0 for procedure)
+    ParamCount: Byte;         // 1 byte
+    NameLen: TNameLen;        // 2 bytes
+    // Followed by Name (NameLen bytes)
+  end;
+
+  TEnumMemberArray = array of TEnumMember;
+  TInterfaceMethodDescriptorArray = array of TInterfaceMethodDescriptor;
+
 { Helper functions }
 
 { Get architecture name as string }
@@ -282,6 +331,8 @@ begin
     recParameter:  Result := 'Parameter';
     recLineInfo:   Result := 'LineInfo';
     recFunctionScope: Result := 'FunctionScope';
+    recInterface:  Result := 'Interface';
+    recEnum:       Result := 'Enum';
     else           Result := 'Unknown';
   end;
 end;

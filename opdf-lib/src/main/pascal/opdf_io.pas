@@ -83,6 +83,28 @@ type
     procedure WriteFunctionScope(ScopeID: Cardinal; LowPC, HighPC: QWord;
                                 const FunctionName: String);
 
+    { Write record type definition }
+    procedure WriteRecord(TypeID: TTypeID; const Name: String;
+                         TotalSize: Cardinal;
+                         const Fields: array of TFieldDescriptor;
+                         const FieldNames: array of String);
+
+    { Write enum type definition }
+    procedure WriteEnum(TypeID: TTypeID; const Name: String;
+                       SizeInBytes: Byte;
+                       const Members: array of TEnumMember;
+                       const MemberNames: array of String);
+
+    { Write interface type definition }
+    procedure WriteInterface(TypeID: TTypeID; ParentTypeID: TTypeID;
+                            const Name: String; IntfType: TInterfaceType;
+                            const GUID: TGUID; const Methods: array of TInterfaceMethodDescriptor;
+                            const MethodNames: array of String);
+
+    { Write parameter definition }
+    procedure WriteParameter(const ParamName: String; TypeID: TTypeID;
+                            IsVar, IsConst: Boolean);
+
     { Finalize - update header with final record count }
     procedure Finalize;
 
@@ -120,6 +142,14 @@ type
     function ReadFunctionScope(out Def: TDefFunctionScope; out FunctionName: String): Boolean;
     function ReadClass(out Def: TDefClass; out Name: String; out Fields: TFieldDescriptorArray; out FieldNames: TStringArray): Boolean;
     function ReadProperty(out Def: TDefProperty; out Name: String): Boolean;
+    function ReadRecord(out Def: TDefRecord; out Name: String;
+                       out Fields: TFieldDescriptorArray; out FieldNames: TStringArray): Boolean;
+    function ReadEnum(out Def: TDefEnum; out Name: String;
+                     out Members: TEnumMemberArray; out MemberNames: TStringArray): Boolean;
+    function ReadInterface(out Def: TDefInterface; out Name: String;
+                          out Methods: TInterfaceMethodDescriptorArray;
+                          out MethodNames: TStringArray): Boolean;
+    function ReadParameter(out Def: TDefParameter; out Name: String): Boolean;
 
     { Skip current record (for unsupported types) }
     procedure SkipRecord(const RecHeader: TOPDFRecordHeader);
@@ -503,6 +533,147 @@ begin
   Inc(FRecordCount);
 end;
 
+procedure TOPDFWriter.WriteRecord(TypeID: TTypeID; const Name: String;
+                                  TotalSize: Cardinal;
+                                  const Fields: array of TFieldDescriptor;
+                                  const FieldNames: array of String);
+var
+  RecHeader: TOPDFRecordHeader;
+  Payload: TDefRecord;
+  I: Integer;
+begin
+  if Length(Fields) <> Length(FieldNames) then
+    raise Exception.Create('WriteRecord: Fields and FieldNames array lengths must match');
+
+  if not FHeaderWritten then
+    WriteHeader;
+
+  Payload.TypeID := TypeID;
+  Payload.FieldCount := Length(Fields);
+  Payload.TotalSize := TotalSize;
+  Payload.NameLen := Length(Name);
+
+  RecHeader.RecType := Ord(recRecord);
+  RecHeader.RecSize := SizeOf(TDefRecord) + Length(Name);
+  for I := 0 to High(Fields) do
+    RecHeader.RecSize := RecHeader.RecSize + SizeOf(TFieldDescriptor) + Length(FieldNames[I]);
+
+  FStream.Write(RecHeader, SizeOf(RecHeader));
+  FStream.Write(Payload, SizeOf(Payload));
+  WriteString(Name);
+
+  for I := 0 to High(Fields) do
+  begin
+    FStream.Write(Fields[I], SizeOf(TFieldDescriptor));
+    WriteString(FieldNames[I]);
+  end;
+
+  Inc(FRecordCount);
+end;
+
+procedure TOPDFWriter.WriteEnum(TypeID: TTypeID; const Name: String;
+                                SizeInBytes: Byte;
+                                const Members: array of TEnumMember;
+                                const MemberNames: array of String);
+var
+  RecHeader: TOPDFRecordHeader;
+  Payload: TDefEnum;
+  I: Integer;
+begin
+  if Length(Members) <> Length(MemberNames) then
+    raise Exception.Create('WriteEnum: Members and MemberNames array lengths must match');
+
+  if not FHeaderWritten then
+    WriteHeader;
+
+  Payload.TypeID := TypeID;
+  Payload.SizeInBytes := SizeInBytes;
+  Payload.MemberCount := Length(Members);
+  Payload.NameLen := Length(Name);
+
+  RecHeader.RecType := Ord(recEnum);
+  RecHeader.RecSize := SizeOf(TDefEnum) + Length(Name);
+  for I := 0 to High(Members) do
+    RecHeader.RecSize := RecHeader.RecSize + SizeOf(TEnumMember) + Length(MemberNames[I]);
+
+  FStream.Write(RecHeader, SizeOf(RecHeader));
+  FStream.Write(Payload, SizeOf(Payload));
+  WriteString(Name);
+
+  for I := 0 to High(Members) do
+  begin
+    FStream.Write(Members[I], SizeOf(TEnumMember));
+    WriteString(MemberNames[I]);
+  end;
+
+  Inc(FRecordCount);
+end;
+
+procedure TOPDFWriter.WriteInterface(TypeID: TTypeID; ParentTypeID: TTypeID;
+                                    const Name: String; IntfType: TInterfaceType;
+                                    const GUID: TGUID;
+                                    const Methods: array of TInterfaceMethodDescriptor;
+                                    const MethodNames: array of String);
+var
+  RecHeader: TOPDFRecordHeader;
+  Payload: TDefInterface;
+  I: Integer;
+begin
+  if Length(Methods) <> Length(MethodNames) then
+    raise Exception.Create('WriteInterface: Methods and MethodNames array lengths must match');
+
+  if not FHeaderWritten then
+    WriteHeader;
+
+  Payload.TypeID := TypeID;
+  Payload.ParentTypeID := ParentTypeID;
+  Payload.IntfType := Ord(IntfType);
+  Payload.GUID := GUID;
+  Payload.MethodCount := Length(Methods);
+  Payload.NameLen := Length(Name);
+
+  RecHeader.RecType := Ord(recInterface);
+  RecHeader.RecSize := SizeOf(TDefInterface) + Length(Name);
+  for I := 0 to High(Methods) do
+    RecHeader.RecSize := RecHeader.RecSize + SizeOf(TInterfaceMethodDescriptor) + Length(MethodNames[I]);
+
+  FStream.Write(RecHeader, SizeOf(RecHeader));
+  FStream.Write(Payload, SizeOf(Payload));
+  WriteString(Name);
+
+  for I := 0 to High(Methods) do
+  begin
+    FStream.Write(Methods[I], SizeOf(TInterfaceMethodDescriptor));
+    WriteString(MethodNames[I]);
+  end;
+
+  Inc(FRecordCount);
+end;
+
+procedure TOPDFWriter.WriteParameter(const ParamName: String; TypeID: TTypeID;
+                                    IsVar, IsConst: Boolean);
+var
+  RecHeader: TOPDFRecordHeader;
+  Payload: TDefParameter;
+begin
+  if not FHeaderWritten then
+    WriteHeader;
+
+  Payload.TypeID := TypeID;
+  if IsVar then Payload.IsVar := 1 else Payload.IsVar := 0;
+  if IsConst then Payload.IsConst := 1 else Payload.IsConst := 0;
+  Payload.NameLen := Length(ParamName);
+
+  RecHeader.RecType := Ord(recParameter);
+  RecHeader.RecSize := SizeOf(TDefParameter) + Length(ParamName);
+
+  FStream.Write(RecHeader, SizeOf(RecHeader));
+  FStream.Write(Payload, SizeOf(Payload));
+  WriteString(ParamName);
+
+  Inc(FRecordCount);
+end;
+
 procedure TOPDFWriter.Finalize;
 var
   Header: TOPDFHeader;
@@ -809,6 +980,164 @@ begin
   Result := False;
 
   if FStream.Position + SizeOf(TDefProperty) > FStream.Size then
+    Exit;
+
+  FStream.Read(Def, SizeOf(Def));
+
+  if FStream.Position + Def.NameLen > FStream.Size then
+    Exit;
+
+  SetLength(Name, Def.NameLen);
+  if Def.NameLen > 0 then
+    FStream.Read(Name[1], Def.NameLen);
+
+  Result := True;
+end;
+
+function TOPDFReader.ReadRecord(out Def: TDefRecord; out Name: String;
+                               out Fields: TFieldDescriptorArray; out FieldNames: TStringArray): Boolean;
+var
+  I: Cardinal;
+  FieldDef: TFieldDescriptor;
+  FieldName: String;
+begin
+  Result := False;
+  SetLength(Fields, 0);
+  SetLength(FieldNames, 0);
+
+  if FStream.Position + SizeOf(TDefRecord) > FStream.Size then
+    Exit;
+
+  FStream.Read(Def, SizeOf(Def));
+
+  if FStream.Position + Def.NameLen > FStream.Size then
+    Exit;
+
+  SetLength(Name, Def.NameLen);
+  if Def.NameLen > 0 then
+    FStream.Read(Name[1], Def.NameLen);
+
+  SetLength(Fields, Def.FieldCount);
+  SetLength(FieldNames, Def.FieldCount);
+  for I := 0 to Def.FieldCount - 1 do
+  begin
+    if FStream.Position + SizeOf(TFieldDescriptor) > FStream.Size then
+      Exit;
+
+    FStream.Read(FieldDef, SizeOf(TFieldDescriptor));
+
+    if FStream.Position + FieldDef.NameLen > FStream.Size then
+      Exit;
+
+    SetLength(FieldName, FieldDef.NameLen);
+    if FieldDef.NameLen > 0 then
+      FStream.Read(FieldName[1], FieldDef.NameLen);
+
+    Fields[I] := FieldDef;
+    FieldNames[I] := FieldName;
+  end;
+
+  Result := True;
+end;
+
+function TOPDFReader.ReadEnum(out Def: TDefEnum; out Name: String;
+                             out Members: TEnumMemberArray; out MemberNames: TStringArray): Boolean;
+var
+  I: Cardinal;
+  Member: TEnumMember;
+  MemberName: String;
+begin
+  Result := False;
+  SetLength(Members, 0);
+  SetLength(MemberNames, 0);
+
+  if FStream.Position + SizeOf(TDefEnum) > FStream.Size then
+    Exit;
+
+  FStream.Read(Def, SizeOf(Def));
+
+  if FStream.Position + Def.NameLen > FStream.Size then
+    Exit;
+
+  SetLength(Name, Def.NameLen);
+  if Def.NameLen > 0 then
+    FStream.Read(Name[1], Def.NameLen);
+
+  SetLength(Members, Def.MemberCount);
+  SetLength(MemberNames, Def.MemberCount);
+  for I := 0 to Def.MemberCount - 1 do
+  begin
+    if FStream.Position + SizeOf(TEnumMember) > FStream.Size then
+      Exit;
+
+    FStream.Read(Member, SizeOf(TEnumMember));
+
+    if FStream.Position + Member.NameLen > FStream.Size then
+      Exit;
+
+    SetLength(MemberName, Member.NameLen);
+    if Member.NameLen > 0 then
+      FStream.Read(MemberName[1], Member.NameLen);
+
+    Members[I] := Member;
+    MemberNames[I] := MemberName;
+  end;
+
+  Result := True;
+end;
+
+function TOPDFReader.ReadInterface(out Def: TDefInterface; out Name: String;
+                                  out Methods: TInterfaceMethodDescriptorArray;
+                                  out MethodNames: TStringArray): Boolean;
+var
+  I: Cardinal;
+  MtdDef: TInterfaceMethodDescriptor;
+  MtdName: String;
+begin
+  Result := False;
+  SetLength(Methods, 0);
+  SetLength(MethodNames, 0);
+
+  if FStream.Position + SizeOf(TDefInterface) > FStream.Size then
+    Exit;
+
+  FStream.Read(Def, SizeOf(Def));
+
+  if FStream.Position + Def.NameLen > FStream.Size then
+    Exit;
+
+  SetLength(Name, Def.NameLen);
+  if Def.NameLen > 0 then
+    FStream.Read(Name[1], Def.NameLen);
+
+  SetLength(Methods, Def.MethodCount);
+  SetLength(MethodNames, Def.MethodCount);
+  for I := 0 to Def.MethodCount - 1 do
+  begin
+    if FStream.Position + SizeOf(TInterfaceMethodDescriptor) > FStream.Size then
+      Exit;
+
+    FStream.Read(MtdDef, SizeOf(TInterfaceMethodDescriptor));
+
+    if FStream.Position + MtdDef.NameLen > FStream.Size then
+      Exit;
+
+    SetLength(MtdName, MtdDef.NameLen);
+    if MtdDef.NameLen > 0 then
+      FStream.Read(MtdName[1], MtdDef.NameLen);
+
+    Methods[I] := MtdDef;
+    MethodNames[I] := MtdName;
+  end;
+
+  Result := True;
+end;
+
+function TOPDFReader.ReadParameter(out Def: TDefParameter; out Name: String): Boolean;
+begin
+  Result := False;
+
+  if FStream.Position + SizeOf(TDefParameter) > FStream.Size then
     Exit;
 
   FStream.Read(Def, SizeOf(Def));
