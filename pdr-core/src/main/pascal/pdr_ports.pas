@@ -49,6 +49,7 @@ type
   { Type category for specialized handling }
   TTypeCategory = (
     tcPrimitive,      // Integer, Boolean, Char
+    tcFloat,          // Single, Double, Extended, Currency, Comp
     tcShortString,    // ShortString
     tcAnsiString,     // AnsiString
     tcUnicodeString,  // UnicodeString

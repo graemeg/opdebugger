@@ -100,6 +100,7 @@ begin
   // Create type system and register evaluators
   FTypeSystem := TTypeSystem.Create(FProcessController, FDebugInfoReader);
   FTypeSystem.RegisterEvaluator(TPrimitiveEvaluator.Create);
+  FTypeSystem.RegisterEvaluator(TFloatEvaluator.Create);
   FTypeSystem.RegisterEvaluator(TShortStringEvaluator.Create);
   FTypeSystem.RegisterEvaluator(TAnsiStringEvaluator.Create);
   FTypeSystem.RegisterEvaluator(TUnicodeStringEvaluator.Create);

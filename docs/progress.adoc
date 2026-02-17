@@ -151,15 +151,24 @@ Integration of OPDF generation directly into the Free Pascal Compiler, eliminati
 * [x] OPDF I/O extended: WriteEnum, WriteInterface, WriteRecord, WriteParameter + Read counterparts in opdf_io.pas
 * [x] Verified: test_phase2_types.pas compiles with -gO, produces valid .opdf section with 15 variables, 4 function scopes, 59 line mappings
 
-=== Phase 2 Status
+=== Debugger Reader and Evaluator Updates
 
-All FPC compiler type handlers are implemented. The compiler emits complete type, symbol, and scope information into the `.opdf` ELF section. The standalone debugger loads embedded OPDF data and recognizes function scopes, variables, and line mappings. Type record parsing in the debugger reader (`pdr_opdf_adapter.pas`) needs updating to handle the new record types (enum, record, class, interface).
+* [x] Mark type definitions as used in FPC compiler (mark_defs_used, mark_used_unit_defs in dbgopdf.pas)
+* [x] Add pointer, record, enum type evaluators to pdr_typesys.pas
+* [x] Add recPointer, recRecord, recEnum, recParameter, recInterface handlers to pdr_opdf_adapter.pas
+* [x] Add tcFloat type category and TFloatEvaluator for Single/Double/Extended display
+* [x] Fix stream alignment in OPDF reader (RecStartPos tracking after each record)
+* [x] Fix Cardinal underflow bugs in opdf_io.pas reader methods (ReadClass, ReadRecord, ReadEnum, ReadInterface)
+* [x] Fix static array element count (was displaying too many elements due to inverted logic)
+* [x] Fix dynamic array length reading (x86_64: high value at offset -8 as SizeInt, not -4 as LongInt)
+* [x] Add dot-notation field access for class and record types (MyShape.FName, MyPoint.X)
+* [x] Verified: 481 types, 16 variables, 4 function scopes, 61 line mappings loaded from test_phase2_types binary
 
 == Current Work Item
 
-**Phase 2: Remaining Type Handlers** — Complete. All `appenddef_*` and `appendsym_*` handlers implemented in `dbgopdf.pas`. New OPDF record types (recEnum=17, recInterface=16) added to the specification. Verified with comprehensive test program.
+**Phase 2 complete** — Both FPC compiler type handlers and standalone debugger reader/evaluators are fully functional. All type categories work: primitives, floats, enums, strings, pointers, arrays (static + dynamic), records, classes, and interfaces.
 
-**Next**: Update standalone debugger to parse and display the new OPDF record types, or update OPDF specification to document embedded storage format.
+**Next**: Update OPDF specification to document embedded storage format, or begin Phase 2+ improvements (nested field access, property getter evaluation, class inheritance field display).
 
 [[Embedding Decision]]
 === Embedding Decision: External File vs ELF Section (RESOLVED)

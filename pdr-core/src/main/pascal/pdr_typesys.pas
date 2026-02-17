@@ -89,6 +89,14 @@ type
     function CanHandle(const TypeInfo: TTypeInfo): Boolean;
   end;
 
+  { Float Type Evaluator - handles Single, Double, Extended }
+  TFloatEvaluator = class(TInterfacedObject, ITypeEvaluator)
+  public
+    function Evaluate(const VarInfo: TVariableInfo; const TypeInfo: TTypeInfo;
+      ProcessController: IProcessController; TypeSystem: TTypeSystem): TVariableValue;
+    function CanHandle(const TypeInfo: TTypeInfo): Boolean;
+  end;
+
   { Pointer Type Evaluator }
   TPointerEvaluator = class(TInterfacedObject, ITypeEvaluator)
   public
@@ -119,6 +127,9 @@ type
     FEvaluators: TInterfaceList;
     FProcessController: IProcessController;
     FDebugInfoReader: IDebugInfoReader;
+
+    { Resolve dot-notation field access (e.g. MyShape.FName) }
+    function ResolveFieldAccess(const BaseName, FieldPath: String): TVariableValue;
   public
     constructor Create(AProcessController: IProcessController; ADebugInfoReader: IDebugInfoReader);
     destructor Destroy; override;
@@ -545,9 +556,9 @@ begin
   if ElementCount < 0 then ElementCount := 0;
 
   { Limit to first 10 elements for display }
-  MaxElements := 10;
-  if ElementCount > MaxElements then
-    MaxElements := ElementCount;
+  MaxElements := ElementCount;
+  if MaxElements > 10 then
+    MaxElements := 10;
 
   { Build bounds string }
   BoundsStr := '[' + IntToStr(TypeInfo.Bounds[0].LowerBound) + '..' +
@@ -592,8 +603,9 @@ function TDynamicArrayEvaluator.Evaluate(const VarInfo: TVariableInfo;
   TypeSystem: TTypeSystem): TVariableValue;
 var
   PointerBuf: array[0..7] of Byte;
-  LengthBuf: array[0..3] of Byte;
+  HighBuf: array[0..7] of Byte;
   ArrayPtr: QWord;
+  ArrayHigh: Int64;
   ArrayLength: LongInt;
   I, MaxElements: Integer;
   ElementSize: Cardinal;
@@ -625,15 +637,17 @@ begin
     Exit;
   end;
 
-  { Read array length (stored at ArrayPtr - 4) }
-  FillChar(LengthBuf, SizeOf(LengthBuf), 0);
-  if not ProcessController.ReadMemory(ArrayPtr - 4, 4, LengthBuf) then
+  { Read array high value (stored at ArrayPtr - 8 as SizeInt on x86_64).
+    FPC stores the high index (Length-1), not the length itself. }
+  FillChar(HighBuf, SizeOf(HighBuf), 0);
+  if not ProcessController.ReadMemory(ArrayPtr - 8, 8, HighBuf) then
   begin
     Result.Value := '<error: failed to read array length>';
     Exit;
   end;
 
-  ArrayLength := PLongInt(@LengthBuf)^;
+  ArrayHigh := PInt64(@HighBuf)^;
+  ArrayLength := ArrayHigh + 1;
   if ArrayLength < 0 then ArrayLength := 0;
 
   { Get element type information }
@@ -672,6 +686,55 @@ begin
 
   Result.Value := 'array of ' + ElementTypeInfo.Name + ' (Length=' +
                   IntToStr(ArrayLength) + ') = [' + ElementOutput + ']';
+  Result.IsValid := True;
+end;
+
+{ TFloatEvaluator }
+
+function TFloatEvaluator.CanHandle(const TypeInfo: TTypeInfo): Boolean;
+begin
+  Result := (TypeInfo.Category = tcFloat);
+end;
+
+function TFloatEvaluator.Evaluate(const VarInfo: TVariableInfo;
+  const TypeInfo: TTypeInfo; ProcessController: IProcessController;
+  TypeSystem: TTypeSystem): TVariableValue;
+var
+  Buffer: array[0..9] of Byte;
+  SingleVal: Single;
+  DoubleVal: Double;
+begin
+  Result.Name := TFPCDemangler.Demangle(VarInfo.Name);
+  Result.TypeName := TypeInfo.Name;
+  Result.Address := VarInfo.Address;
+  Result.IsValid := False;
+
+  FillChar(Buffer, SizeOf(Buffer), 0);
+  if not ProcessController.ReadMemory(VarInfo.Address, TypeInfo.Size, Buffer) then
+  begin
+    Result.Value := '<error: failed to read memory>';
+    Exit;
+  end;
+
+  case TypeInfo.Size of
+    4: begin  { Single }
+         SingleVal := PSingle(@Buffer)^;
+         Result.Value := FloatToStrF(SingleVal, ffGeneral, 7, 0);
+       end;
+    8: begin  { Double, Currency, Comp }
+         DoubleVal := PDouble(@Buffer)^;
+         Result.Value := FloatToStrF(DoubleVal, ffGeneral, 15, 0);
+       end;
+    10: begin { Extended }
+          { Extended is 10 bytes on x86, read as Double approximation }
+          DoubleVal := PExtended(@Buffer)^;
+          Result.Value := FloatToStrF(DoubleVal, ffGeneral, 18, 0);
+        end;
+  else
+    Result.Value := '<error: unsupported float size>';
+    Exit;
+  end;
+
   Result.IsValid := True;
 end;
 
@@ -868,13 +931,172 @@ begin
   FEvaluators.Add(Evaluator);
 end;
 
+function TTypeSystem.ResolveFieldAccess(const BaseName, FieldPath: String): TVariableValue;
+var
+  VarInfo: TVariableInfo;
+  TypeInfo: TTypeInfo;
+  RIP: QWord;
+  InstancePtr: QWord;
+  PointerBuf: array[0..7] of Byte;
+  I: Integer;
+  FieldName, RemainingPath: String;
+  DotPos: Integer;
+  Fields: TDebuggerFieldArray;
+  FieldVarInfo: TVariableInfo;
+  Found: Boolean;
+begin
+  Result.Name := BaseName + '.' + FieldPath;
+  Result.IsValid := False;
+
+  { Find the base variable }
+  RIP := FProcessController.GetCurrentAddress;
+  if RIP <> 0 then
+  begin
+    if not FDebugInfoReader.FindVariableWithScope(BaseName, RIP, VarInfo) then
+      if not FDebugInfoReader.FindVariable(BaseName, VarInfo) then
+      begin
+        Result.Value := '<error: variable not found>';
+        Exit;
+      end;
+  end
+  else if not FDebugInfoReader.FindVariable(BaseName, VarInfo) then
+  begin
+    Result.Value := '<error: variable not found>';
+    Exit;
+  end;
+
+  { Get type info for the base variable }
+  if not FDebugInfoReader.FindType(VarInfo.TypeID, TypeInfo) then
+  begin
+    Result.Value := '<error: type not found>';
+    Exit;
+  end;
+
+  { Split field path for potential nested access }
+  DotPos := Pos('.', FieldPath);
+  if DotPos > 0 then
+  begin
+    FieldName := Copy(FieldPath, 1, DotPos - 1);
+    RemainingPath := Copy(FieldPath, DotPos + 1, Length(FieldPath));
+  end
+  else
+  begin
+    FieldName := FieldPath;
+    RemainingPath := '';
+  end;
+
+  { Handle class types — dereference instance pointer first }
+  if (TypeInfo.Category = tcClass) and (TypeInfo.ClassInfo <> nil) then
+  begin
+    { Read instance pointer }
+    FillChar(PointerBuf, SizeOf(PointerBuf), 0);
+    if not FProcessController.ReadMemory(VarInfo.Address, 8, PointerBuf) then
+    begin
+      Result.Value := '<error: failed to read instance pointer>';
+      Exit;
+    end;
+    InstancePtr := PQWord(@PointerBuf)^;
+    if InstancePtr = 0 then
+    begin
+      Result.Value := 'nil';
+      Result.IsValid := True;
+      Exit;
+    end;
+
+    Fields := TypeInfo.ClassInfo^.Fields;
+
+    { Find the matching field (case-insensitive) }
+    Found := False;
+    for I := 0 to High(Fields) do
+    begin
+      if CompareText(Fields[I].Name, FieldName) = 0 then
+      begin
+        FieldVarInfo.Name := Fields[I].Name;
+        FieldVarInfo.TypeID := Fields[I].TypeID;
+        FieldVarInfo.Address := InstancePtr + Fields[I].Offset;
+        FieldVarInfo.LocationExpr := 0;
+        FieldVarInfo.LocationData := 0;
+        Found := True;
+        Break;
+      end;
+    end;
+
+    if not Found then
+    begin
+      Result.Value := '<error: field "' + FieldName + '" not found>';
+      Exit;
+    end;
+
+    if RemainingPath <> '' then
+    begin
+      { TODO: nested field access }
+      Result.Value := '<error: nested field access not yet supported>';
+      Exit;
+    end;
+
+    Result := EvaluateVariableInfo(FieldVarInfo);
+    Result.Name := BaseName + '.' + FieldName;
+  end
+  { Handle record types — direct memory access }
+  else if (TypeInfo.Category = tcRecord) and (TypeInfo.RecordInfo <> nil) then
+  begin
+    Fields := TypeInfo.RecordInfo^.Fields;
+
+    Found := False;
+    for I := 0 to High(Fields) do
+    begin
+      if CompareText(Fields[I].Name, FieldName) = 0 then
+      begin
+        FieldVarInfo.Name := Fields[I].Name;
+        FieldVarInfo.TypeID := Fields[I].TypeID;
+        FieldVarInfo.Address := VarInfo.Address + Fields[I].Offset;
+        FieldVarInfo.LocationExpr := 0;
+        FieldVarInfo.LocationData := 0;
+        Found := True;
+        Break;
+      end;
+    end;
+
+    if not Found then
+    begin
+      Result.Value := '<error: field "' + FieldName + '" not found>';
+      Exit;
+    end;
+
+    if RemainingPath <> '' then
+    begin
+      Result.Value := '<error: nested field access not yet supported>';
+      Exit;
+    end;
+
+    Result := EvaluateVariableInfo(FieldVarInfo);
+    Result.Name := BaseName + '.' + FieldName;
+  end
+  else
+  begin
+    Result.Value := '<error: type does not support field access>';
+  end;
+end;
+
 function TTypeSystem.EvaluateVariable(const VarName: String): TVariableValue;
 var
   VarInfo: TVariableInfo;
   RIP: QWord;
+  DotPos: Integer;
+  BaseName, FieldPath: String;
 begin
   Result.Name := VarName;
   Result.IsValid := False;
+
+  { Check for dot notation (e.g. MyShape.FName) }
+  DotPos := Pos('.', VarName);
+  if DotPos > 0 then
+  begin
+    BaseName := Copy(VarName, 1, DotPos - 1);
+    FieldPath := Copy(VarName, DotPos + 1, Length(VarName));
+    Result := ResolveFieldAccess(BaseName, FieldPath);
+    Exit;
+  end;
 
   { Try scope-aware lookup first if process is running }
   RIP := FProcessController.GetCurrentAddress;

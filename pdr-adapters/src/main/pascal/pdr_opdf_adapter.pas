@@ -328,8 +328,15 @@ begin
             PType^.Name := TypeName;
             PType^.Size := DefPrimitive.SizeInBytes;
             PType^.IsSigned := DefPrimitive.IsSigned <> 0;
-            PType^.Category := tcPrimitive;
             PType^.MaxLength := 0;
+
+            { Detect float types by name — FPC emits them as primitives }
+            if (TypeName = 'Single') or (TypeName = 'Double') or
+               (TypeName = 'Extended') or (TypeName = 'Currency') or
+               (TypeName = 'Comp') or (TypeName = 'Real') then
+              PType^.Category := tcFloat
+            else
+              PType^.Category := tcPrimitive;
 
             FTypes.Add(IntToStr(DefPrimitive.TypeID), PType);
           end;
