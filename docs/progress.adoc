@@ -135,25 +135,31 @@ Integration of OPDF generation directly into the Free Pascal Compiler, eliminati
 
 === Phase 2: Remaining Type Handlers
 
-These stub implementations in dbgopdf.pas need fleshing out:
+* [x] appenddef_float — Float types emitted as REC_PRIMITIVE (signed, with size)
+* [x] appenddef_enum — Full enum type with member names and ordinal values (new REC_ENUM = 17)
+* [x] appenddef_string — ShortString (REC_SHORTSTR), AnsiString (REC_ANSISTR), UnicodeString/WideString (REC_UNICODESTR)
+* [x] appenddef_pointer — Pointer types with target type ID (REC_POINTER), void pointer support
+* [x] appenddef_array — Static arrays with bounds, dynamic arrays (REC_ARRAY)
+* [x] appenddef_record — Record types with inline field descriptors (REC_RECORD)
+* [x] appenddef_object — Class/object types with parent, VMT, fields (REC_CLASS); interface types with GUID, methods (new REC_INTERFACE = 16)
+* [x] appendsym_localvar — Local variables with RBP-relative stack offset (REC_LOCALVAR)
+* [x] appendsym_paravar — Parameters with var/const flags (REC_PARAMETER)
+* [x] appendsym_fieldvar — No-op: fields emitted inline within record/class records
+* [x] appendsym_property — No-op: property access resolved via field offsets in class record
+* [x] appendprocdef — Function scope records with label-based LowPC/HighPC (REC_FUNCSCOPE)
+* [x] OPDF format extended: TDefEnum, TEnumMember, TDefInterface, TInterfaceMethodDescriptor added to ogopdf.pas
+* [x] OPDF I/O extended: WriteEnum, WriteInterface, WriteRecord, WriteParameter + Read counterparts in opdf_io.pas
+* [x] Verified: test_phase2_types.pas compiles with -gO, produces valid .opdf section with 15 variables, 4 function scopes, 59 line mappings
 
-* [ ] appenddef_float — Float type records
-* [ ] appenddef_enum — Enumeration type records
-* [ ] appenddef_string — String type records (Short, Ansi, Unicode, Wide)
-* [ ] appenddef_pointer — Pointer type records
-* [ ] appenddef_array — Array type records
-* [ ] appenddef_record — Record type records
-* [ ] appenddef_object — Class/object type records
-* [ ] appendsym_localvar — Local variable records
-* [ ] appendsym_paravar — Parameter variable records
-* [ ] appendsym_fieldvar — Field variable records
-* [ ] appendsym_property — Property records
+=== Phase 2 Status
+
+All FPC compiler type handlers are implemented. The compiler emits complete type, symbol, and scope information into the `.opdf` ELF section. The standalone debugger loads embedded OPDF data and recognizes function scopes, variables, and line mappings. Type record parsing in the debugger reader (`pdr_opdf_adapter.pas`) needs updating to handle the new record types (enum, record, class, interface).
 
 == Current Work Item
 
-**Phase 1G: Line Information** — Complete. FPC-compiled OPDF binaries now include line info records in the `.opdf` ELF section. The PDR debugger resolves `break file.pas:line` and hits breakpoints correctly.
+**Phase 2: Remaining Type Handlers** — Complete. All `appenddef_*` and `appendsym_*` handlers implemented in `dbgopdf.pas`. New OPDF record types (recEnum=17, recInterface=16) added to the specification. Verified with comprehensive test program.
 
-**Next**: Phase 2 — Remaining Type Handlers, or update OPDF specification to document embedded storage format.
+**Next**: Update standalone debugger to parse and display the new OPDF record types, or update OPDF specification to document embedded storage format.
 
 [[Embedding Decision]]
 === Embedding Decision: External File vs ELF Section (RESOLVED)
@@ -221,6 +227,7 @@ test_09_dynamic_arrays.pas  → Dynamic array length/elements
 test_10_arguments.pas       → Function arguments
 test_11_callstack.pas       → Stack traces
 test_bool_only.pas          → Boolean type testing
+test_phase2_types.pas       → All Phase 2 types (float, string, enum, pointer, array, record, class, interface, locals, params)
 ----
 
 == Quick Reference
