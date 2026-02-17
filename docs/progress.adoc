@@ -88,7 +88,7 @@ Integration of OPDF generation directly into the Free Pascal Compiler, eliminati
 
 * [x] Add `dbg_opdf` to `tdbg` enumeration (systems.inc)
 * [x] Add `-gO` flag parsing in options.pas (`Interpret_G_l`)
-* [ ] Add `-gO` to compiler help output (`-h`)
+* [x] Add `-gO` to compiler help output (`-h`)
 
 === Phase 1C: Type Mapper
 
@@ -111,40 +111,52 @@ Integration of OPDF generation directly into the Free Pascal Compiler, eliminati
 * [x] appendsym_staticvar: Write global variables with type IDs
 * [x] insertmoduleinfo: Finalize OPDF output
 * [x] Verified: `ppcx64 -gO` produces valid .opdf with types and variables
-* [ ] Verify .opdf works end-to-end with PDR debugger
 
-=== Phase 1F: Line Information (BLOCKED - architectural decision needed)
+=== Phase 1F: Embedded ELF Section
 
-* [ ] Implement insertlineinfo
-* [ ] Source file and line number mapping
-* [ ] Address resolution
+* [x] Add `al_opdf` asm list type to `TAsmListType` in aasmdata.pas
+* [x] Rewrite dbgopdf.pas to emit via `tai_const` into asm list (no more external file)
+* [x] Use `sec_user` with `.opdf` section name (non-loadable debug section)
+* [x] Global variable addresses resolved by linker via symbol references
+* [x] Remove dependency on opdf_io, classes, sysutils from compiler writer
+* [x] Create `elf_reader.pas` — minimal ELF64 parser for section extraction
+* [x] Update `pdr_opdf_adapter.pas` to load from embedded `.opdf` section (with external file fallback)
+* [x] Verified: `readelf -S` shows `.opdf` section, `readelf -x .opdf` shows valid OPDF magic bytes
+* [x] Verified: PDR debugger loads 2 variables from embedded section
 
-**Status**: Blocked. The current external-file approach cannot resolve code addresses because `insertlineinfo` is called before assembly/linking. The DWARF/Stabs writers solve this by emitting into asm lists that go through the assembler/linker relocation process.
+=== Phase 1G: Line Information
 
-**Decision required**: Pivot to embedding OPDF data inside the binary (as an ELF section) instead of an external file. This would allow using the same label-based address resolution that DWARF and Stabs use. See <<Embedding Decision>> below.
+* [x] Implement `insertlineinfo` — emit line records with label-based addresses
+* [x] Insert labels at line boundaries (same pattern as DWARF `alt_dbgline`)
+* [x] Emit `recLineInfo` records with symbol references for code addresses
+* [x] Source file name and line number mapping
+* [x] Accumulate line records in private FLineInfoList, merge into al_opdf during inserttypeinfo
+* [x] Verify with PDR debugger: `break file.pas:line` works with embedded data (12 line mappings, breakpoint hit)
 
-=== Phase 2+: Remaining Type Handlers (not started)
+=== Phase 2: Remaining Type Handlers
 
 These stub implementations in dbgopdf.pas need fleshing out:
 
-* [ ] appenddef_float - Float type records
-* [ ] appenddef_enum - Enumeration type records
-* [ ] appenddef_string - String type records (Short, Ansi, Unicode, Wide)
-* [ ] appenddef_pointer - Pointer type records
-* [ ] appenddef_array - Array type records
-* [ ] appenddef_record - Record type records
-* [ ] appenddef_object - Class/object type records
-* [ ] appendsym_localvar - Local variable records
-* [ ] appendsym_paravar - Parameter variable records
-* [ ] appendsym_fieldvar - Field variable records
-* [ ] appendsym_property - Property records
+* [ ] appenddef_float — Float type records
+* [ ] appenddef_enum — Enumeration type records
+* [ ] appenddef_string — String type records (Short, Ansi, Unicode, Wide)
+* [ ] appenddef_pointer — Pointer type records
+* [ ] appenddef_array — Array type records
+* [ ] appenddef_record — Record type records
+* [ ] appenddef_object — Class/object type records
+* [ ] appendsym_localvar — Local variable records
+* [ ] appendsym_paravar — Parameter variable records
+* [ ] appendsym_fieldvar — Field variable records
+* [ ] appendsym_property — Property records
 
 == Current Work Item
 
-**Embedding OPDF in binary (ELF section)** — Pivoting from external .opdf file to embedded section.
+**Phase 1G: Line Information** — Complete. FPC-compiled OPDF binaries now include line info records in the `.opdf` ELF section. The PDR debugger resolves `break file.pas:line` and hits breakpoints correctly.
+
+**Next**: Phase 2 — Remaining Type Handlers, or update OPDF specification to document embedded storage format.
 
 [[Embedding Decision]]
-=== Embedding Decision: External File vs ELF Section
+=== Embedding Decision: External File vs ELF Section (RESOLVED)
 
 ==== Problem
 
@@ -159,13 +171,13 @@ Pivot to embedding OPDF data inside the binary as a custom ELF section (`.opdf`)
 * Single-file distribution (no separate .opdf file to manage)
 * The OPDF specification already planned for embedded storage
 
-==== Implementation Tasks
+==== Implementation (completed in Phase 1F)
 
-* [ ] Define OPDF ELF section name and structure
-* [ ] Register a new asm list for OPDF data emission
-* [ ] Rewrite TOPDFDebugWriter to emit tai_const values into asm list
-* [ ] Implement insertlineinfo with label insertion and line records
-* [ ] Update PDR debugger to read OPDF section from ELF binary
+* [x] Define OPDF ELF section name and structure
+* [x] Register a new asm list for OPDF data emission
+* [x] Rewrite TOPDFDebugWriter to emit tai_const values into asm list
+* [x] Update PDR debugger to read OPDF section from ELF binary
+* [x] Implement insertlineinfo with label insertion and line records
 * [ ] Update OPDF specification to document embedded storage format
 * [ ] Update test infrastructure to work with embedded OPDF
 
@@ -181,14 +193,12 @@ pdr-cli/       →   367 lines (command-line interface)
 tools/         → 1,293 lines (OPDF generator from DWARF)
 ----
 
-=== FPC Integration (~900 lines across 6 files)
+=== FPC Integration (~700 lines across 5 files)
 
 ----
-dbgopdf.pas          → OPDF debug writer (TOPDFDebugWriter)
+dbgopdf.pas          → OPDF debug writer (emits into al_opdf asm list)
 tpdf_type_mapper.pas → Type ID allocation
-ogopdf.pas           → OPDF format definitions (from opdf-lib)
-opdf_io.pas          → OPDF binary reader/writer (from opdf-lib)
-opdf_demangle.pas    → FPC symbol demangling (from opdf-lib)
+aasmdata.pas         → al_opdf enum in TAsmListType
 systems.inc          → dbg_opdf enum entry
 options.pas          → -gO flag handling
 x86_64/cputarg.pas   → dbgopdf registration
