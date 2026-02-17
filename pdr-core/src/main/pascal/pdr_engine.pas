@@ -106,6 +106,9 @@ begin
   FTypeSystem.RegisterEvaluator(TClassEvaluator.Create);
   FTypeSystem.RegisterEvaluator(TStaticArrayEvaluator.Create);
   FTypeSystem.RegisterEvaluator(TDynamicArrayEvaluator.Create);
+  FTypeSystem.RegisterEvaluator(TPointerEvaluator.Create);
+  FTypeSystem.RegisterEvaluator(TRecordEvaluator.Create);
+  FTypeSystem.RegisterEvaluator(TEnumEvaluator.Create);
 end;
 
 destructor TDebuggerEngine.Destroy;

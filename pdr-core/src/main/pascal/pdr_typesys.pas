@@ -89,6 +89,30 @@ type
     function CanHandle(const TypeInfo: TTypeInfo): Boolean;
   end;
 
+  { Pointer Type Evaluator }
+  TPointerEvaluator = class(TInterfacedObject, ITypeEvaluator)
+  public
+    function Evaluate(const VarInfo: TVariableInfo; const TypeInfo: TTypeInfo;
+      ProcessController: IProcessController; TypeSystem: TTypeSystem): TVariableValue;
+    function CanHandle(const TypeInfo: TTypeInfo): Boolean;
+  end;
+
+  { Record Type Evaluator }
+  TRecordEvaluator = class(TInterfacedObject, ITypeEvaluator)
+  public
+    function Evaluate(const VarInfo: TVariableInfo; const TypeInfo: TTypeInfo;
+      ProcessController: IProcessController; TypeSystem: TTypeSystem): TVariableValue;
+    function CanHandle(const TypeInfo: TTypeInfo): Boolean;
+  end;
+
+  { Enum Type Evaluator }
+  TEnumEvaluator = class(TInterfacedObject, ITypeEvaluator)
+  public
+    function Evaluate(const VarInfo: TVariableInfo; const TypeInfo: TTypeInfo;
+      ProcessController: IProcessController; TypeSystem: TTypeSystem): TVariableValue;
+    function CanHandle(const TypeInfo: TTypeInfo): Boolean;
+  end;
+
   { Type System - manages type evaluators }
   TTypeSystem = class
   private
@@ -648,6 +672,177 @@ begin
 
   Result.Value := 'array of ' + ElementTypeInfo.Name + ' (Length=' +
                   IntToStr(ArrayLength) + ') = [' + ElementOutput + ']';
+  Result.IsValid := True;
+end;
+
+{ TPointerEvaluator }
+
+function TPointerEvaluator.CanHandle(const TypeInfo: TTypeInfo): Boolean;
+begin
+  Result := (TypeInfo.Category = tcPointer);
+end;
+
+function TPointerEvaluator.Evaluate(const VarInfo: TVariableInfo;
+  const TypeInfo: TTypeInfo; ProcessController: IProcessController;
+  TypeSystem: TTypeSystem): TVariableValue;
+var
+  PointerBuf: array[0..7] of Byte;
+  PtrValue: QWord;
+  TargetTypeInfo: TTypeInfo;
+  TargetVarInfo: TVariableInfo;
+  TargetValue: TVariableValue;
+begin
+  Result.Name := TFPCDemangler.Demangle(VarInfo.Name);
+  Result.TypeName := TypeInfo.Name;
+  Result.Address := VarInfo.Address;
+  Result.IsValid := False;
+
+  { Read pointer value }
+  FillChar(PointerBuf, SizeOf(PointerBuf), 0);
+  if not ProcessController.ReadMemory(VarInfo.Address, 8, PointerBuf) then
+  begin
+    Result.Value := '<error: failed to read pointer>';
+    Exit;
+  end;
+
+  PtrValue := PQWord(@PointerBuf)^;
+
+  { Nil pointer }
+  if PtrValue = 0 then
+  begin
+    Result.Value := 'nil';
+    Result.IsValid := True;
+    Exit;
+  end;
+
+  { Try to dereference and show target value }
+  if (TypeInfo.PointerTo <> 0) and
+     TypeSystem.FDebugInfoReader.FindType(TypeInfo.PointerTo, TargetTypeInfo) then
+  begin
+    TargetVarInfo.Name := VarInfo.Name + '^';
+    TargetVarInfo.TypeID := TypeInfo.PointerTo;
+    TargetVarInfo.Address := PtrValue;
+    TargetVarInfo.LocationExpr := 0;
+    TargetVarInfo.LocationData := 0;
+
+    TargetValue := TypeSystem.EvaluateVariableInfo(TargetVarInfo);
+    if TargetValue.IsValid then
+      Result.Value := '^' + TargetValue.Value + ' (@$' + IntToHex(PtrValue, 16) + ')'
+    else
+      Result.Value := '@$' + IntToHex(PtrValue, 16);
+  end
+  else
+    Result.Value := '@$' + IntToHex(PtrValue, 16);
+
+  Result.IsValid := True;
+end;
+
+{ TRecordEvaluator }
+
+function TRecordEvaluator.CanHandle(const TypeInfo: TTypeInfo): Boolean;
+begin
+  Result := (TypeInfo.Category = tcRecord);
+end;
+
+function TRecordEvaluator.Evaluate(const VarInfo: TVariableInfo;
+  const TypeInfo: TTypeInfo; ProcessController: IProcessController;
+  TypeSystem: TTypeSystem): TVariableValue;
+var
+  I: Integer;
+  FieldInfo: TVariableInfo;
+  FieldValue: TVariableValue;
+  FieldOutput: String;
+begin
+  Result.Name := TFPCDemangler.Demangle(VarInfo.Name);
+  Result.TypeName := TypeInfo.Name;
+  Result.Address := VarInfo.Address;
+  Result.IsValid := False;
+
+  if TypeInfo.RecordInfo = nil then
+  begin
+    Result.Value := '<error: no record info>';
+    Exit;
+  end;
+
+  { Build field output }
+  FieldOutput := '';
+  for I := 0 to High(TypeInfo.RecordInfo^.Fields) do
+  begin
+    FieldInfo.Name := TypeInfo.RecordInfo^.Fields[I].Name;
+    FieldInfo.TypeID := TypeInfo.RecordInfo^.Fields[I].TypeID;
+    FieldInfo.Address := VarInfo.Address + TypeInfo.RecordInfo^.Fields[I].Offset;
+    FieldInfo.LocationExpr := 0;
+    FieldInfo.LocationData := 0;
+
+    if I > 0 then FieldOutput := FieldOutput + ', ';
+
+    if FieldInfo.TypeID <> 0 then
+    begin
+      FieldValue := TypeSystem.EvaluateVariableInfo(FieldInfo);
+      FieldOutput := FieldOutput + FieldInfo.Name + ': ' + FieldValue.Value;
+    end
+    else
+      FieldOutput := FieldOutput + FieldInfo.Name + ': <untyped>';
+  end;
+
+  Result.Value := TypeInfo.Name + ' { ' + FieldOutput + ' }';
+  Result.IsValid := True;
+end;
+
+{ TEnumEvaluator }
+
+function TEnumEvaluator.CanHandle(const TypeInfo: TTypeInfo): Boolean;
+begin
+  Result := (TypeInfo.Category = tcEnum);
+end;
+
+function TEnumEvaluator.Evaluate(const VarInfo: TVariableInfo;
+  const TypeInfo: TTypeInfo; ProcessController: IProcessController;
+  TypeSystem: TTypeSystem): TVariableValue;
+var
+  Buffer: array[0..7] of Byte;
+  OrdValue: Int64;
+  I: Integer;
+  MemberName: String;
+begin
+  Result.Name := TFPCDemangler.Demangle(VarInfo.Name);
+  Result.TypeName := TypeInfo.Name;
+  Result.Address := VarInfo.Address;
+  Result.IsValid := False;
+
+  { Read ordinal value }
+  FillChar(Buffer, SizeOf(Buffer), 0);
+  if not ProcessController.ReadMemory(VarInfo.Address, TypeInfo.Size, Buffer) then
+  begin
+    Result.Value := '<error: failed to read memory>';
+    Exit;
+  end;
+
+  { Extract value based on size }
+  case TypeInfo.Size of
+    1: OrdValue := Byte(Buffer[0]);
+    2: OrdValue := Word(PWord(@Buffer)^);
+    4: OrdValue := DWord(PDWord(@Buffer)^);
+  else
+    OrdValue := Byte(Buffer[0]);
+  end;
+
+  { Find matching member name }
+  MemberName := '';
+  for I := 0 to High(TypeInfo.EnumMembers) do
+  begin
+    if TypeInfo.EnumMembers[I].Value = OrdValue then
+    begin
+      MemberName := TypeInfo.EnumMembers[I].Name;
+      Break;
+    end;
+  end;
+
+  if MemberName <> '' then
+    Result.Value := MemberName + ' (' + IntToStr(OrdValue) + ')'
+  else
+    Result.Value := IntToStr(OrdValue);
+
   Result.IsValid := True;
 end;
 

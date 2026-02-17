@@ -876,6 +876,7 @@ end;
 function TOPDFReader.ReadArray(out Def: TDefArray; out Name: String): Boolean;
 begin
   Result := False;
+  SetLength(Name, 0);
 
   if FStream.Position + SizeOf(TDefArray) > FStream.Size then
     Exit;
@@ -932,7 +933,7 @@ end;
 
 function TOPDFReader.ReadClass(out Def: TDefClass; out Name: String; out Fields: TFieldDescriptorArray; out FieldNames: TStringArray): Boolean;
 var
-  I: Cardinal;
+  I: Longint;
   FieldDef: TFieldDescriptor;
   FieldName: String;
 begin
@@ -953,6 +954,8 @@ begin
     FStream.Read(Name[1], Def.NameLen);
 
   // Read field descriptors and names
+  if Def.FieldCount > 10000 then
+    Exit;
   SetLength(Fields, Def.FieldCount);
   SetLength(FieldNames, Def.FieldCount);
   for I := 0 to Def.FieldCount - 1 do
@@ -998,7 +1001,7 @@ end;
 function TOPDFReader.ReadRecord(out Def: TDefRecord; out Name: String;
                                out Fields: TFieldDescriptorArray; out FieldNames: TStringArray): Boolean;
 var
-  I: Cardinal;
+  I: Longint;
   FieldDef: TFieldDescriptor;
   FieldName: String;
 begin
@@ -1017,6 +1020,10 @@ begin
   SetLength(Name, Def.NameLen);
   if Def.NameLen > 0 then
     FStream.Read(Name[1], Def.NameLen);
+
+  { Sanity check field count }
+  if Def.FieldCount > 10000 then
+    Exit;
 
   SetLength(Fields, Def.FieldCount);
   SetLength(FieldNames, Def.FieldCount);
@@ -1044,7 +1051,7 @@ end;
 function TOPDFReader.ReadEnum(out Def: TDefEnum; out Name: String;
                              out Members: TEnumMemberArray; out MemberNames: TStringArray): Boolean;
 var
-  I: Cardinal;
+  I: Longint;
   Member: TEnumMember;
   MemberName: String;
 begin
@@ -1091,7 +1098,7 @@ function TOPDFReader.ReadInterface(out Def: TDefInterface; out Name: String;
                                   out Methods: TInterfaceMethodDescriptorArray;
                                   out MethodNames: TStringArray): Boolean;
 var
-  I: Cardinal;
+  I: Longint;
   MtdDef: TInterfaceMethodDescriptor;
   MtdName: String;
 begin

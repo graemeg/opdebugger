@@ -126,6 +126,9 @@ begin
     // Free ClassInfo if it's a class type
     if (TypeInfo.Category = tcClass) and (TypeInfo.ClassInfo <> nil) then
       Dispose(TypeInfo.ClassInfo);
+    // Free RecordInfo if it's a record type
+    if (TypeInfo.Category = tcRecord) and (TypeInfo.RecordInfo <> nil) then
+      Dispose(TypeInfo.RecordInfo);
     Dispose(PTypeInfo(FTypes[I]));
   end;
   FTypes.Clear;
@@ -211,8 +214,19 @@ var
   DefFunctionScope: TDefFunctionScope;
   DefLocalVar: TDefLocalVar;
   DefClass: TDefClass;
+  DefPointer: TDefPointer;
+  DefRecord: TDefRecord;
+  DefEnum: TDefEnum;
+  DefParameter: TDefParameter;
+  DefInterface: TDefInterface;
   ClassFields: TFieldDescriptorArray;
   ClassFieldNames: array of String;
+  RecordFields: TFieldDescriptorArray;
+  RecordFieldNames: TStringArray;
+  EnumMembers: TEnumMemberArray;
+  EnumMemberNames: TStringArray;
+  IntfMethods: TInterfaceMethodDescriptorArray;
+  IntfMethodNames: TStringArray;
   TypeName: String;
   VarName: String;
   FileName: String;
@@ -226,6 +240,7 @@ var
   LocalList: TFPList;
   I: Integer;
   ELFStream: TMemoryStream;
+  RecStartPos: Int64;
 begin
   Result := False;
 
@@ -297,6 +312,9 @@ begin
     if not FReader.ReadRecordHeader(RecHeader) then
       Break;
 
+    { Save position after header so we can ensure correct alignment }
+    RecStartPos := FStream.Position;
+
     RecType := TOPDFRecordType(RecHeader.RecType);
 
     case RecType of
@@ -305,6 +323,7 @@ begin
           if FReader.ReadPrimitive(DefPrimitive, TypeName) then
           begin
             New(PType);
+            FillChar(PType^, SizeOf(TTypeInfo), 0);
             PType^.TypeID := DefPrimitive.TypeID;
             PType^.Name := TypeName;
             PType^.Size := DefPrimitive.SizeInBytes;
@@ -321,6 +340,7 @@ begin
           if FReader.ReadShortString(DefShortString, TypeName) then
           begin
             New(PType);
+            FillChar(PType^, SizeOf(TTypeInfo), 0);
             PType^.TypeID := DefShortString.TypeID;
             PType^.Name := TypeName;
             PType^.Size := DefShortString.MaxLength + 1; // Length byte + data
@@ -337,6 +357,7 @@ begin
           if FReader.ReadAnsiString(DefAnsiString, TypeName) then
           begin
             New(PType);
+            FillChar(PType^, SizeOf(TTypeInfo), 0);
             PType^.TypeID := DefAnsiString.TypeID;
             PType^.Name := TypeName;
             PType^.Size := 8; // Pointer size (64-bit)
@@ -353,6 +374,7 @@ begin
           if FReader.ReadUnicodeString(DefUnicodeString, TypeName) then
           begin
             New(PType);
+            FillChar(PType^, SizeOf(TTypeInfo), 0);
             PType^.TypeID := DefUnicodeString.TypeID;
             PType^.Name := TypeName;
             PType^.Size := 8; // Pointer size (64-bit)
@@ -403,6 +425,7 @@ begin
           if FReader.ReadClass(DefClass, TypeName, ClassFields, ClassFieldNames) then
           begin
             New(PType);
+            FillChar(PType^, SizeOf(TTypeInfo), 0);
             PType^.TypeID := DefClass.TypeID;
             PType^.Name := TypeName;
             PType^.Size := 8;  // Classes are pointers
@@ -476,6 +499,7 @@ begin
           if FReader.ReadArray(DefArray, TypeName) then
           begin
             New(PType);
+            FillChar(PType^, SizeOf(TTypeInfo), 0);
             PType^.TypeID := DefArray.TypeID;
             PType^.Name := TypeName;
             PType^.Size := 0;  // Arrays have variable size
@@ -485,16 +509,124 @@ begin
             PType^.ElementTypeID := DefArray.ElementTypeID;
             PType^.IsDynamic := DefArray.IsDynamic <> 0;
             PType^.Dimensions := DefArray.Dimensions;
-            SetLength(PType^.Bounds, 0);  // Array bounds to be filled if static
+
+            { Read bounds for static arrays }
+            if (DefArray.IsDynamic = 0) and (DefArray.Dimensions > 0) then
+            begin
+              SetLength(PType^.Bounds, DefArray.Dimensions);
+              for I := 0 to DefArray.Dimensions - 1 do
+                FStream.Read(PType^.Bounds[I], SizeOf(TArrayBound));
+            end
+            else
+              SetLength(PType^.Bounds, 0);
 
             FTypes.Add(IntToStr(DefArray.TypeID), PType);
           end;
         end;
 
+      recPointer:
+        begin
+          if FReader.ReadPointer(DefPointer, TypeName) then
+          begin
+            New(PType);
+            FillChar(PType^, SizeOf(TTypeInfo), 0);
+            PType^.TypeID := DefPointer.TypeID;
+            PType^.Name := TypeName;
+            PType^.Size := 8;  // Pointer size (64-bit)
+            PType^.IsSigned := False;
+            PType^.Category := tcPointer;
+            PType^.MaxLength := 0;
+            PType^.PointerTo := DefPointer.TargetTypeID;
+
+            FTypes.Add(IntToStr(DefPointer.TypeID), PType);
+          end;
+        end;
+
+      recRecord:
+        begin
+          if FReader.ReadRecord(DefRecord, TypeName, RecordFields, RecordFieldNames) then
+          begin
+            New(PType);
+            FillChar(PType^, SizeOf(TTypeInfo), 0);
+            PType^.TypeID := DefRecord.TypeID;
+            PType^.Name := TypeName;
+            PType^.Size := DefRecord.TotalSize;
+            PType^.IsSigned := False;
+            PType^.Category := tcRecord;
+            PType^.MaxLength := 0;
+
+            { Allocate and populate RecordInfo }
+            New(PType^.RecordInfo);
+            PType^.RecordInfo^.TotalSize := DefRecord.TotalSize;
+            SetLength(PType^.RecordInfo^.Fields, DefRecord.FieldCount);
+            for I := 0 to DefRecord.FieldCount - 1 do
+            begin
+              PType^.RecordInfo^.Fields[I].Name := RecordFieldNames[I];
+              PType^.RecordInfo^.Fields[I].TypeID := RecordFields[I].FieldTypeID;
+              PType^.RecordInfo^.Fields[I].Offset := RecordFields[I].Offset;
+            end;
+
+            FTypes.Add(IntToStr(DefRecord.TypeID), PType);
+          end;
+        end;
+
+      recEnum:
+        begin
+          if FReader.ReadEnum(DefEnum, TypeName, EnumMembers, EnumMemberNames) then
+          begin
+            New(PType);
+            FillChar(PType^, SizeOf(TTypeInfo), 0);
+            PType^.TypeID := DefEnum.TypeID;
+            PType^.Name := TypeName;
+            PType^.Size := DefEnum.SizeInBytes;
+            PType^.IsSigned := False;
+            PType^.Category := tcEnum;
+            PType^.MaxLength := 0;
+
+            { Store enum members for display }
+            SetLength(PType^.EnumMembers, DefEnum.MemberCount);
+            for I := 0 to DefEnum.MemberCount - 1 do
+            begin
+              PType^.EnumMembers[I].Name := EnumMemberNames[I];
+              PType^.EnumMembers[I].Value := EnumMembers[I].Value;
+            end;
+
+            FTypes.Add(IntToStr(DefEnum.TypeID), PType);
+          end;
+        end;
+
+      recParameter:
+        begin
+          { Parameters are informational - skip for now }
+          if not FReader.ReadParameter(DefParameter, VarName) then
+            FReader.SkipRecord(RecHeader);
+        end;
+
+      recInterface:
+        begin
+          if FReader.ReadInterface(DefInterface, TypeName, IntfMethods, IntfMethodNames) then
+          begin
+            New(PType);
+            FillChar(PType^, SizeOf(TTypeInfo), 0);
+            PType^.TypeID := DefInterface.TypeID;
+            PType^.Name := TypeName;
+            PType^.Size := 8;  // Interface is a pointer
+            PType^.IsSigned := False;
+            PType^.Category := tcInterface;
+            PType^.MaxLength := 0;
+
+            FTypes.Add(IntToStr(DefInterface.TypeID), PType);
+          end;
+        end;
+
       else
-        // Skip unknown record types
-        FReader.SkipRecord(RecHeader);
+        ; { Unknown record types handled by seek below }
     end;
+
+    { Ensure stream is at correct position for next record.
+      Some readers may not consume all payload bytes (e.g. ReadArray
+      doesn't read static array bounds). This guarantees alignment. }
+    FStream.Position := RecStartPos + RecHeader.RecSize;
   end;
 
   WriteLn('[INFO] Loaded ', FTypes.Count, ' type(s), ', FVariables.Count,

@@ -56,7 +56,9 @@ type
     tcPointer,        // Pointer type
     tcArray,          // Array type
     tcRecord,         // Record/Structure
-    tcClass           // Class type
+    tcClass,          // Class type
+    tcEnum,           // Enumeration type
+    tcInterface       // Interface type (COM/CORBA)
   );
 
   TDebuggerField = record
@@ -73,6 +75,20 @@ type
     Fields: TDebuggerFieldArray;
   end;
   PDebuggerClass = ^TDebuggerClass;
+
+  { Enum member for display }
+  TDebuggerEnumMember = record
+    Name: String;
+    Value: Int64;
+  end;
+  TDebuggerEnumMemberArray = array of TDebuggerEnumMember;
+
+  { Record type info (field layout) }
+  TDebuggerRecord = record
+    TotalSize: Cardinal;
+    Fields: TDebuggerFieldArray;
+  end;
+  PDebuggerRecord = ^TDebuggerRecord;
 
   { Type information }
   { Array dimension bounds }
@@ -100,6 +116,10 @@ type
     IsDynamic: Boolean;      // True for dynamic arrays (pointer-based)
     Dimensions: Byte;        // Number of dimensions (1-4)
     Bounds: TArrayBounds;    // Array bounds for each dimension
+    // Enum-specific
+    EnumMembers: TDebuggerEnumMemberArray;  // Enum member names and values
+    // Record-specific
+    RecordInfo: PDebuggerRecord;  // For records: field layout
   end;
 
   { Variable information }
