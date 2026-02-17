@@ -218,6 +218,7 @@ type
     TypeID: TTypeID;          // 4 bytes
     IsVar: Byte;              // 1 byte (1 if var parameter)
     IsConst: Byte;            // 1 byte (1 if const parameter)
+    IsOut: Byte;              // 1 byte (1 if out parameter)
     NameLen: TNameLen;        // 2 bytes
     // Followed by Name (NameLen bytes)
   end;

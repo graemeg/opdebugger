@@ -103,7 +103,7 @@ type
 
     { Write parameter definition }
     procedure WriteParameter(const ParamName: String; TypeID: TTypeID;
-                            IsVar, IsConst: Boolean);
+                            IsVar, IsConst, IsOut: Boolean);
 
     { Finalize - update header with final record count }
     procedure Finalize;
@@ -651,7 +651,7 @@ begin
 end;
 
 procedure TOPDFWriter.WriteParameter(const ParamName: String; TypeID: TTypeID;
-                                    IsVar, IsConst: Boolean);
+                                    IsVar, IsConst, IsOut: Boolean);
 var
   RecHeader: TOPDFRecordHeader;
   Payload: TDefParameter;
@@ -662,6 +662,7 @@ begin
   Payload.TypeID := TypeID;
   if IsVar then Payload.IsVar := 1 else Payload.IsVar := 0;
   if IsConst then Payload.IsConst := 1 else Payload.IsConst := 0;
+  if IsOut then Payload.IsOut := 1 else Payload.IsOut := 0;
   Payload.NameLen := Length(ParamName);
 
   RecHeader.RecType := Ord(recParameter);
