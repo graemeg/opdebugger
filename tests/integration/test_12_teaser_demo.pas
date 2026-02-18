@@ -2,7 +2,8 @@ program test_12_teaser_demo;
 
 {$mode objfpc}{$H+}
 
-{ Teaser Demo - showcases class instance inspection and enum variable display }
+{ Teaser Demo — demonstrates nested scope variable access, class inspection,
+  and enum-indexed arrays. This mirrors the original TeaserDemo.pas scenario. }
 
 uses
   SysUtils;
@@ -13,26 +14,42 @@ type
   TTeaser = class
   private
     FData: string;
-    FCount: Integer;
     FDay: TDays;
   public
-    constructor Create(const AValue: string; ACount: Integer; ADay: TDays);
+    constructor Create(const AValue: string; ADay: TDays);
   end;
 
-constructor TTeaser.Create(const AValue: string; ACount: Integer; ADay: TDays);
+constructor TTeaser.Create(const AValue: string; ADay: TDays);
 begin
   FData := AValue;
-  FCount := ACount;
   FDay := ADay;
+end;
+
+procedure OuterProcedure;
+var
+  ParentVar: string;
+  Counter: Integer;
+
+  { Nested procedure that accesses ParentVar from the enclosing scope }
+  procedure InnerNested;
+  begin
+    ParentVar := 'Modified by InnerNested';
+    Inc(Counter);
+    WriteLn('[PROG] InnerNested: Counter=', Counter);
+    { Breakpoint here to test nested scope access }
+  end;
+
+begin
+  ParentVar := 'Initial Value';
+  Counter := 0;
+  InnerNested;
 end;
 
 var
   Obj: TTeaser;
-  Today: TDays;
 begin
-  Obj := TTeaser.Create('FPC Mystery', 42, Wed);
-  Today := Fri;
-  WriteLn('Teaser Demo running');  { Breakpoint at next line }
-  WriteLn('Done');
+  Obj := TTeaser.Create('FPC Mystery', Wed);
+  WriteLn('[PROG] Obj.FData=', Obj.FData);
+  OuterProcedure;
   Obj.Free;
 end.

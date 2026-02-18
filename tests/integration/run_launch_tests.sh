@@ -71,7 +71,7 @@ run_test() {
     # Run PDR with commands
     echo "  [2/3] Running PDR..."
     if [ -f "$test_base.commands" ]; then
-        cat "$test_base.commands" | "$PDR_BIN" "$test_base" 2>&1 | filter_output > "$test_base.actual"
+        cat "$test_base.commands" | "$PDR_BIN" --verbose "$test_base" 2>&1 | filter_output > "$test_base.actual"
     else
         echo -e "${YELLOW}  No commands file${NC}"
         return 0

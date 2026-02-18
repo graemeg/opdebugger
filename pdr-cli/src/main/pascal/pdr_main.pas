@@ -72,6 +72,7 @@ begin
   WriteLn('      0x401000           - Hex address');
   WriteLn('      MyGlobalInt        - Variable name');
   WriteLn('  delete <num>   - Remove breakpoint by number');
+  WriteLn('  verbose [on|off] - Enable/disable diagnostic output (default: off)');
   WriteLn('  help           - Show this help');
   WriteLn('  quit           - Exit debugger');
   WriteLn;
@@ -238,6 +239,25 @@ begin
         end;
       end;
 
+    'verbose', 'v':
+      begin
+        if (Length(Parts) > 1) and
+           ((LowerCase(Parts[1]) = 'off') or (LowerCase(Parts[1]) = 'false') or (Parts[1] = '0')) then
+        begin
+          gVerbose := False;
+          WriteLn('[INFO] Verbose mode off');
+        end
+        else if (Length(Parts) > 1) and
+                ((LowerCase(Parts[1]) = 'on') or (LowerCase(Parts[1]) = 'true') or (Parts[1] = '1')) then
+        begin
+          gVerbose := True;
+          WriteLn('[INFO] Verbose mode on');
+        end
+        else
+          WriteLn('[INFO] Verbose mode is ', BoolToStr(gVerbose, 'on', 'off'),
+                  '. Use: verbose on|off');
+      end;
+
   else
     WriteLn('[ERROR] Unknown command: ', Cmd);
     WriteLn('Type "help" for available commands');
@@ -263,11 +283,13 @@ begin
 
   // Create architecture adapter with process controller
   {$IFDEF CPUX86_64}
-  WriteLn('[INFO] Detected architecture: x86_64');
+  if gVerbose then
+    WriteLn('[INFO] Detected architecture: x86_64');
   FArchAdapter := TArchX86_64Adapter.Create(FProcessController);
   {$ENDIF}
   {$IFDEF CPUI386}
-  WriteLn('[INFO] Detected architecture: i386');
+  if gVerbose then
+    WriteLn('[INFO] Detected architecture: i386');
   FArchAdapter := TArchX86Adapter.Create(FProcessController);
   {$ENDIF}
 
@@ -325,12 +347,28 @@ var
   CLI: TCLIDebugger;
   I: Integer;
   Args: array of String;
+  FirstArg: Integer;
 begin
-  if ParamCount < 1 then
+  { Scan for --verbose / -v flag (may appear before the binary path) }
+  FirstArg := 1;
+  for I := 1 to ParamCount do
   begin
-    WriteLn('Usage: pdr <binary> [<argument> ...]');
+    if (ParamStr(I) = '--verbose') or (ParamStr(I) = '-v') then
+    begin
+      gVerbose := True;
+      if I = FirstArg then
+        Inc(FirstArg);
+    end;
+  end;
+
+  if ParamCount < FirstArg then
+  begin
+    WriteLn('Usage: pdr [--verbose] <binary> [<argument> ...]');
     WriteLn;
     WriteLn('Debug an Object Pascal program using OPDF debug information.');
+    WriteLn;
+    WriteLn('Options:');
+    WriteLn('  --verbose, -v  - Enable diagnostic output at startup');
     WriteLn;
     WriteLn('Arguments:');
     WriteLn('  <binary>       - Path to the binary to debug');
@@ -338,11 +376,12 @@ begin
     WriteLn;
     WriteLn('Examples:');
     WriteLn('  pdr ./myprogram');
+    WriteLn('  pdr --verbose ./myprogram');
     WriteLn('  pdr ./myprogram arg1 arg2 arg3');
     Halt(1);
   end;
 
-  BinaryPath := ParamStr(1);
+  BinaryPath := ParamStr(FirstArg);
 
   if not FileExists(BinaryPath) then
   begin
@@ -351,11 +390,11 @@ begin
   end;
 
   { Collect command-line arguments (all parameters after the binary path) }
-  if ParamCount > 1 then
+  if ParamCount > FirstArg then
   begin
-    SetLength(Args, ParamCount - 1);
-    for I := 2 to ParamCount do
-      Args[I - 2] := ParamStr(I);
+    SetLength(Args, ParamCount - FirstArg);
+    for I := FirstArg + 1 to ParamCount do
+      Args[I - FirstArg - 1] := ParamStr(I);
   end;
 
   CLI := TCLIDebugger.Create;

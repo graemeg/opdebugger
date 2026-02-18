@@ -1262,9 +1262,10 @@ begin
     if RBP <> 0 then
     begin
       ComputedVarInfo.Address := RBP + VarInfo.LocationData;
-      WriteLn('[DEBUG] Computed address for ', VarInfo.Name, ': RBP=$',
-              IntToHex(RBP, 16), ' + ', VarInfo.LocationData, ' = $',
-              IntToHex(ComputedVarInfo.Address, 16));
+      if gVerbose then
+        WriteLn('[DEBUG] Computed address for ', VarInfo.Name, ': RBP=$',
+                IntToHex(RBP, 16), ' + ', VarInfo.LocationData, ' = $',
+                IntToHex(ComputedVarInfo.Address, 16));
     end;
   end
   else if (VarInfo.LocationExpr = 2) then { Parent frame RBP-relative (nested procedure) }
@@ -1280,9 +1281,10 @@ begin
       begin
         ParentRBP := PQWord(@RBPBuf)^;
         ComputedVarInfo.Address := ParentRBP + VarInfo.LocationData;
-        WriteLn('[DEBUG] Computed parent frame address for ', VarInfo.Name,
-                ': ParentRBP=$', IntToHex(ParentRBP, 16), ' + ', VarInfo.LocationData,
-                ' = $', IntToHex(ComputedVarInfo.Address, 16));
+        if gVerbose then
+          WriteLn('[DEBUG] Computed parent frame address for ', VarInfo.Name,
+                  ': ParentRBP=$', IntToHex(ParentRBP, 16), ' + ', VarInfo.LocationData,
+                  ' = $', IntToHex(ComputedVarInfo.Address, 16));
       end;
     end;
   end;

@@ -1,2 +1,1 @@
-Obj = TTeaser(@$<addr>) { FData: 'FPC Mystery', FCount: 42, FDay: Wed (2) }
-Today = Fri (4)
+ParentVar = 'Modified by InnerNested'

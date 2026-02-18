@@ -138,7 +138,8 @@ begin
     Exit;
   end;
 
-  WriteLn('[INFO] Launching program: ', BinaryPath);
+  if gVerbose then
+    WriteLn('[INFO] Launching program: ', BinaryPath);
 
   // Fork a child process
   ChildPID := FpFork;
@@ -175,7 +176,8 @@ begin
   else
   begin
     // Parent process - wait for child to stop at exec
-    WriteLn('[INFO] Child process created with PID ', ChildPID);
+    if gVerbose then
+      WriteLn('[INFO] Child process created with PID ', ChildPID);
 
     if FpWaitPid(ChildPID, @Status, 0) = -1 then
     begin
@@ -193,8 +195,11 @@ begin
     FPID := ChildPID;
     FAttached := True;
 
-    WriteLn('[INFO] Child process stopped at entry point');
-    WriteLn('[INFO] Debugger has control (process is paused)');
+    if gVerbose then
+    begin
+      WriteLn('[INFO] Child process stopped at entry point');
+      WriteLn('[INFO] Debugger has control (process is paused)');
+    end;
     Result := True;
   end;
 end;
@@ -250,7 +255,8 @@ begin
   // Remove all breakpoints before detaching
   if Length(FBreakpoints) > 0 then
   begin
-    WriteLn('[INFO] Removing all breakpoints before detach');
+    if gVerbose then
+      WriteLn('[INFO] Removing all breakpoints before detach');
     for I := 0 to High(FBreakpoints) do
     begin
       if FBreakpoints[I].Active then
@@ -265,7 +271,8 @@ begin
     Exit;
   end;
 
-  WriteLn('[INFO] Detached from PID ', FPID);
+  if gVerbose then
+    WriteLn('[INFO] Detached from PID ', FPID);
   FAttached := False;
   FPID := -1;
   Result := True;
@@ -877,7 +884,8 @@ begin
       end;
 
       FBreakpoints[Idx].Active := True;
-      WriteLn('[INFO] Reactivated breakpoint at $', IntToHex(Address, 16));
+      if gVerbose then
+        WriteLn('[INFO] Reactivated breakpoint at $', IntToHex(Address, 16));
       Exit(True);
     end;
   end;
@@ -911,7 +919,8 @@ begin
   SetLength(FBreakpoints, Length(FBreakpoints) + 1);
   FBreakpoints[High(FBreakpoints)] := BpInfo;
 
-  WriteLn('[INFO] Breakpoint set at $', IntToHex(Address, 16));
+  if gVerbose then
+    WriteLn('[INFO] Breakpoint set at $', IntToHex(Address, 16));
   Result := True;
 end;
 
@@ -952,7 +961,8 @@ begin
   // Mark as inactive (keep in list for potential reactivation)
   FBreakpoints[Idx].Active := False;
 
-  WriteLn('[INFO] Breakpoint removed from $', IntToHex(Address, 16));
+  if gVerbose then
+    WriteLn('[INFO] Breakpoint removed from $', IntToHex(Address, 16));
   Result := True;
 end;
 

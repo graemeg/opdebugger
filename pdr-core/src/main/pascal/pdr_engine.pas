@@ -187,7 +187,8 @@ begin
     Exit;
   end;
 
-  WriteLn('[INFO] Detaching from process ', FAttachedPID, '...');
+  if gVerbose then
+    WriteLn('[INFO] Detaching from process ', FAttachedPID, '...');
 
   if not FProcessController.Detach then
   begin
@@ -198,7 +199,8 @@ begin
   FAttachedPID := -1;
   FState := dsIdle;
 
-  WriteLn('[INFO] Detached successfully');
+  if gVerbose then
+    WriteLn('[INFO] Detached successfully');
   Result := True;
 end;
 
@@ -245,7 +247,7 @@ begin
     Exit;
   end;
 
-  WriteLn('[INFO] Continuing process...');
+  if gVerbose then WriteLn('[INFO] Continuing process...');
 
   if not FProcessController.Continue then
   begin
@@ -259,7 +261,7 @@ begin
 
   // For now, assume process is still paused (at breakpoint or after step)
   // TODO: Add a method to query process state from adapter
-  WriteLn('[INFO] Process stopped and ready for commands');
+  if gVerbose then WriteLn('[INFO] Process stopped and ready for commands');
   Result := True;
 end;
 
@@ -273,7 +275,7 @@ begin
     Exit;
   end;
 
-  WriteLn('[INFO] Stepping...');
+  if gVerbose then WriteLn('[INFO] Stepping...');
 
   if not FProcessController.Step then
   begin
@@ -281,7 +283,7 @@ begin
     Exit;
   end;
 
-  WriteLn('[INFO] Step complete');
+  if gVerbose then WriteLn('[INFO] Step complete');
   Result := True;
 end;
 
@@ -316,18 +318,19 @@ begin
     Exit;
   end;
 
-  WriteLn('[DEBUG] Current address: 0x', IntToHex(CurrentAddr, 16));
+  if gVerbose then WriteLn('[DEBUG] Current address: 0x', IntToHex(CurrentAddr, 16));
 
   // Find current source line
   if not FDebugInfoReader.FindLineByAddress(CurrentAddr, CurrentLine) then
   begin
     WriteLn('[ERROR] No source line found for current address 0x', IntToHex(CurrentAddr, 16));
-    WriteLn('[INFO] Use "step" for instruction-level stepping');
+    if gVerbose then WriteLn('[INFO] Use "step" for instruction-level stepping');
     Exit;
   end;
 
-  WriteLn('[INFO] Current line: ', CurrentLine.FileName, ':', CurrentLine.LineNumber,
-          ' (address: 0x', IntToHex(CurrentLine.Address, 16), ')');
+  if gVerbose then
+    WriteLn('[INFO] Current line: ', CurrentLine.FileName, ':', CurrentLine.LineNumber,
+            ' (address: 0x', IntToHex(CurrentLine.Address, 16), ')');
 
   // Get all line entries for this file
   LineEntries := FDebugInfoReader.GetFileLineEntries(CurrentLine.FileName);
@@ -356,8 +359,9 @@ begin
       end
       else
       begin
-        WriteLn('[DEBUG] Set temp breakpoint at line ', LineEntries[I].LineNumber,
-                ' (0x', IntToHex(LineEntries[I].Address, 16), ')');
+        if gVerbose then
+          WriteLn('[DEBUG] Set temp breakpoint at line ', LineEntries[I].LineNumber,
+                  ' (0x', IntToHex(LineEntries[I].Address, 16), ')');
       end;
     end;
   end;
@@ -369,7 +373,7 @@ begin
     Exit;
   end;
 
-  WriteLn('[INFO] Stepping to next line...');
+  if gVerbose then WriteLn('[INFO] Stepping to next line...');
 
   // Continue until we hit one of the temporary breakpoints
   if not FProcessController.Continue then
@@ -452,7 +456,7 @@ begin
       if FDebugInfoReader.FindAddressByLine(FileName, LineNum, Address) then
       begin
         Result := True;
-        WriteLn('[INFO] Resolved ', FileName, ':', LineNum, ' to address 0x', IntToHex(Address, 8));
+        if gVerbose then WriteLn('[INFO] Resolved ', FileName, ':', LineNum, ' to address 0x', IntToHex(Address, 8));
         Exit;
       end
       else
@@ -553,7 +557,7 @@ begin
   begin
     if FBreakpoints[Idx].Active then
     begin
-      WriteLn('[INFO] Breakpoint already set at ', Location);
+      if gVerbose then WriteLn('[INFO] Breakpoint already set at ', Location);
       Result := FBreakpoints[Idx].Handle;
       Exit;
     end
@@ -564,7 +568,7 @@ begin
       begin
         FBreakpoints[Idx].Active := True;
         Result := FBreakpoints[Idx].Handle;
-        WriteLn('[INFO] Breakpoint #', Result, ' reactivated at 0x', IntToHex(Address, 16));
+        if gVerbose then WriteLn('[INFO] Breakpoint #', Result, ' reactivated at 0x', IntToHex(Address, 16));
       end;
       Exit;
     end;
@@ -590,7 +594,7 @@ begin
   Result := FNextHandle;
   Inc(FNextHandle);
 
-  WriteLn('[INFO] Breakpoint #', Result, ' set at 0x', IntToHex(Address, 16), ' (', Location, ')');
+  if gVerbose then WriteLn('[INFO] Breakpoint #', Result, ' set at 0x', IntToHex(Address, 16), ' (', Location, ')');
 end;
 
 function TDebuggerEngine.RemoveBreakpoint(Handle: TBreakpointHandle): Boolean;
@@ -616,7 +620,7 @@ begin
   // Check if already inactive
   if not FBreakpoints[Idx].Active then
   begin
-    WriteLn('[INFO] Breakpoint #', Handle, ' already removed');
+    if gVerbose then WriteLn('[INFO] Breakpoint #', Handle, ' already removed');
     Result := True;
     Exit;
   end;
@@ -632,8 +636,9 @@ begin
   FBreakpoints[Idx].Active := False;
   Result := True;
 
-  WriteLn('[INFO] Breakpoint #', Handle, ' removed from 0x',
-          IntToHex(FBreakpoints[Idx].Address, 16));
+  if gVerbose then
+    WriteLn('[INFO] Breakpoint #', Handle, ' removed from 0x',
+            IntToHex(FBreakpoints[Idx].Address, 16));
 end;
 
 { Inspection }
@@ -681,7 +686,7 @@ begin
   { Get current registers }
   if not FProcessController.GetRegisters(Regs) then
   begin
-    WriteLn('[DEBUG] Failed to get registers for callstack');
+    if gVerbose then WriteLn('[DEBUG] Failed to get registers for callstack');
     Exit;
   end;
 

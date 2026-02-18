@@ -1,6 +1,5 @@
 run
-break test_12_teaser_demo.pas:35
+break test_12_teaser_demo.pas:37
 continue
-print Obj
-print Today
+print ParentVar
 quit

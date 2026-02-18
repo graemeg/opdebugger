@@ -337,6 +337,11 @@ type
     function GetState: TDebuggerState;
   end;
 
+{ Global verbose flag — controls [DEBUG] and internal [INFO] message output.
+  Set to True via the 'verbose on' command to enable diagnostic output. }
+var
+  gVerbose: Boolean = False;
+
 implementation
 
 end.

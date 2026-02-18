@@ -256,7 +256,8 @@ begin
     ELFStream := TELFSectionReader.ExtractSection(BinaryPath, '.opdf');
     if Assigned(ELFStream) then
     begin
-      WriteLn('[INFO] Loading embedded OPDF section from: ', BinaryPath);
+      if gVerbose then
+        WriteLn('[INFO] Loading embedded OPDF section from: ', BinaryPath);
       FStream := ELFStream; { FStream owns the TMemoryStream }
       FOPDFPath := BinaryPath;
       FReader := TOPDFReader.Create(FStream);
@@ -302,10 +303,13 @@ begin
     Exit;
   end;
 
-  WriteLn('[INFO] OPDF version: ', FHeader.Version);
-  WriteLn('[INFO] Target architecture: ', ArchToString(TTargetArch(FHeader.TargetArch)));
-  WriteLn('[INFO] Pointer size: ', FHeader.PointerSize, ' bytes');
-  WriteLn('[INFO] Total records: ', FHeader.TotalRecords);
+  if gVerbose then
+  begin
+    WriteLn('[INFO] OPDF version: ', FHeader.Version);
+    WriteLn('[INFO] Target architecture: ', ArchToString(TTargetArch(FHeader.TargetArch)));
+    WriteLn('[INFO] Pointer size: ', FHeader.PointerSize, ' bytes');
+    WriteLn('[INFO] Total records: ', FHeader.TotalRecords);
+  end;
 
   // Read all records and cache them
   while not FReader.AtEnd do
@@ -496,9 +500,10 @@ begin
             PScope^.Name := FunctionName;
 
             FFunctionScopes.Add(PScope);
-            WriteLn('[DEBUG] Loaded function scope: ', FunctionName,
-                    ' [$', IntToHex(DefFunctionScope.LowPC, 8), ' - $',
-                    IntToHex(DefFunctionScope.HighPC, 8), ']');
+            if gVerbose then
+              WriteLn('[DEBUG] Loaded function scope: ', FunctionName,
+                      ' [$', IntToHex(DefFunctionScope.LowPC, 8), ' - $',
+                      IntToHex(DefFunctionScope.HighPC, 8), ']');
           end;
         end;
 
@@ -716,7 +721,8 @@ begin
     end;
   end;
 
-  WriteLn('[DEBUG] Variable not found: ', Name);
+  if gVerbose then
+    WriteLn('[DEBUG] Variable not found: ', Name);
 end;
 
 { Find variable with scope awareness - checks local variables first, then globals }
@@ -759,8 +765,9 @@ begin
         VarInfo.LocationExpr := LocalVar.LocationExpr;
         VarInfo.LocationData := LocalVar.LocationData;
         Result := True;
-        WriteLn('[DEBUG] Found local var: ', LocalVar.Name, ' LocationExpr=', LocalVar.LocationExpr,
-                ' LocationData=', LocalVar.LocationData);
+        if gVerbose then
+          WriteLn('[DEBUG] Found local var: ', LocalVar.Name, ' LocationExpr=', LocalVar.LocationExpr,
+                  ' LocationData=', LocalVar.LocationData);
         Exit;
       end;
     end;
@@ -787,8 +794,9 @@ begin
           VarInfo.LocationExpr := 2; { Parent frame RBP-relative }
           VarInfo.LocationData := LocalVar.LocationData;
           Result := True;
-          WriteLn('[DEBUG] Found enclosing scope var: ', LocalVar.Name,
-                  ' in ', FuncScope^.Name, ' LocationData=', LocalVar.LocationData);
+          if gVerbose then
+            WriteLn('[DEBUG] Found enclosing scope var: ', LocalVar.Name,
+                    ' in ', FuncScope^.Name, ' LocationData=', LocalVar.LocationData);
           Exit;
         end;
       end;
@@ -824,7 +832,8 @@ begin
     end;
   end;
 
-  WriteLn('[DEBUG] Type not found: TypeID=', TypeID);
+  if gVerbose then
+    WriteLn('[DEBUG] Type not found: TypeID=', TypeID);
 end;
 
 function TOPDFReaderAdapter.GetGlobalVariables: TStringArray;
