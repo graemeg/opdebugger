@@ -238,6 +238,9 @@ type
     { Get address of last breakpoint hit (before handling) }
     function GetLastBreakpointAddress: QWord;
 
+    { Get frame base pointer saved at last breakpoint hit (before single-step) }
+    function GetLastBreakpointRBP: QWord;
+
     { Set command-line arguments for program }
     function SetCommandLineArgs(const Args: array of String): Boolean;
   end;

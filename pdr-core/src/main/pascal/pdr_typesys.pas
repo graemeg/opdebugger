@@ -1175,8 +1175,13 @@ begin
     Exit;
   end;
 
-  { Try scope-aware lookup first if process is running }
-  RIP := FProcessController.GetCurrentAddress;
+  { Try scope-aware lookup using the last breakpoint address.
+    GetCurrentAddress() returns the RIP AFTER the single-step that reinserts the
+    breakpoint, which may be inside a called function (e.g. WriteLn). The last
+    breakpoint address is the original source line address and gives the correct scope. }
+  RIP := FProcessController.GetLastBreakpointAddress;
+  if RIP = 0 then
+    RIP := FProcessController.GetCurrentAddress;
   if RIP <> 0 then
   begin
     if FDebugInfoReader.FindVariableWithScope(VarName, RIP, VarInfo) then
@@ -1204,6 +1209,8 @@ var
   Evaluator: ITypeEvaluator;
   ComputedVarInfo: TVariableInfo;
   RBP: QWord;
+  ParentRBP: QWord;
+  RBPBuf: array[0..7] of Byte;
 begin
   Result.Name := VarInfo.Name;
   Result.IsValid := False;
@@ -1218,17 +1225,40 @@ begin
 
   Result.TypeName := TypeInfo.Name;
 
-  { Compute actual address for stack-based variables }
+  { Compute actual address for stack-based variables.
+    Use the RBP saved at the last breakpoint hit (before single-step), because after
+    the single-step the CPU may have entered a called function, changing the frame. }
   ComputedVarInfo := VarInfo;
-  if (VarInfo.LocationExpr = 1) then { RBP-relative }
+  if (VarInfo.LocationExpr = 1) then { RBP-relative (current frame) }
   begin
-    RBP := FProcessController.GetFrameBasePointer;
+    RBP := FProcessController.GetLastBreakpointRBP;
+    if RBP = 0 then
+      RBP := FProcessController.GetFrameBasePointer;
     if RBP <> 0 then
     begin
       ComputedVarInfo.Address := RBP + VarInfo.LocationData;
       WriteLn('[DEBUG] Computed address for ', VarInfo.Name, ': RBP=$',
               IntToHex(RBP, 16), ' + ', VarInfo.LocationData, ' = $',
               IntToHex(ComputedVarInfo.Address, 16));
+    end;
+  end
+  else if (VarInfo.LocationExpr = 2) then { Parent frame RBP-relative (nested procedure) }
+  begin
+    RBP := FProcessController.GetLastBreakpointRBP;
+    if RBP = 0 then
+      RBP := FProcessController.GetFrameBasePointer;
+    if RBP <> 0 then
+    begin
+      { Follow the saved RBP chain: the saved RBP at [RBP+0] is the caller's RBP }
+      FillChar(RBPBuf, SizeOf(RBPBuf), 0);
+      if FProcessController.ReadMemory(RBP, 8, RBPBuf) then
+      begin
+        ParentRBP := PQWord(@RBPBuf)^;
+        ComputedVarInfo.Address := ParentRBP + VarInfo.LocationData;
+        WriteLn('[DEBUG] Computed parent frame address for ', VarInfo.Name,
+                ': ParentRBP=$', IntToHex(ParentRBP, 16), ' + ', VarInfo.LocationData,
+                ' = $', IntToHex(ComputedVarInfo.Address, 16));
+      end;
     end;
   end;
 

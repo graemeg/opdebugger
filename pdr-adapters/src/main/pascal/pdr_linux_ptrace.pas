@@ -31,6 +31,7 @@ type
     FAttached: Boolean;
     FBreakpoints: array of TBreakpointInfo;
     FLastBreakpointAddr: QWord;  // Address of last breakpoint hit (before handling)
+    FLastBreakpointRBP: QWord;   // Frame base pointer saved at last breakpoint hit
     FCommandLineArgs: array of String;  // Command-line arguments for the program
 
     { Breakpoint management helpers }
@@ -58,6 +59,9 @@ type
 
     { Get the address of the last breakpoint that was hit (before handling) }
     function GetLastBreakpointAddress: QWord;
+
+    { Get the frame base pointer saved at last breakpoint hit (before single-step) }
+    function GetLastBreakpointRBP: QWord;
 
     { Set command-line arguments for program }
     function SetCommandLineArgs(const Args: array of String): Boolean;
@@ -738,8 +742,14 @@ begin
   BreakpointAddr := Regs.EIP - 1;
   {$ENDIF}
 
-  // Store the breakpoint address for StepLine to use
+  // Store the breakpoint address and frame pointer for scope-aware variable evaluation
   FLastBreakpointAddr := BreakpointAddr;
+  {$IFDEF CPUX86_64}
+  FLastBreakpointRBP := Regs.RBP;
+  {$ENDIF}
+  {$IFDEF CPUI386}
+  FLastBreakpointRBP := Regs.EBP;
+  {$ENDIF}
 
   // Find the breakpoint at this address
   Idx := FindBreakpoint(BreakpointAddr);
@@ -995,6 +1005,11 @@ end;
 function TLinuxPtraceAdapter.GetLastBreakpointAddress: QWord;
 begin
   Result := FLastBreakpointAddr;
+end;
+
+function TLinuxPtraceAdapter.GetLastBreakpointRBP: QWord;
+begin
+  Result := FLastBreakpointRBP;
 end;
 
 function TLinuxPtraceAdapter.SetCommandLineArgs(const Args: array of String): Boolean;

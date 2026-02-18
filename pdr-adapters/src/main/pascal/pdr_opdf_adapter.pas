@@ -725,10 +725,11 @@ function TOPDFReaderAdapter.FindVariableWithScope(const Name: String; RIP: QWord
 var
   ScopeID: Cardinal;
   Locals: TLocalVariableArray;
-  I: Integer;
+  I, J: Integer;
   LocalVar: TLocalVariableInfo;
   SearchName: String;
   DemangledName: String;
+  FuncScope: PFunctionScope;
 begin
   Result := False;
 
@@ -740,7 +741,7 @@ begin
 
   SearchName := LowerCase(Name);
 
-  { Try to find in local variables first }
+  { Try to find in local variables first (current scope) }
   ScopeID := GetCurrentFunctionScope(RIP);
   if ScopeID <> 0 then
   begin
@@ -761,6 +762,35 @@ begin
         WriteLn('[DEBUG] Found local var: ', LocalVar.Name, ' LocationExpr=', LocalVar.LocationExpr,
                 ' LocationData=', LocalVar.LocationData);
         Exit;
+      end;
+    end;
+
+    { Not found in current scope — search enclosing scopes (for nested procedures).
+      When a nested procedure accesses a variable from an outer procedure, the variable
+      is located in the outer frame. We use LocationExpr=2 to signal that the address
+      must be computed via the saved RBP chain: parent_RBP = *(current_RBP). }
+    for I := 0 to FFunctionScopes.Count - 1 do
+    begin
+      FuncScope := PFunctionScope(FFunctionScopes[I]);
+      if FuncScope^.ScopeID = ScopeID then
+        Continue; { Skip current scope — already searched }
+
+      Locals := FindLocalVariablesInScope(FuncScope^.ScopeID);
+      for J := 0 to High(Locals) do
+      begin
+        LocalVar := Locals[J];
+        if LowerCase(LocalVar.Name) = SearchName then
+        begin
+          VarInfo.Name := LocalVar.Name;
+          VarInfo.TypeID := LocalVar.TypeID;
+          VarInfo.Address := 0;
+          VarInfo.LocationExpr := 2; { Parent frame RBP-relative }
+          VarInfo.LocationData := LocalVar.LocationData;
+          Result := True;
+          WriteLn('[DEBUG] Found enclosing scope var: ', LocalVar.Name,
+                  ' in ', FuncScope^.Name, ' LocationData=', LocalVar.LocationData);
+          Exit;
+        end;
       end;
     end;
   end;

@@ -145,7 +145,7 @@ Integration of OPDF generation directly into the Free Pascal Compiler, eliminati
 * [x] appendsym_localvar — Local variables with RBP-relative stack offset (REC_LOCALVAR)
 * [x] appendsym_paravar — Parameters with var/const flags (REC_PARAMETER)
 * [x] appendsym_fieldvar — No-op: fields emitted inline within record/class records
-* [x] appendsym_property — No-op: property access resolved via field offsets in class record
+* [x] appendsym_property — Emit REC_PROPERTY records (ClassTypeID, PropertyTypeID, ReadType/Addr, WriteType/Addr) from within appenddef_object class iteration
 * [x] appendprocdef — Function scope records with label-based LowPC/HighPC (REC_FUNCSCOPE)
 * [x] OPDF format extended: TDefEnum, TEnumMember, TDefInterface, TInterfaceMethodDescriptor added to ogopdf.pas
 * [x] OPDF I/O extended: WriteEnum, WriteInterface, WriteRecord, WriteParameter + Read counterparts in opdf_io.pas
@@ -162,13 +162,33 @@ Integration of OPDF generation directly into the Free Pascal Compiler, eliminati
 * [x] Fix static array element count (was displaying too many elements due to inverted logic)
 * [x] Fix dynamic array length reading (x86_64: high value at offset -8 as SizeInt, not -4 as LongInt)
 * [x] Add dot-notation field access for class and record types (MyShape.FName, MyPoint.X)
+* [x] Add recProperty handler to pdr_opdf_adapter.pas: field-backed properties exposed as TDebuggerProperty with ReadOffset
+* [x] Add ResolveClassProperty to TTypeSystem: walks inheritance chain, evaluates field-backed props, marks method-backed as non-evaluable
+* [x] 32-bit dynamic array support: use GetPointerSize to select between PLongInt (32-bit) and PInt64 (64-bit) for high-value read
 * [x] Verified: 481 types, 16 variables, 4 function scopes, 61 line mappings loaded from test_phase2_types binary
+* [x] Property access verified: MyShape.Name (field-backed, inherited) evaluates correctly; method-backed prints informative message
+* [x] Fix nested procedure scope variable access (ParentVar, Names visible from InnerNested)
+  ** `FindVariableWithScope`: after current scope fails, searches all other scopes; returns `LocationExpr=2` (parent frame) for enclosing scope variables
+  ** `EvaluateVariableInfo`: `LocationExpr=2` follows saved RBP chain — `parent_RBP = *(breakpoint_RBP)`, `address = parent_RBP + LocationData`
+  ** Root cause: single-step in `HandleBreakpointHit` moves RIP/RBP into called code; fix uses `GetLastBreakpointAddress` + `GetLastBreakpointRBP` for scope/address lookup
+  ** `GetLastBreakpointRBP: QWord` added to `IProcessController`; `TLinuxPtraceAdapter` saves RBP before single-step
 
 == Current Work Item
 
-**Phase 2 complete** — Both FPC compiler type handlers and standalone debugger reader/evaluators are fully functional. All type categories work: primitives, floats, enums, strings, pointers, arrays (static + dynamic), records, classes, and interfaces.
+**Nested procedure variable access complete** — Variables from enclosing procedure scopes are now visible from inner nested procedures. Supports one level of nesting via saved-RBP-chain traversal.
 
-**Next**: Update OPDF specification to document embedded storage format, or begin Phase 2+ improvements (nested field access, property getter evaluation, class inheritance field display).
+**Verified with TeaserDemo.pas**:
+
+* `ParentVar` = 'Initial Value' at line 43 (before assignment in InnerNested) ✓
+* `ParentVar` = 'Modified by Nest' at line 45 (after assignment) ✓
+* `Names` array shows 'Monday'/'Tuesday' correctly from inside InnerNested ✓
+* Call stack shows `InnerNested → OuterProcedure → main` ✓
+
+**Known limitations**:
+
+* `set of Enum` types have no evaluator — display as `<error: type not found>` (TDaySet)
+* Arrays indexed by enum type (e.g. `array[TDays] of string`) display as `[0..6]` rather than `[Mon..Sun]`
+* Nested procedure static link not modelled in OPDF — using saved RBP chain as approximation (works for one level of nesting)
 
 [[Embedding Decision]]
 === Embedding Decision: External File vs ELF Section (RESOLVED)
