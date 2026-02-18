@@ -1,0 +1,6 @@
+run
+break test_12_teaser_demo.pas:35
+continue
+print Obj
+print Today
+quit
