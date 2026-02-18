@@ -217,6 +217,13 @@ begin
       else
         Result.Value := 'False';
     end
+    // Special formatting for Char / AnsiChar (display as character, not ordinal)
+    else if (TypeInfo.Size = 1) and
+            ((UpperCase(TypeInfo.Name) = 'CHAR') or
+             (UpperCase(TypeInfo.Name) = 'ANSICHAR')) then
+    begin
+      Result.Value := Chr(Byte(UValue));
+    end
     else
     begin
       Result.Value := IntToStr(UValue);
@@ -458,6 +465,7 @@ var
   FieldInfo: TVariableInfo;
   FieldValue: TVariableValue;
   FieldOutput: String;
+  Prop: TDebuggerProperty;
 begin
   Result.Name := TFPCDemangler.Demangle(VarInfo.Name);
   Result.TypeName := TypeInfo.Name;
@@ -510,6 +518,23 @@ begin
     begin
       // TypeID not resolved yet, skip detailed evaluation
       FieldOutput := FieldOutput + FieldInfo.Name + ': <untyped>';
+    end;
+  end;
+
+  // Append field-backed properties (readable without calling a method)
+  for I := 0 to High(TypeInfo.ClassInfo^.Properties) do
+  begin
+    Prop := TypeInfo.ClassInfo^.Properties[I];
+    if Prop.ReadKind = pakField then
+    begin
+      FieldInfo.Name := Prop.Name;
+      FieldInfo.TypeID := Prop.TypeID;
+      FieldInfo.Address := InstancePtr + Prop.ReadOffset;
+      FieldInfo.LocationExpr := 0;
+      FieldInfo.LocationData := 0;
+      if FieldOutput <> '' then FieldOutput := FieldOutput + ', ';
+      FieldValue := TypeSystem.EvaluateVariableInfo(FieldInfo);
+      FieldOutput := FieldOutput + Prop.Name + ': ' + FieldValue.Value;
     end;
   end;
 

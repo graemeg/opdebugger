@@ -248,8 +248,8 @@ procedure TCLIDebugger.Run(const BinaryPath: String; const Args: array of String
 var
   CmdLine: String;
 begin
-  WriteLn('PDR (Pascal Debug Reference) v0.1.0');
-  WriteLn('Copyright (c) 2025 Graeme Geldenhuys');
+  WriteLn('PDR (Pascal Debug Reference) v0.2.0');
+  WriteLn('Copyright (c) 2025-2026 Graeme Geldenhuys');
   WriteLn;
 
   // Store command-line arguments

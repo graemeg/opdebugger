@@ -3,6 +3,8 @@
 # Integration Test Runner for PDR Debugger (Launch Mode)
 #
 # Tests that launch programs directly (for break/next/step commands)
+# Compiles using the FPC OPDF-capable compiler (ppcx64 -gO).
+# Debug information is embedded directly in the binary (.opdf ELF section).
 #
 
 set -e
@@ -21,7 +23,8 @@ PASSED=0
 FAILED=0
 
 PDR_BIN="$PROJECT_ROOT/pdr-cli/target/pdr"
-OPDF_GEN="$PROJECT_ROOT/tools/target/opdf_generator"
+PPCX64="/data/devel/fpc-3.3.1/x86_64-linux/lib/fpc/3.3.1/ppcx64"
+FPC_CFG="/data/devel/fpc-3.3.1/x86_64-linux/lib/fpc/3.3.1/fpc.cfg"
 
 echo "=== PDR Integration Test Runner (Launch Mode) ==="
 echo
@@ -31,21 +34,22 @@ if [ ! -f "$PDR_BIN" ]; then
     exit 1
 fi
 
-if [ ! -f "$OPDF_GEN" ]; then
-    echo -e "${YELLOW}WARNING: OPDF generator not found${NC}"
+if [ ! -f "$PPCX64" ]; then
+    echo -e "${RED}ERROR: OPDF-capable FPC compiler not found: $PPCX64${NC}"
+    exit 1
 fi
 
 # Filter non-deterministic output
 filter_output() {
-    # Remove the debugger prompt (pdr) from each line, then filter
-    # Only match debugger output from print commands, callstack, and step messages
-    # Matches: Myglobalint = 42, Myboolean = True, Instance = ..., etc.
+    # Remove the debugger prompt (pdr) from each line, then filter.
+    # Only capture debugger output from print commands, callstack, and step messages.
+    # Matches: variable names with 2+ chars followed by " = " (e.g. Sum = 15, COUNTER = 42, MyGlobalInt = 42)
     # Matches: [INFO] Stepped to line: ..., stepped to line: ...
     # Matches: [CALLSTACK], #0 ..., #1 ..., etc.
-    # But NOT program output like: MyGlobalInt = 42, MyBoolean = TRUE, Test Program, etc.
+    # Excludes: single-char names (A, B), program WriteLn output (multi-word lines)
     sed 's/^(pdr) //' | \
     sed -E 's/ \(0x[0-9A-Fa-f ]+\)//' | \
-    grep -E "^(([A-Z][a-z]+ = )|(\[INFO\] )?[Ss]tepped to line:|\\[CALLSTACK\\]|#[0-9]+ )" | \
+    grep -E "^(([A-Z][A-Za-z0-9_]+ = )|(\[INFO\] )?[Ss]tepped to line:|\\[CALLSTACK\\]|#[0-9]+ )" | \
     sed 's/^\[INFO\] //' || true
 }
 
@@ -55,26 +59,17 @@ run_test() {
 
     echo -e "${YELLOW}Running: $test_base${NC}"
 
-    # Compile
-    echo "  [1/4] Compiling..."
-    if ! fpc -g "$test_name" -o"$test_base" > "$test_base.compile.log" 2>&1; then
+    # Compile with FPC OPDF support (embeds debug info in .opdf ELF section)
+    echo "  [1/3] Compiling..."
+    if ! "$PPCX64" "@$FPC_CFG" -gO "$test_name" -o"$test_base" > "$test_base.compile.log" 2>&1; then
         echo -e "${RED}  FAILED: Compilation${NC}"
+        cat "$test_base.compile.log"
         ((FAILED++))
         return 1
     fi
 
-    # Generate OPDF
-    if [ -f "$OPDF_GEN" ]; then
-        echo "  [2/4] Generating OPDF..."
-        if ! "$OPDF_GEN" "$test_base" > "$test_base.opdf.log" 2>&1; then
-            echo -e "${RED}  FAILED: OPDF generation${NC}"
-            ((FAILED++))
-            return 1
-        fi
-    fi
-
     # Run PDR with commands
-    echo "  [3/4] Running PDR..."
+    echo "  [2/3] Running PDR..."
     if [ -f "$test_base.commands" ]; then
         cat "$test_base.commands" | "$PDR_BIN" "$test_base" 2>&1 | filter_output > "$test_base.actual"
     else
@@ -83,7 +78,7 @@ run_test() {
     fi
 
     # Compare (case-insensitive for Pascal, address-normalized)
-    echo "  [4/4] Comparing output..."
+    echo "  [3/3] Comparing output..."
     if [ -f "$test_base.expected" ]; then
         # Normalize addresses in both files (replace hex addresses with placeholder)
         # Then convert to lowercase for case-insensitive comparison

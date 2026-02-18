@@ -18,8 +18,8 @@ begin
 
   WriteLn('Test Program: Primitives');
   WriteLn('PID: ', {$IFDEF UNIX}FpGetPID{$ELSE}GetCurrentProcessId{$ENDIF});
-  WriteLn('MyGlobalInt = ', MyGlobalInt);
-  WriteLn('MyBoolean = ', MyBoolean);
+  WriteLn('[PROG] MyGlobalInt = ', MyGlobalInt);
+  WriteLn('[PROG] MyBoolean = ', MyBoolean);
   WriteLn;
   WriteLn('Press Enter to continue (debugger can attach now)...');
   ReadLn;

@@ -1041,6 +1041,9 @@ begin
     if (Address >= FuncScope^.LowPC) and (Address < FuncScope^.HighPC) then
     begin
       FuncInfo.Name := FuncScope^.Name;
+      { Strip FPC's leading '$' from internal names (e.g. '$main' -> 'main') }
+      if (Length(FuncInfo.Name) > 1) and (FuncInfo.Name[1] = '$') then
+        FuncInfo.Name := Copy(FuncInfo.Name, 2, Length(FuncInfo.Name) - 1);
       FuncInfo.LowPC := FuncScope^.LowPC;
       FuncInfo.HighPC := FuncScope^.HighPC;
       Result := True;
