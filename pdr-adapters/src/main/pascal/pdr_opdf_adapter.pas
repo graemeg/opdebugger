@@ -219,6 +219,7 @@ var
   DefEnum: TDefEnum;
   DefParameter: TDefParameter;
   DefInterface: TDefInterface;
+  DefProperty: TDefProperty;
   ClassFields: TFieldDescriptorArray;
   ClassFieldNames: array of String;
   RecordFields: TFieldDescriptorArray;
@@ -599,6 +600,35 @@ begin
             end;
 
             FTypes.Add(IntToStr(DefEnum.TypeID), PType);
+          end;
+        end;
+
+      recProperty:
+        begin
+          if FReader.ReadProperty(DefProperty, VarName) then
+          begin
+            { Find the owning class by ClassTypeID and add this property }
+            for I := 0 to FTypes.Count - 1 do
+            begin
+              PType := PTypeInfo(FTypes[I]);
+              if Assigned(PType) and (PType^.TypeID = DefProperty.ClassTypeID) and
+                 (PType^.Category = tcClass) and Assigned(PType^.ClassInfo) then
+              begin
+                { Append to Properties array }
+                SetLength(PType^.ClassInfo^.Properties,
+                          Length(PType^.ClassInfo^.Properties) + 1);
+                with PType^.ClassInfo^.Properties[High(PType^.ClassInfo^.Properties)] do
+                begin
+                  Name := VarName;
+                  TypeID := DefProperty.PropertyTypeID;
+                  ReadKind  := TPropertyAccessKind(DefProperty.ReadType);
+                  WriteKind := TPropertyAccessKind(DefProperty.WriteType);
+                  ReadOffset  := DefProperty.ReadAddr;
+                  WriteOffset := DefProperty.WriteAddr;
+                end;
+                Break;
+              end;
+            end;
           end;
         end;
 

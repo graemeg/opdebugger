@@ -130,6 +130,10 @@ type
 
     { Resolve dot-notation field access (e.g. MyShape.FName) }
     function ResolveFieldAccess(const BaseName, FieldPath: String): TVariableValue;
+
+    { Resolve a property name on a class instance, walking the inheritance chain }
+    function ResolveClassProperty(const ClassTypeInfo: TTypeInfo;
+      InstancePtr: QWord; const PropName: String): TVariableValue;
   public
     constructor Create(AProcessController: IProcessController; ADebugInfoReader: IDebugInfoReader);
     destructor Destroy; override;
@@ -607,6 +611,7 @@ var
   ArrayPtr: QWord;
   ArrayHigh: Int64;
   ArrayLength: LongInt;
+  PtrSize: Byte;
   I, MaxElements: Integer;
   ElementSize: Cardinal;
   ElementTypeInfo: TTypeInfo;
@@ -619,15 +624,22 @@ begin
   Result.Address := VarInfo.Address;
   Result.IsValid := False;
 
+  { Get pointer/SizeInt size from debug info (4 for 32-bit, 8 for 64-bit) }
+  PtrSize := TypeSystem.FDebugInfoReader.GetPointerSize;
+  if PtrSize = 0 then PtrSize := 8; { Default to 64-bit }
+
   { Read pointer to array data }
   FillChar(PointerBuf, SizeOf(PointerBuf), 0);
-  if not ProcessController.ReadMemory(VarInfo.Address, 8, PointerBuf) then
+  if not ProcessController.ReadMemory(VarInfo.Address, PtrSize, PointerBuf) then
   begin
     Result.Value := '<error: failed to read array pointer>';
     Exit;
   end;
 
-  ArrayPtr := PQWord(@PointerBuf)^;
+  if PtrSize = 4 then
+    ArrayPtr := PDWord(@PointerBuf)^
+  else
+    ArrayPtr := PQWord(@PointerBuf)^;
 
   { Nil array }
   if ArrayPtr = 0 then
@@ -637,16 +649,19 @@ begin
     Exit;
   end;
 
-  { Read array high value (stored at ArrayPtr - 8 as SizeInt on x86_64).
-    FPC stores the high index (Length-1), not the length itself. }
+  { Read array high value. FPC stores the high index (Length-1) at
+    ArrayPtr - SizeOf(SizeInt). SizeInt matches pointer size. }
   FillChar(HighBuf, SizeOf(HighBuf), 0);
-  if not ProcessController.ReadMemory(ArrayPtr - 8, 8, HighBuf) then
+  if not ProcessController.ReadMemory(ArrayPtr - PtrSize, PtrSize, HighBuf) then
   begin
     Result.Value := '<error: failed to read array length>';
     Exit;
   end;
 
-  ArrayHigh := PInt64(@HighBuf)^;
+  if PtrSize = 4 then
+    ArrayHigh := PLongInt(@HighBuf)^
+  else
+    ArrayHigh := PInt64(@HighBuf)^;
   ArrayLength := ArrayHigh + 1;
   if ArrayLength < 0 then ArrayLength := 0;
 
@@ -931,6 +946,63 @@ begin
   FEvaluators.Add(Evaluator);
 end;
 
+function TTypeSystem.ResolveClassProperty(const ClassTypeInfo: TTypeInfo;
+  InstancePtr: QWord; const PropName: String): TVariableValue;
+var
+  CurrentTypeInfo: TTypeInfo;
+  ParentTypeInfo: TTypeInfo;
+  I: Integer;
+  Prop: TDebuggerProperty;
+  PropVarInfo: TVariableInfo;
+begin
+  Result.IsValid := False;
+  Result.Value := '';
+
+  CurrentTypeInfo := ClassTypeInfo;
+  { Walk the inheritance chain }
+  repeat
+    if (CurrentTypeInfo.Category <> tcClass) or (CurrentTypeInfo.ClassInfo = nil) then
+      Break;
+
+    { Search properties in this class level }
+    for I := 0 to High(CurrentTypeInfo.ClassInfo^.Properties) do
+    begin
+      Prop := CurrentTypeInfo.ClassInfo^.Properties[I];
+      if CompareText(Prop.Name, PropName) = 0 then
+      begin
+        case Prop.ReadKind of
+          pakField:
+            begin
+              PropVarInfo.Name := Prop.Name;
+              PropVarInfo.TypeID := Prop.TypeID;
+              PropVarInfo.Address := InstancePtr + Prop.ReadOffset;
+              PropVarInfo.LocationExpr := 0;
+              PropVarInfo.LocationData := 0;
+              Result := EvaluateVariableInfo(PropVarInfo);
+            end;
+          pakMethod:
+            begin
+              Result.IsValid := True;
+              Result.Value := '<method getter — cannot evaluate without calling>';
+            end;
+          pakNone:
+            begin
+              Result.IsValid := True;
+              Result.Value := '<write-only property>';
+            end;
+        end;
+        Exit;
+      end;
+    end;
+
+    { Move up to parent class }
+    if (CurrentTypeInfo.ClassInfo^.ParentTypeID = 0) or
+       not FDebugInfoReader.FindType(CurrentTypeInfo.ClassInfo^.ParentTypeID, ParentTypeInfo) then
+      Break;
+    CurrentTypeInfo := ParentTypeInfo;
+  until False;
+end;
+
 function TTypeSystem.ResolveFieldAccess(const BaseName, FieldPath: String): TVariableValue;
 var
   VarInfo: TVariableInfo;
@@ -1023,7 +1095,12 @@ begin
 
     if not Found then
     begin
-      Result.Value := '<error: field "' + FieldName + '" not found>';
+      { Not a direct field — check properties, walking up the inheritance chain }
+      Result := ResolveClassProperty(TypeInfo, InstancePtr, FieldName);
+      if Result.IsValid then
+        Result.Name := BaseName + '.' + FieldName
+      else
+        Result.Value := '<error: field or property "' + FieldName + '" not found>';
       Exit;
     end;
 

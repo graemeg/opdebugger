@@ -69,11 +69,29 @@ type
   end;
   TDebuggerFieldArray = array of TDebuggerField;
 
+  { Property access kind }
+  TPropertyAccessKind = (
+    pakField,    // Direct field access — offset stored in ReadOffset/WriteOffset
+    pakMethod,   // Getter/setter method — cannot be evaluated without calling it
+    pakNone      // No accessor (write-only has no reader, read-only has no writer)
+  );
+
+  TDebuggerProperty = record
+    Name: String;
+    TypeID: TTypeID;            // Property return type
+    ReadKind: TPropertyAccessKind;
+    WriteKind: TPropertyAccessKind;
+    ReadOffset: QWord;          // Byte offset in instance (if ReadKind=pakField)
+    WriteOffset: QWord;         // Byte offset in instance (if WriteKind=pakField)
+  end;
+  TDebuggerPropertyArray = array of TDebuggerProperty;
+
   TDebuggerClass = record
     ParentTypeID: TTypeID;
     VMTAddress: QWord;
     InstanceSize: Cardinal;
     Fields: TDebuggerFieldArray;
+    Properties: TDebuggerPropertyArray;
   end;
   PDebuggerClass = ^TDebuggerClass;
 
