@@ -19,10 +19,10 @@ project, covering both the standalone debugger toolchain and the FPC compiler in
 
 * [x] Feature 1: `locals` command — lists all in-scope local variables with evaluated values
 * [x] Feature 1: `locals globals` subcommand — also enumerates global variables
-* [x] Feature 2: `inspect` command — structured multi-line layout for records and classes
+* [x] Feature 2: `inspect` command — structured multi-line layout for records, classes, and interfaces
 * [x] Feature 3: `print <arr>[N..M]` — array slice display with out-of-bounds clamping
 * [x] Feature 4: `set <var> = <value>` — in-process variable assignment (primitives and enums)
-* [x] Integration tests 14–17 covering all four features; 17/17 automated tests passing
+* [x] Integration tests 14–18 covering all four features; 18/18 automated tests passing
 
 === Standalone Debugger (Phases 0–2)
 
@@ -266,7 +266,7 @@ x86_64/cputarg.pas   → dbgopdf registration
 i386/cputarg.pas     → dbgopdf registration
 ----
 
-=== Integration Tests (17 automated)
+=== Integration Tests (18 automated)
 
 ----
 test_01_primitives       → Integer and Boolean variables
@@ -287,6 +287,7 @@ test_14_locals           → locals command: in-scope variable listing
 test_15_inspect          → inspect command: record field layout
 test_16_array_slice      → print MyArray[N..M] slice display with clamping
 test_17_set_variable     → set command: modify Counter and MyFlag in-process
+test_18_inspect_class_intf → inspect command: class + interface with methods
 ----
 
 ---
