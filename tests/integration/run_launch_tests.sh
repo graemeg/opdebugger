@@ -43,13 +43,14 @@ fi
 filter_output() {
     # Remove the debugger prompt (pdr) from each line, then filter.
     # Only capture debugger output from print commands, callstack, and step messages.
-    # Matches: variable names with 2+ chars followed by " = " (e.g. Sum = 15, COUNTER = 42, MyGlobalInt = 42)
+    # Matches: variable names with 2+ chars (optionally followed by [index]) and " = " value
+    #           e.g. Sum = 15, COUNTER = 42, BigArray[2] = 30
     # Matches: [INFO] Stepped to line: ..., stepped to line: ...
     # Matches: [CALLSTACK], #0 ..., #1 ..., etc.
     # Excludes: single-char names (A, B), program WriteLn output (multi-word lines)
     sed 's/^(pdr) //' | \
     sed -E 's/ \(0x[0-9A-Fa-f ]+\)//' | \
-    grep -E "^(([A-Z][A-Za-z0-9_]+ = )|(\[INFO\] )?[Ss]tepped to line:|\\[CALLSTACK\\]|#[0-9]+ )" | \
+    grep -E "^(([A-Z][A-Za-z0-9_]+(\[[0-9]+\])? = )|(\[INFO\] )?[Ss]tepped to line:|\\[CALLSTACK\\]|#[0-9]+ )" | \
     sed 's/^\[INFO\] //' || true
 }
 

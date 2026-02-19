@@ -81,6 +81,33 @@ begin
   WriteLn;
 end;
 
+{ Parse "VarName[N..M]" slice notation from a print expression.
+  Returns True and fills VarName, LowIdx, HighIdx if the pattern is found. }
+function TryParseSlice(const Expr: String; out VarName: String;
+                       out LowIdx, HighIdx: Int64): Boolean;
+var
+  BracketOpen, BracketClose, DotDotPos: Integer;
+  IndexStr: String;
+begin
+  Result := False;
+  BracketOpen  := Pos('[', Expr);
+  BracketClose := Pos(']', Expr);
+  if (BracketOpen = 0) or (BracketClose = 0) or (BracketClose < BracketOpen) then
+    Exit;
+
+  IndexStr := Copy(Expr, BracketOpen + 1, BracketClose - BracketOpen - 1);
+  DotDotPos := Pos('..', IndexStr);
+  if DotDotPos = 0 then Exit;
+
+  VarName := Copy(Expr, 1, BracketOpen - 1);
+  if VarName = '' then Exit;
+
+  if not TryStrToInt64(Trim(Copy(IndexStr, 1, DotDotPos - 1)), LowIdx) then Exit;
+  if not TryStrToInt64(Trim(Copy(IndexStr, DotDotPos + 2, Length(IndexStr))), HighIdx) then Exit;
+
+  Result := True;
+end;
+
 procedure TCLIDebugger.ProcessCommand(const CmdLine: String);
 var
   Parts: TStringArray;
@@ -93,6 +120,9 @@ var
   CallStack: TStringArray;
   LocalVars: TVariableValueArray;
   GlobalNames: TStringArray;
+  SliceResult: TVariableValueArray;
+  SliceVarName: String;
+  SliceLow, SliceHigh: Int64;
   I: Integer;
 begin
   if Trim(CmdLine) = '' then
@@ -174,12 +204,27 @@ begin
           Exit;
         end;
 
-        VarValue := FEngine.EvaluateExpression(Parts[1]);
-
-        if VarValue.IsValid then
-          WriteLn(VarValue.Name, ' = ', VarValue.Value)
+        { Check for array slice notation: VarName[N..M] }
+        if TryParseSlice(Parts[1], SliceVarName, SliceLow, SliceHigh) then
+        begin
+          SliceResult := FEngine.EvaluateArraySlice(SliceVarName, SliceLow, SliceHigh);
+          for I := 0 to High(SliceResult) do
+          begin
+            if SliceResult[I].IsValid then
+              WriteLn(SliceResult[I].Name, ' = ', SliceResult[I].Value)
+            else
+              WriteLn('[ERROR] ', SliceResult[I].Name, ': ', SliceResult[I].Value);
+          end;
+        end
         else
-          WriteLn('[ERROR] ', VarValue.Value);
+        begin
+          VarValue := FEngine.EvaluateExpression(Parts[1]);
+
+          if VarValue.IsValid then
+            WriteLn(VarValue.Name, ' = ', VarValue.Value)
+          else
+            WriteLn('[ERROR] ', VarValue.Value);
+        end;
       end;
 
     'break', 'b':

@@ -70,6 +70,8 @@ type
     function EvaluateExpression(const Expr: String): TVariableValue;
     function GetLocalVariables: TVariableValueArray;
     function GetInspectLines(const Expr: String): TStringArray;
+    function EvaluateArraySlice(const VarName: String;
+                                LowIndex, HighIndex: Int64): TVariableValueArray;
     function GetCallStack(Limit: Integer = 0): TStringArray;
 
     { ICommandHandler - State query }
@@ -836,6 +838,102 @@ begin
       else
         AddLine('[INSPECT] ' + SingleValue.Value);
     end;
+  end;
+end;
+
+function TDebuggerEngine.EvaluateArraySlice(const VarName: String;
+                                             LowIndex, HighIndex: Int64): TVariableValueArray;
+var
+  RIP: QWord;
+  VarInfo: TVariableInfo;
+  TypeInfo: TTypeInfo;
+  ElemTypeInfo: TTypeInfo;
+  ElemSize: Cardinal;
+  LowerBound, UpperBound: Int64;
+  BaseAddr: QWord;
+  RBP: QWord;
+  I: Int64;
+  ElemInfo: TVariableInfo;
+  ElemValue: TVariableValue;
+begin
+  SetLength(Result, 0);
+  if FState = dsIdle then Exit;
+
+  RIP := FProcessController.GetLastBreakpointAddress;
+  if RIP = 0 then RIP := FProcessController.GetCurrentAddress;
+
+  if not FDebugInfoReader.FindVariableWithScope(VarName, RIP, VarInfo) then
+  begin
+    WriteLn('[ERROR] Variable not found: ', VarName);
+    Exit;
+  end;
+
+  if not FDebugInfoReader.FindType(VarInfo.TypeID, TypeInfo) then
+  begin
+    WriteLn('[ERROR] Type not found for: ', VarName);
+    Exit;
+  end;
+
+  if TypeInfo.Category <> tcArray then
+  begin
+    WriteLn('[ERROR] Variable is not an array: ', VarName);
+    Exit;
+  end;
+
+  if not FDebugInfoReader.FindType(TypeInfo.ElementTypeID, ElemTypeInfo) then
+  begin
+    WriteLn('[ERROR] Element type not found');
+    Exit;
+  end;
+
+  ElemSize := ElemTypeInfo.Size;
+  if ElemSize = 0 then ElemSize := 1;
+
+  if Length(TypeInfo.Bounds) = 0 then
+  begin
+    WriteLn('[ERROR] Array has no bounds info');
+    Exit;
+  end;
+
+  LowerBound := TypeInfo.Bounds[0].LowerBound;
+  UpperBound := TypeInfo.Bounds[0].UpperBound;
+
+  { Compute actual base address }
+  if VarInfo.LocationExpr = 1 then
+  begin
+    RBP := FProcessController.GetLastBreakpointRBP;
+    if RBP = 0 then RBP := FProcessController.GetFrameBasePointer;
+    BaseAddr := RBP + VarInfo.LocationData;
+  end
+  else
+    BaseAddr := VarInfo.Address;
+
+  { Clamp slice indices to actual bounds with warnings }
+  if LowIndex < LowerBound then
+  begin
+    WriteLn('[WARN] Low index clamped from ', LowIndex, ' to ', LowerBound);
+    LowIndex := LowerBound;
+  end;
+  if HighIndex > UpperBound then
+  begin
+    WriteLn('[WARN] High index clamped from ', HighIndex, ' to ', UpperBound);
+    HighIndex := UpperBound;
+  end;
+
+  if LowIndex > HighIndex then Exit;
+
+  SetLength(Result, HighIndex - LowIndex + 1);
+  for I := LowIndex to HighIndex do
+  begin
+    ElemInfo.Name    := VarName + '[' + IntToStr(I) + ']';
+    ElemInfo.TypeID  := TypeInfo.ElementTypeID;
+    ElemInfo.Address := BaseAddr + QWord(I - LowerBound) * ElemSize;
+    ElemInfo.LocationExpr := 0;
+    ElemInfo.LocationData := 0;
+
+    ElemValue      := FTypeSystem.EvaluateVariableInfo(ElemInfo);
+    ElemValue.Name := VarName + '[' + IntToStr(I) + ']';
+    Result[I - LowIndex] := ElemValue;
   end;
 end;
 
