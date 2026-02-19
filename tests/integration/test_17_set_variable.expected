@@ -1,0 +1,4 @@
+Counter = 5
+Counter = 42
+MyFlag = False
+MyFlag = True

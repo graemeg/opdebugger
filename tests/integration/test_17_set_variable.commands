@@ -1,0 +1,10 @@
+run
+break test_17_set_variable.pas:13
+continue
+print Counter
+set Counter = 42
+print Counter
+print MyFlag
+set MyFlag = True
+print MyFlag
+quit

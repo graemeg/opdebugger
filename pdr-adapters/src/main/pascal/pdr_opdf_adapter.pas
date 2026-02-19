@@ -502,10 +502,6 @@ begin
             PScope^.Name := FunctionName;
 
             FFunctionScopes.Add(PScope);
-//            if gVerbose then
-//              WriteLn('[DEBUG] Loaded function scope: ', FunctionName,
-//                      ' [$', IntToHex(DefFunctionScope.LowPC, 8), ' - $',
-//                      IntToHex(DefFunctionScope.HighPC, 8), ']');
           end;
         end;
 

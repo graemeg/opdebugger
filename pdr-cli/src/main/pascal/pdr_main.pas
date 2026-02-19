@@ -75,6 +75,7 @@ begin
   WriteLn('  locals         - List all local variables in current scope');
   WriteLn('  locals globals - Also include global variables');
   WriteLn('  inspect <var>  - Show structured type layout with all fields/properties');
+  WriteLn('  set <var> = <value> - Assign a value to a variable');
   WriteLn('  verbose [on|off] - Enable/disable diagnostic output (default: off)');
   WriteLn('  help, h        - Show this help');
   WriteLn('  quit, q        - Exit debugger');
@@ -334,6 +335,37 @@ begin
         else
           for I := 0 to High(CallStack) do
             WriteLn(CallStack[I]);
+      end;
+
+    'set':
+      begin
+        { Format: set VarName = Value }
+        if Length(Parts) < 4 then
+        begin
+          WriteLn('[ERROR] Usage: set <variable> = <value>');
+          Exit;
+        end;
+
+        if Parts[2] <> '=' then
+        begin
+          WriteLn('[ERROR] Usage: set <variable> = <value>');
+          Exit;
+        end;
+
+        { Reconstruct value in case it contains spaces }
+        VarValue.Name := Parts[1];
+        VarValue.Value := Parts[3];
+        if Length(Parts) > 4 then
+        begin
+          I := 4;
+          while I <= High(Parts) do
+          begin
+            VarValue.Value := VarValue.Value + ' ' + Parts[I];
+            Inc(I);
+          end;
+        end;
+
+        FEngine.SetVariable(Parts[1], VarValue.Value);
       end;
 
     'verbose', 'v':

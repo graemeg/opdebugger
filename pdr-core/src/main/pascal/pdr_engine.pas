@@ -14,7 +14,7 @@ unit pdr_engine;
 interface
 
 uses
-  Classes, SysUtils, pdr_ports, pdr_typesys, opdf_types;
+  Classes, SysUtils, Math, pdr_ports, pdr_typesys, opdf_types;
 
 type
   { Breakpoint tracking record }
@@ -72,6 +72,7 @@ type
     function GetInspectLines(const Expr: String): TStringArray;
     function EvaluateArraySlice(const VarName: String;
                                 LowIndex, HighIndex: Int64): TVariableValueArray;
+    function SetVariable(const VarName, Value: String): Boolean;
     function GetCallStack(Limit: Integer = 0): TStringArray;
 
     { ICommandHandler - State query }
@@ -935,6 +936,123 @@ begin
     ElemValue.Name := VarName + '[' + IntToStr(I) + ']';
     Result[I - LowIndex] := ElemValue;
   end;
+end;
+
+function TDebuggerEngine.SetVariable(const VarName, Value: String): Boolean;
+var
+  RIP, Addr: QWord;
+  VarInfo: TVariableInfo;
+  TypeInfo: TTypeInfo;
+  IntVal: Int64;
+  OrdVal: Int64;
+  Buffer: array[0..7] of Byte;
+  RBP: QWord;
+  I: Integer;
+begin
+  Result := False;
+
+  if FState = dsIdle then
+  begin
+    WriteLn('[ERROR] Not attached to process');
+    Exit;
+  end;
+
+  RIP := FProcessController.GetLastBreakpointAddress;
+  if RIP = 0 then RIP := FProcessController.GetCurrentAddress;
+
+  if not FDebugInfoReader.FindVariableWithScope(VarName, RIP, VarInfo) then
+  begin
+    WriteLn('[ERROR] Variable not found: ', VarName);
+    Exit;
+  end;
+
+  if not FDebugInfoReader.FindType(VarInfo.TypeID, TypeInfo) then
+  begin
+    WriteLn('[ERROR] Type not found for: ', VarName);
+    Exit;
+  end;
+
+  { Compute actual address }
+  if VarInfo.LocationExpr = 1 then
+  begin
+    RBP := FProcessController.GetLastBreakpointRBP;
+    if RBP = 0 then RBP := FProcessController.GetFrameBasePointer;
+    Addr := RBP + VarInfo.LocationData;
+  end
+  else
+    Addr := VarInfo.Address;
+
+  if Addr = 0 then
+  begin
+    WriteLn('[ERROR] Cannot determine address for: ', VarName);
+    Exit;
+  end;
+
+  FillChar(Buffer, SizeOf(Buffer), 0);
+
+  case TypeInfo.Category of
+
+    tcPrimitive:
+    begin
+      { Boolean literals }
+      if (LowerCase(Value) = 'true') or (Value = '1') then
+        Buffer[0] := 1
+      else if (LowerCase(Value) = 'false') or (Value = '0') then
+        Buffer[0] := 0
+      { Hex literals: $NNNN or 0xNNNN }
+      else if (Length(Value) > 1) and (Value[1] = '$') then
+      begin
+        IntVal := StrToInt64Def(Value, 0);
+        Move(IntVal, Buffer[0], Min(TypeInfo.Size, SizeOf(IntVal)));
+      end
+      else if (Length(Value) > 2) and (Copy(Value, 1, 2) = '0x') then
+      begin
+        IntVal := StrToInt64Def('$' + Copy(Value, 3, MaxInt), 0);
+        Move(IntVal, Buffer[0], Min(TypeInfo.Size, SizeOf(IntVal)));
+      end
+      { Decimal literals (signed or unsigned) }
+      else if TryStrToInt64(Value, IntVal) then
+        Move(IntVal, Buffer[0], Min(TypeInfo.Size, SizeOf(IntVal)))
+      else
+      begin
+        WriteLn('[ERROR] Cannot parse value for primitive type: ', Value);
+        Exit;
+      end;
+
+      Result := FProcessController.WriteMemory(Addr, TypeInfo.Size, Buffer);
+    end;
+
+    tcEnum:
+    begin
+      { Try enum member name first }
+      OrdVal := -1;
+      for I := 0 to High(TypeInfo.EnumMembers) do
+        if LowerCase(TypeInfo.EnumMembers[I].Name) = LowerCase(Value) then
+        begin
+          OrdVal := TypeInfo.EnumMembers[I].Value;
+          Break;
+        end;
+
+      { Fall back to ordinal }
+      if (OrdVal = -1) and not TryStrToInt64(Value, OrdVal) then
+      begin
+        WriteLn('[ERROR] Unknown enum member or invalid ordinal: ', Value);
+        Exit;
+      end;
+
+      Move(OrdVal, Buffer[0], Min(TypeInfo.Size, SizeOf(OrdVal)));
+      Result := FProcessController.WriteMemory(Addr, TypeInfo.Size, Buffer);
+    end;
+
+  else
+    WriteLn('[ERROR] set: type not supported for assignment: ', TypeInfo.Name);
+    Exit;
+  end;
+
+  if Result then
+    WriteLn('[INFO] ', VarName, ' set to ', Value)
+  else
+    WriteLn('[ERROR] Failed to write to address $', IntToHex(Addr, 16));
 end;
 
 function TDebuggerEngine.GetCallStack(Limit: Integer = 0): TStringArray;
