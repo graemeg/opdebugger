@@ -308,7 +308,7 @@ begin
     Exit;
   end;
 
-  if gVerbose then
+//  if gVerbose then
   begin
     WriteLn('[INFO] OPDF version: ', FHeader.Version);
     WriteLn('[INFO] Target architecture: ', ArchToString(TTargetArch(FHeader.TargetArch)));
