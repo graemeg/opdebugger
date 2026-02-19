@@ -2,8 +2,8 @@
 :toc: left
 :toclevels: 4
 :sectnums:
-:version: 0.1.0-draft
-:date: 2025-12-15
+:version: 0.2.0
+:date: 2026-02-19
 
 == Introduction
 
@@ -59,6 +59,8 @@ OPDF debug information can be stored in two modes:
 |`.opdf`
 |===
 
+The embedded form (ELF `.opdf` section) is the primary form produced by the FPC compiler integration. All data is emitted into the assembler list and resolved by the linker, enabling label-based address resolution for line information and function scopes.
+
 === Build ID Linking
 
 When debug information is stored externally, a UUID-based handshake ensures correct matching:
@@ -70,347 +72,570 @@ When debug information is stored externally, a UUID-based handshake ensures corr
 
 == Binary Format
 
-=== Header Structure
+=== Endianness
 
 All data is stored in little-endian format (Intel standard).
+
+=== Header Structure
 
 [source,pascal]
 ----
 TOPDFHeader = packed record
-  Magic: array[0..3] of Char;  // 'OPDF'
-  Version: Word;               // Format version (current: 1)
-  BuildID: TGUID;              // UUID linking binary to debug info
-  TargetArch: Byte;            // Architecture ID (1=i386, 2=x86_64, etc.)
-  PointerSize: Byte;           // Pointer size in bytes (4 or 8)
-  TotalRecords: Cardinal;      // Number of debug records
-  Flags: Cardinal;             // Reserved (compression, encryption)
+  Magic: array[0..3] of Char;  // 'OPDF' (4 bytes)
+  Version: Word;               // Format version (current: 1) (2 bytes)
+  BuildID: TGUID;              // UUID linking binary to debug info (16 bytes)
+  TargetArch: Byte;            // Architecture ID (1 byte)
+  PointerSize: Byte;           // Pointer size in bytes: 4 or 8 (1 byte)
+  TotalRecords: Cardinal;      // Number of debug records (4 bytes)
+  Flags: Cardinal;             // Reserved for future use (4 bytes)
 end;
+// Total: 32 bytes
 ----
 
-.Header Fields
-[cols="1,1,3"]
+.Architecture Identifiers
+[cols="1,2"]
 |===
-|Field |Size |Description
+|Value |Architecture
 
-|Magic
-|4 bytes
-|Magic bytes 'OPDF' for format identification
-
-|Version
-|2 bytes
-|Format version number (incremental)
-
-|BuildID
-|16 bytes
-|GUID linking debug file to specific binary build
-
-|TotalRecords
-|4 bytes
-|Count of debug records following header
-
-|Flags
-|4 bytes
-|Feature flags (reserved for future use)
+|0 |Unknown
+|1 |i386 (32-bit x86)
+|2 |x86_64 (64-bit x86)
+|3 |ARM (32-bit)
+|4 |AArch64 (64-bit ARM)
+|5 |PowerPC (32-bit)
+|6 |PowerPC64 (64-bit)
 |===
 
 === Record Structure
 
-OPDF uses a "stream of records" approach with typed records rather than DWARF's complex tree structure.
+OPDF uses a stream of typed records rather than DWARF's tree structure. Each record is self-describing and can be skipped by any reader that does not understand its type.
 
 ==== Record Header
 
-Every record begins with a generic header:
+Every record begins with a 5-byte generic header:
 
 [source,pascal]
 ----
 TOPDFRecordHeader = packed record
-  RecType: Byte;      // Record type identifier (0..255)
-  RecSize: Cardinal;  // Size of payload in bytes (supports large records)
+  RecType: Byte;      // Record type identifier (1 byte)
+  RecSize: Cardinal;  // Payload size in bytes (4 bytes)
 end;
+// Total: 5 bytes
 ----
 
-==== Record Types
+`RecSize` is the byte count of the payload following the header, not including the header itself.
+
+==== Common Field Types
+
+[source,pascal]
+----
+TTypeID  = Cardinal;  // 4 bytes — unique type identifier
+TNameLen = Word;      // 2 bytes — byte length of a name string
+----
+
+Type IDs are assigned sequentially by the compiler during type processing. ID 0 is reserved to mean "no type" or "void".
+
+==== Record Type Enumeration
 
 [source,pascal]
 ----
 TOPDFRecordType = (
-  recUnknown       = 0,
-  recPrimitive     = 1,  // Integer, Boolean, Char, Enum
-  recGlobalVar     = 2,  // Global variable symbol
-  recShortStr      = 3,  // ShortString type definition
-  recAnsiStr       = 4,  // AnsiString type definition
-  recUnicodeStr    = 5,  // UnicodeString type definition
-  recPointer       = 6,  // Pointer type
-  recArray         = 7,  // Static array
-  recRecord        = 8,  // Record/Structure
-  recClass         = 9,  // Class definition
-  recProperty      = 10, // Class property
-  recMethod        = 11, // Class method/function
-  recLocalVar      = 12, // Local variable
-  recParameter     = 13  // Function parameter
+  recUnknown       = 0,   // Reserved
+  recPrimitive     = 1,   // Integer, Boolean, Char, Float
+  recGlobalVar     = 2,   // Global or unit-level variable
+  recShortStr      = 3,   // ShortString type
+  recAnsiStr       = 4,   // AnsiString type
+  recUnicodeStr    = 5,   // UnicodeString or WideString type
+  recPointer       = 6,   // Pointer type
+  recArray         = 7,   // Static or dynamic array type
+  recRecord        = 8,   // Record/structure type
+  recClass         = 9,   // Class type
+  recProperty      = 10,  // Class property definition
+  recMethod        = 11,  // Class method or standalone function
+  recLocalVar      = 12,  // Stack-based local variable
+  recParameter     = 13,  // Function or method parameter
+  recLineInfo      = 14,  // Source line to address mapping
+  recFunctionScope = 15,  // Function scope (address range + name)
+  recInterface     = 16,  // COM or CORBA interface type
+  recEnum          = 17,  // Enumeration type with named members
+  recSet           = 18   // Set type (bitfield over ordinal or enum base)
 );
 ----
 
-== Type Definitions
+Readers encountering an unknown record type must use `RecSize` to skip it without error.
 
-=== Primitive Types (recPrimitive)
+== Type Definition Records
 
-Defines basic data types: Integer, Boolean, Char, Enumerations.
+=== Primitive Types (recPrimitive = 1)
+
+Covers integer, boolean, character, and float types. All are emitted with the same format; the debugger infers display format from the type name.
 
 [source,pascal]
 ----
 TDefPrimitive = packed record
-  TypeID: Cardinal;   // Unique type identifier (4 bytes, supports 4B+ types)
-  SizeInBytes: Byte;  // Size (1, 2, 4, 8 bytes)
-  IsSigned: Byte;     // 1=signed, 0=unsigned
-  NameLen: Word;      // Length of type name (supports long qualified names)
-  // Followed by NameLen bytes: type name string
+  TypeID: TTypeID;    // 4 bytes
+  SizeInBytes: Byte;  // 1 byte — storage size (1, 2, 4, 8, 10 bytes)
+  IsSigned: Byte;     // 1 byte — 1=signed, 0=unsigned
+  NameLen: TNameLen;  // 2 bytes
+  // Followed by: Name (NameLen bytes)
 end;
+// Fixed part: 8 bytes
 ----
 
 .Examples
-* `TypeID=100, Size=4, IsSigned=1, Name="LongInt"`
-* `TypeID=101, Size=1, IsSigned=0, Name="Boolean"`
+* `Size=4, Signed=1, Name="LongInt"` — 32-bit signed integer
+* `Size=1, Signed=0, Name="Boolean"` — boolean
+* `Size=8, Signed=1, Name="Double"` — 64-bit float
+* `Size=10, Signed=1, Name="Extended"` — 80-bit extended float (x87)
 
-=== ShortString Type (recShortStr)
+Float types are identified by their FPC type names (`Single`, `Double`, `Extended`, `Currency`, `Comp`). The debugger uses the name to select the correct floating-point decode path.
 
-Pascal's length-prefixed static string.
+=== ShortString Type (recShortStr = 3)
+
+Pascal's length-prefixed, fixed-capacity string.
 
 [source,pascal]
 ----
 TDefShortString = packed record
-  TypeID: Word;
-  MaxLength: Byte;    // Maximum capacity (0-255)
-  NameLen: Byte;
-  // Followed by Name: e.g., "String20"
+  TypeID: TTypeID;    // 4 bytes
+  MaxLength: Byte;    // 1 byte — maximum capacity (0..255)
+  NameLen: TNameLen;  // 2 bytes
+  // Followed by: Name (NameLen bytes)
 end;
+// Fixed part: 7 bytes
 ----
 
-Memory layout known to debugger:
+Memory layout at runtime:
 
 ----
-[Length:Byte][Char0][Char1]...[CharN]
+[LengthByte: Byte][Char_0][Char_1]...[Char_N][...padding to MaxLength+1...]
 ----
 
-=== AnsiString Type (recAnsiStr)
+The variable stores the string inline (not a pointer). The first byte is the current length.
 
-Dynamic string with reference counting.
+=== AnsiString Type (recAnsiStr = 4)
+
+Reference-counted heap-allocated string with 8-bit characters.
 
 [source,pascal]
 ----
 TDefAnsiString = packed record
-  TypeID: Word;
-  NameLen: Byte;
-  // Followed by Name
+  TypeID: TTypeID;    // 4 bytes
+  NameLen: TNameLen;  // 2 bytes
+  // Followed by: Name (NameLen bytes)
 end;
+// Fixed part: 6 bytes
 ----
 
-Runtime structure (known to debugger):
+Memory layout at runtime (x86_64):
 
 ----
-Variable -> [Pointer to Heap]
-            Heap-4: RefCount (LongInt)
-            Heap-8: Length (LongInt)
-            Heap-12: CodePage (Word)
-            Heap: Character data
+Variable: [Pointer: 8 bytes]
+  -> Heap block:
+     Offset -16: CodePage (Word)
+     Offset -14: ElementSize (Word)
+     Offset -12: RefCount (LongInt)
+     Offset  -8: Length (LongInt)   -- character count
+     Offset   0: Character data (Length bytes) + NUL terminator
 ----
 
-=== UnicodeString Type (recUnicodeStr)
+The debugger reads the pointer, then dereferences at `Pointer - 8` for length and `Pointer + 0` for the character data.
 
-UTF-16 encoded dynamic string.
+=== UnicodeString / WideString Type (recUnicodeStr = 5)
+
+UTF-16 encoded dynamic string. Both `UnicodeString` and `WideString` emit this record type.
 
 [source,pascal]
 ----
 TDefUnicodeString = packed record
-  TypeID: Word;
-  NameLen: Byte;
-  // Followed by Name
+  TypeID: TTypeID;    // 4 bytes
+  NameLen: TNameLen;  // 2 bytes
+  // Followed by: Name (NameLen bytes)
 end;
+// Fixed part: 6 bytes
 ----
 
-Similar heap structure to AnsiString but with 2-byte characters.
+Memory layout is the same as AnsiString but with 2-byte WideChar elements. Length at `Pointer - 8` is the character count (not byte count).
 
-=== Pointer Type (recPointer)
+=== Pointer Type (recPointer = 6)
 
 Type-safe pointer reference.
 
 [source,pascal]
 ----
 TDefPointer = packed record
-  TypeID: Word;       // ID of this pointer type
-  TargetTypeID: Word; // Type being pointed to
-  NameLen: Byte;
-  // Followed by Name: e.g., "PInteger"
+  TypeID: TTypeID;        // 4 bytes — ID of this pointer type
+  TargetTypeID: TTypeID;  // 4 bytes — ID of the pointed-to type (0 = untyped/void)
+  NameLen: TNameLen;      // 2 bytes
+  // Followed by: Name (NameLen bytes)
 end;
+// Fixed part: 10 bytes
 ----
 
-=== Array Type (recArray)
+`TargetTypeID = 0` indicates an untyped or void pointer. The debugger may attempt to dereference typed pointers to display the target value.
 
-Static or dynamic array definition.
+=== Array Type (recArray = 7)
+
+Static or dynamic array. The `IsDynamic` flag determines the runtime layout.
 
 [source,pascal]
 ----
 TDefArray = packed record
-  TypeID: Word;
-  ElementTypeID: Word;  // Type of array elements
-  Dimensions: Byte;     // Number of dimensions
-  IsDynamic: Byte;      // 1=dynamic, 0=static
-  // If static: followed by dimension bounds
-  // Followed by Name
+  TypeID: TTypeID;        // 4 bytes
+  ElementTypeID: TTypeID; // 4 bytes — type of each element
+  Dimensions: Byte;       // 1 byte — number of dimensions
+  IsDynamic: Byte;        // 1 byte — 1=dynamic, 0=static
+  NameLen: TNameLen;      // 2 bytes
+  // Followed by: Name (NameLen bytes)
+  // If IsDynamic=0: followed by Dimensions × TArrayBound records
 end;
+// Fixed part: 12 bytes
+
+TArrayBound = record
+  LowerBound: Int64;  // 8 bytes
+  UpperBound: Int64;  // 8 bytes
+end;
+// Size: 16 bytes per dimension
 ----
 
-=== Record Type (recRecord)
+.Static array runtime layout
+The variable stores elements inline, packed contiguously from `LowerBound` to `UpperBound`.
 
-Structured type with named fields.
+.Dynamic array runtime layout (x86_64)
+----
+Variable: [Pointer: 8 bytes]
+  -> Heap block:
+     Offset  -8: High index (SizeInt, 8 bytes) — Length = High + 1
+     Offset   0: Element 0
+     Offset   N: Element 1  (N = element size)
+     ...
+----
+
+A nil dynamic array has Pointer = 0.
+
+=== Record Type (recRecord = 8)
+
+Pascal record (structure) with named fields.
 
 [source,pascal]
 ----
 TDefRecord = packed record
-  TypeID: Word;
-  FieldCount: Word;     // Number of fields
-  TotalSize: Cardinal;  // Total size in bytes
-  NameLen: Byte;
-  // Followed by Name
-  // Followed by FieldCount field descriptors:
-  //   - FieldNameLen: Byte
-  //   - FieldName: string
-  //   - FieldTypeID: Word
-  //   - Offset: Cardinal (byte offset in structure)
+  TypeID: TTypeID;      // 4 bytes
+  FieldCount: Cardinal; // 4 bytes
+  TotalSize: Cardinal;  // 4 bytes — total byte size of the record
+  NameLen: TNameLen;    // 2 bytes
+  // Followed by: Name (NameLen bytes)
+  // Followed by: FieldCount × TFieldDescriptor
 end;
+// Fixed part: 14 bytes
+
+TFieldDescriptor = packed record
+  FieldTypeID: TTypeID;  // 4 bytes
+  Offset: Cardinal;      // 4 bytes — byte offset within record
+  NameLen: TNameLen;     // 2 bytes
+  // Followed by: FieldName (NameLen bytes)
+end;
+// Fixed part: 10 bytes per field
 ----
 
-=== Class Type (recClass)
+Anonymous records (no name) have `NameLen = 0`.
 
-Object Pascal class definition.
+=== Class Type (recClass = 9)
+
+Object Pascal class. The instance is always accessed through a pointer at the variable's address.
 
 [source,pascal]
 ----
 TDefClass = packed record
-  TypeID: Word;
-  ParentTypeID: Word;    // 0 if TObject
-  VMTAddress: QWord;     // Virtual Method Table address
-  InstanceSize: Cardinal; // Size of instance
-  FieldCount: Word;      // Number of instance fields
-  NameLen: Byte;
-  // Followed by Name
-  // Followed by field descriptors (similar to Record)
+  TypeID: TTypeID;        // 4 bytes
+  ParentTypeID: TTypeID;  // 4 bytes — parent class TypeID (0 if TObject/root)
+  VMTAddress: QWord;      // 8 bytes — virtual method table address (0 if unknown)
+  InstanceSize: Cardinal; // 4 bytes — instance size in bytes
+  FieldCount: Cardinal;   // 4 bytes — number of instance fields
+  NameLen: TNameLen;      // 2 bytes
+  // Followed by: Name (NameLen bytes)
+  // Followed by: FieldCount × TFieldDescriptor
 end;
+// Fixed part: 26 bytes
 ----
 
-=== Property Definition (recProperty)
+Field access for class instances:
 
-Class property with access methods.
+----
+Variable: [Pointer: PointerSize bytes]
+  -> Instance heap block at Pointer:
+     Offset 0: VMT pointer (PointerSize bytes)
+     Offset N: Field data (FieldDescriptor.Offset is relative to instance start)
+----
+
+Properties for a class are emitted as separate `recProperty` records following the class record.
+
+=== Property Definition (recProperty = 10)
+
+Class property with typed access methods.
 
 [source,pascal]
 ----
 TDefProperty = packed record
-  ClassTypeID: Word;     // Owning class
-  PropertyTypeID: Word;  // Property data type
-  ReadType: Byte;        // 0=Field, 1=Method
-  WriteType: Byte;       // 0=Field, 1=Method, 2=None
-  ReadAddr: QWord;       // Field offset or method address
-  WriteAddr: QWord;      // Field offset or method address
-  NameLen: Byte;
-  // Followed by Name
+  ClassTypeID: TTypeID;     // 4 bytes — owning class TypeID
+  PropertyTypeID: TTypeID;  // 4 bytes — property return type TypeID
+  ReadType: Byte;           // 1 byte — TPropertyAccessType
+  WriteType: Byte;          // 1 byte — TPropertyAccessType
+  ReadAddr: QWord;          // 8 bytes — field offset or method address
+  WriteAddr: QWord;         // 8 bytes — field offset or method address
+  NameLen: TNameLen;        // 2 bytes
+  // Followed by: Name (NameLen bytes)
 end;
+// Fixed part: 28 bytes
+
+TPropertyAccessType = (
+  patField  = 0,  // Direct field: Addr is byte offset within instance
+  patMethod = 1,  // Getter/setter method: Addr is absolute code address
+  patNone   = 2   // No accessor (write-only has no getter, read-only has no setter)
+);
 ----
 
-.Access Types
-* `ReadType/WriteType = 0`: Direct field access, Addr is byte offset
-* `ReadType/WriteType = 1`: Method access, Addr is absolute method address
-* `WriteType = 2`: Read-only property
+Debuggers that cannot call methods should display a placeholder such as `<method getter>` for `patMethod` read accessors.
 
-== Symbol Definitions
+=== Method Definition (recMethod = 11)
 
-=== Global Variable (recGlobalVar)
-
-Global or unit-level variable.
-
-[source,pascal]
-----
-TDefGlobalVar = packed record
-  TypeID: Word;       // Type of this variable
-  Address: QWord;     // Absolute memory address
-  NameLen: Byte;
-  // Followed by Name: e.g., "MyGlobalInt"
-end;
-----
-
-=== Local Variable (recLocalVar)
-
-Stack-based local variable or function temporary.
-
-[source,pascal]
-----
-TDefLocalVar = packed record
-  TypeID: Word;
-  ScopeID: Cardinal;     // Function/block scope
-  LocationExpr: Byte;    // Location expression type
-  // Followed by location data (register, stack offset, etc.)
-  NameLen: Byte;
-  // Followed by Name
-end;
-----
-
-=== Method Definition (recMethod)
-
-Function or procedure definition.
+Class method or standalone function declaration.
 
 [source,pascal]
 ----
 TDefMethod = packed record
-  MethodID: Cardinal;
-  ClassTypeID: Word;     // 0 for standalone function
-  ReturnTypeID: Word;    // 0 for procedure
-  ParamCount: Byte;
-  IsVirtual: Byte;       // 1 if virtual method
-  Address: QWord;        // Entry point address
-  NameLen: Byte;
-  // Followed by Name
-  // Followed by parameter descriptors
+  MethodID: Cardinal;    // 4 bytes — unique method identifier
+  ClassTypeID: TTypeID;  // 4 bytes — owning class (0 for standalone function)
+  ReturnTypeID: TTypeID; // 4 bytes — return type (0 for procedure)
+  ParamCount: Byte;      // 1 byte
+  IsVirtual: Byte;       // 1 byte — 1 if virtual/dynamic
+  Address: QWord;        // 8 bytes — entry point address
+  NameLen: TNameLen;     // 2 bytes
+  // Followed by: Name (NameLen bytes)
+  // Followed by: ParamCount × recParameter payloads (without headers)
 end;
+// Fixed part: 24 bytes
 ----
+
+NOTE: `recMethod` is defined in the format for completeness but is not currently emitted by the FPC compiler integration. Function scopes use `recFunctionScope` instead.
+
+=== Enumeration Type (recEnum = 17)
+
+Enumeration with named ordinal members.
+
+[source,pascal]
+----
+TDefEnum = packed record
+  TypeID: TTypeID;       // 4 bytes
+  SizeInBytes: Byte;     // 1 byte — storage size (1, 2, or 4 bytes)
+  MemberCount: Cardinal; // 4 bytes
+  NameLen: TNameLen;     // 2 bytes
+  // Followed by: Name (NameLen bytes)
+  // Followed by: MemberCount × TEnumMember
+end;
+// Fixed part: 11 bytes
+
+TEnumMember = packed record
+  Value: Int64;          // 8 bytes — ordinal value (supports full 64-bit range)
+  NameLen: TNameLen;     // 2 bytes
+  // Followed by: MemberName (NameLen bytes)
+end;
+// Fixed part: 10 bytes per member
+----
+
+Only members within the declared range (`minval..maxval`) are emitted.
+
+=== Set Type (recSet = 18)
+
+A Pascal `set of` type stored as a compact bitfield. Each bit represents membership of a particular ordinal value.
+
+[source,pascal]
+----
+TDefSet = packed record
+  TypeID: TTypeID;      // 4 bytes — this set type's ID
+  BaseTypeID: TTypeID;  // 4 bytes — base ordinal or enum type ID
+  SizeInBytes: Byte;    // 1 byte — storage size in bytes (1, 2, 4, or 8)
+  LowerBound: LongInt;  // 4 bytes — lowest valid ordinal value (setlow)
+  NameLen: TNameLen;    // 2 bytes
+  // Followed by: Name (NameLen bytes)
+end;
+// Fixed part: 15 bytes
+----
+
+.Bit Encoding
+
+Given a `SizeInBytes`-byte value read from the variable address, bit position `B` (where `B = 0` is the least significant bit of byte 0) corresponds to ordinal value `LowerBound + B`. The member name is obtained by looking up `LowerBound + B` in the base enum type's `recEnum` record.
+
+.Example: `TDaySet = set of TDays` where `TDays = (Mon, Tue, Wed, Thu, Fri, Sat, Sun)`
+
+* `LowerBound = 0`, `SizeInBytes = 1`
+* Raw byte `0x1F` (binary `00011111`) → bits 0..4 set → `[Mon, Tue, Wed, Thu, Fri]`
+* Raw byte `0x60` (binary `01100000`) → bits 5..6 set → `[Sat, Sun]`
+* Raw byte `0x00` → `[]` (empty set)
+
+`BaseTypeID` references the `recEnum` record for `TDays`, from which member names are resolved. If the base type is a subrange rather than an enum, member names are not available and ordinal values are displayed numerically.
+
+=== Interface Type (recInterface = 16)
+
+COM or CORBA interface definition.
+
+[source,pascal]
+----
+TDefInterface = packed record
+  TypeID: TTypeID;        // 4 bytes
+  ParentTypeID: TTypeID;  // 4 bytes — parent interface (0 if root, e.g. IUnknown)
+  IntfType: Byte;         // 1 byte — TInterfaceType
+  GUID: TGUID;            // 16 bytes — interface GUID (zeroed for CORBA)
+  MethodCount: Cardinal;  // 4 bytes
+  NameLen: TNameLen;      // 2 bytes
+  // Followed by: Name (NameLen bytes)
+  // Followed by: MethodCount × TInterfaceMethodDescriptor
+end;
+// Fixed part: 31 bytes
+
+TInterfaceType = (
+  itfCOM      = 0,
+  itfCORBA    = 1,
+  itfDispatch = 2
+);
+
+TInterfaceMethodDescriptor = packed record
+  ReturnTypeID: TTypeID;  // 4 bytes (0 for procedure)
+  ParamCount: Byte;       // 1 byte
+  NameLen: TNameLen;      // 2 bytes
+  // Followed by: MethodName (NameLen bytes)
+end;
+// Fixed part: 7 bytes per method
+----
+
+== Symbol Definition Records
+
+=== Global Variable (recGlobalVar = 2)
+
+Unit-level or global variable with a linker-resolved address.
+
+[source,pascal]
+----
+TDefGlobalVar = packed record
+  TypeID: TTypeID;    // 4 bytes
+  Address: QWord;     // 8 bytes — absolute memory address (linker-resolved)
+  NameLen: TNameLen;  // 2 bytes
+  // Followed by: Name (NameLen bytes)
+end;
+// Fixed part: 14 bytes
+----
+
+=== Local Variable (recLocalVar = 12)
+
+Stack-based local variable within a function scope.
+
+[source,pascal]
+----
+TDefLocalVar = packed record
+  TypeID: TTypeID;      // 4 bytes
+  ScopeID: Cardinal;    // 4 bytes — matches ScopeID in recFunctionScope
+  LocationExpr: Byte;   // 1 byte — location expression type
+  NameLen: TNameLen;    // 2 bytes
+  // Followed by: location data (see Location Expressions)
+  // Followed by: Name (NameLen bytes)
+end;
+// Fixed part: 11 bytes (before location data)
+----
+
+=== Function Parameter (recParameter = 13)
+
+Formal parameter of a function or method.
+
+[source,pascal]
+----
+TDefParameter = packed record
+  TypeID: TTypeID;   // 4 bytes
+  IsVar: Byte;       // 1 byte — 1 if declared with `var`
+  IsConst: Byte;     // 1 byte — 1 if declared with `const`
+  IsOut: Byte;       // 1 byte — 1 if declared with `out`
+  NameLen: TNameLen; // 2 bytes
+  // Followed by: Name (NameLen bytes)
+end;
+// Fixed part: 9 bytes
+----
+
+== Source Information Records
+
+=== Line Information (recLineInfo = 14)
+
+Maps a source file location to a machine code address.
+
+[source,pascal]
+----
+TDefLineInfo = packed record
+  Address: QWord;         // 8 bytes — machine code address (linker-resolved)
+  LineNumber: Cardinal;   // 4 bytes
+  ColumnNumber: Word;     // 2 bytes — 0 if unknown
+  FileNameLen: TNameLen;  // 2 bytes
+  // Followed by: FileName (FileNameLen bytes)
+end;
+// Fixed part: 16 bytes
+----
+
+Line info records are emitted in source order within each function. The debugger uses them for `break file.pas:line` resolution and for `stepped to line:` reporting.
+
+=== Function Scope (recFunctionScope = 15)
+
+Associates a function name with its code address range. Used to resolve which scope a given instruction address belongs to.
+
+[source,pascal]
+----
+TDefFunctionScope = packed record
+  ScopeID: Cardinal;  // 4 bytes — low PC cast to Cardinal (scope identifier)
+  LowPC: QWord;       // 8 bytes — function entry address (linker-resolved)
+  HighPC: QWord;      // 8 bytes — function exit address (linker-resolved)
+  NameLen: TNameLen;  // 2 bytes
+  // Followed by: Name (NameLen bytes)
+end;
+// Fixed part: 22 bytes
+----
+
+`ScopeID` must match the `ScopeID` fields in all `recLocalVar` records belonging to this function. It is derived from `LowPC` at read time (low 32 bits of the entry address).
 
 == Location Expressions
 
-Location expressions encode where data resides at runtime.
+Location expressions encode where a variable resides at runtime. The `LocationExpr` byte in `recLocalVar` selects the expression type; the bytes that follow are the expression operands.
 
-=== Expression Types
-
-[cols="1,3"]
+[cols="1,2,3"]
 |===
-|Type |Description
+|LocationExpr |Name |Payload
 
-|`0x01`
-|Absolute address (global/static)
+|`0`
+|Global / absolute
+|No extra bytes; address is in the variable record
 
-|`0x02`
-|Register (EAX, RBX, etc.)
+|`1`
+|RBP-relative (current frame)
+|`ShortInt` (1 byte): signed offset from frame base pointer
 
-|`0x03`
-|Stack offset from frame pointer
+|`2`
+|Parent frame RBP-relative
+|`ShortInt` (1 byte): signed offset from enclosing procedure's frame base pointer
 
-|`0x04`
-|Heap pointer dereference
-
-|`0x05`
-|Complex expression (bytecode)
+|`3..255`
+|Reserved
+|Reserved for register-based, multi-level nesting, or complex expressions
 |===
 
-=== Complex Expressions
-
-For optimized code, location may require calculation:
-
+.RBP-relative addressing (`LocationExpr = 1`)
 ----
-[OpCode][Operands]
+effective_address = RBP + SignExtend(LocationData)
 ----
 
-Example opcodes:
+.Parent frame addressing (`LocationExpr = 2`)
+Used for variables from an enclosing procedure accessed inside a nested procedure. The saved RBP at `*(breakpoint_RBP)` gives the parent frame base:
 
-* `DW_OP_ADD`: Add top two stack values
-* `DW_OP_DEREF`: Dereference pointer
-* `DW_OP_CONST`: Push constant value
+----
+parent_RBP        = *(breakpoint_RBP)
+effective_address = parent_RBP + SignExtend(LocationData)
+----
+
+NOTE: The current implementation uses a saved-RBP-chain traversal as an approximation of the static link. This is accurate for one level of nesting. Deeper nesting levels are reserved for future implementation.
 
 == Platform-Specific Details
 
@@ -418,10 +643,12 @@ Example opcodes:
 
 Section name: `.opdf`
 
-Section flags:
+Section attributes:
 
 * Type: `SHT_PROGBITS`
-* Flags: `SHF_ALLOC` (loaded into memory, read-only)
+* Flags: none (non-loadable debug section, not `SHF_ALLOC`)
+
+The FPC compiler emits OPDF data into an asm list (`al_opdf`) which is placed in the `.opdf` section by the ELF backend. Addresses within the section are resolved by the linker from label references emitted as `tai_const` values.
 
 === Windows (PE/COFF)
 
@@ -431,7 +658,7 @@ Option 2: Custom resource `RT_RCDATA`, ID `OPDF`
 
 === macOS (Mach-O)
 
-Segment name: `__OPDF`
+Segment: `__OPDF`
 
 Load command: `LC_SEGMENT_64`
 
@@ -441,23 +668,23 @@ Section within segment: `__debug`
 
 === File Format
 
-External `.opdf` files use identical binary structure to embedded sections but stored as standalone files.
+External `.opdf` files use identical binary structure to embedded sections, stored as standalone files.
 
 === Discovery
 
-Debugger searches for external debug file:
+Debugger searches for debug information in this order:
 
-. Check for embedded `.opdf` section in binary
-. If not found, extract BuildID from binary note section
-. Look for `<binary_name>.opdf` in same directory
-. Verify BuildID matches
-. Load external debug information
+. Check for embedded `.opdf` section in the binary (primary)
+. Extract BuildID from binary
+. Look for `<binary_name>.opdf` in the same directory
+. Verify BuildID matches before loading
+. Report an error on BuildID mismatch (stale debug file)
 
 === Distribution
 
-* Release builds: Ship lean binary without debug info
-* Development: Keep `.opdf` files for crash analysis
-* Security: Debug info contains all symbol names; keep private
+* Release builds: strip the `.opdf` section or ship without `.opdf` file
+* Development: keep `.opdf` embedded for full debugging
+* Security: `.opdf` data contains all symbol names; treat as sensitive
 
 == Version History
 
@@ -467,7 +694,14 @@ Debugger searches for external debug file:
 
 |0.1.0
 |2025-12-15
-|Initial draft specification
+|Initial draft specification (recPrimitive through recParameter). This actually started well over a year ago.
+
+|0.2.0
+|2026-02-17
+|Implemented specification: add recLineInfo (14), recFunctionScope (15),
+recInterface (16), recEnum (17), recSet (18). Correct field widths throughout
+(TTypeID = Cardinal, TNameLen = Word). Add set bit-encoding rules. Add
+location expression table. Document dynamic array layout (x86_64).
 |===
 
 == Appendices
@@ -482,13 +716,21 @@ Debugger searches for external debug file:
 |Limited; ShortString shown as byte array
 |Native support for all Pascal strings
 
+|Set Types
+|No concept; stored as raw bytes
+|First-class with member name resolution
+
 |Properties
 |No concept; requires complex workarounds
-|First-class property definitions
+|First-class property definitions with access type
 
-|Method Calls
-|Complex, GDB-dependent
-|Explicit getter/setter encoding
+|Interface Types
+|Partial (FPC issue #39904: methods missing)
+|Full method signatures via recInterface
+
+|Line Information
+|Complex line number program
+|Flat recLineInfo records
 
 |File Size
 |Large (complex tree structure)
@@ -497,8 +739,37 @@ Debugger searches for external debug file:
 |Extensibility
 |Standards committee
 |FPC community driven
+
+|Unknown Record Skipping
+|Requires form knowledge
+|RecSize field in every header enables safe skipping
 |===
 
 === Appendix B: Reference Implementation
 
-The Pascal Debug Reference (PDR) debugger serves as the reference implementation for OPDF consumption. See `implementation-plan.adoc` for development roadmap.
+The Pascal Debug Reference (PDR) debugger serves as the reference implementation for OPDF consumption. The FPC compiler integration (`dbgopdf.pas`) is the canonical emitter.
+
+Key source files:
+
+[cols="1,3"]
+|===
+|File |Role
+
+|`opdf-lib/ogopdf.pas`
+|Binary format type definitions and record structures
+
+|`opdf-lib/opdf_io.pas`
+|TOPDFWriter / TOPDFReader for format I/O
+
+|`opdf-lib/opdf_demangle.pas`
+|FPC symbol name demangling
+
+|`opdf-lib/elf_reader.pas`
+|Minimal ELF64 parser for `.opdf` section extraction
+
+|`compiler/dbgopdf.pas`
+|FPC compiler OPDF emission (asm list output)
+
+|`compiler/tpdf_type_mapper.pas`
+|Type ID allocation within the FPC compiler
+|===
