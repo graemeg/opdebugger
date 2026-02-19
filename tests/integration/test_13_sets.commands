@@ -1,0 +1,7 @@
+run
+break test_13_sets.pas:18
+continue
+print WorkingDays
+print Weekend
+print EmptySet
+quit

@@ -59,7 +59,8 @@ type
     tcRecord,         // Record/Structure
     tcClass,          // Class type
     tcEnum,           // Enumeration type
-    tcInterface       // Interface type (COM/CORBA)
+    tcInterface,      // Interface type (COM/CORBA)
+    tcSet             // Set type (bitfield over ordinal/enum base)
   );
 
   TDebuggerField = record
@@ -139,6 +140,8 @@ type
     EnumMembers: TDebuggerEnumMemberArray;  // Enum member names and values
     // Record-specific
     RecordInfo: PDebuggerRecord;  // For records: field layout
+    // Set-specific (ElementTypeID holds base enum/ordinal TypeID)
+    SetLowerBound: LongInt;       // Lowest ordinal value (bit 0 position)
   end;
 
   { Variable information }

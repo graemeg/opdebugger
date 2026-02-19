@@ -217,6 +217,7 @@ var
   DefPointer: TDefPointer;
   DefRecord: TDefRecord;
   DefEnum: TDefEnum;
+  DefSet: TDefSet;
   DefParameter: TDefParameter;
   DefInterface: TDefInterface;
   DefProperty: TDefProperty;
@@ -605,6 +606,24 @@ begin
             end;
 
             FTypes.Add(IntToStr(DefEnum.TypeID), PType);
+          end;
+        end;
+
+      recSet:
+        begin
+          if FReader.ReadSet(DefSet, TypeName) then
+          begin
+            New(PType);
+            FillChar(PType^, SizeOf(TTypeInfo), 0);
+            PType^.TypeID := DefSet.TypeID;
+            PType^.Name := TypeName;
+            PType^.Size := DefSet.SizeInBytes;
+            PType^.IsSigned := False;
+            PType^.Category := tcSet;
+            PType^.ElementTypeID := DefSet.BaseTypeID;
+            PType^.SetLowerBound := DefSet.LowerBound;
+
+            FTypes.Add(IntToStr(DefSet.TypeID), PType);
           end;
         end;
 

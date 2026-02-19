@@ -95,6 +95,10 @@ type
                        const Members: array of TEnumMember;
                        const MemberNames: array of String);
 
+    { Write set type definition }
+    procedure WriteSet(TypeID: TTypeID; BaseTypeID: TTypeID;
+                      const Name: String; SizeInBytes: Byte; LowerBound: LongInt);
+
     { Write interface type definition }
     procedure WriteInterface(TypeID: TTypeID; ParentTypeID: TTypeID;
                             const Name: String; IntfType: TInterfaceType;
@@ -144,6 +148,7 @@ type
     function ReadProperty(out Def: TDefProperty; out Name: String): Boolean;
     function ReadRecord(out Def: TDefRecord; out Name: String;
                        out Fields: TFieldDescriptorArray; out FieldNames: TStringArray): Boolean;
+    function ReadSet(out Def: TDefSet; out Name: String): Boolean;
     function ReadEnum(out Def: TDefEnum; out Name: String;
                      out Members: TEnumMemberArray; out MemberNames: TStringArray): Boolean;
     function ReadInterface(out Def: TDefInterface; out Name: String;
@@ -609,6 +614,31 @@ begin
   Inc(FRecordCount);
 end;
 
+procedure TOPDFWriter.WriteSet(TypeID: TTypeID; BaseTypeID: TTypeID;
+                              const Name: String; SizeInBytes: Byte; LowerBound: LongInt);
+var
+  RecHeader: TOPDFRecordHeader;
+  Payload: TDefSet;
+begin
+  if not FHeaderWritten then
+    WriteHeader;
+
+  Payload.TypeID := TypeID;
+  Payload.BaseTypeID := BaseTypeID;
+  Payload.SizeInBytes := SizeInBytes;
+  Payload.LowerBound := LowerBound;
+  Payload.NameLen := Length(Name);
+
+  RecHeader.RecType := Ord(recSet);
+  RecHeader.RecSize := SizeOf(TDefSet) + Length(Name);
+
+  FStream.Write(RecHeader, SizeOf(RecHeader));
+  FStream.Write(Payload, SizeOf(Payload));
+  WriteString(Name);
+
+  Inc(FRecordCount);
+end;
+
 procedure TOPDFWriter.WriteInterface(TypeID: TTypeID; ParentTypeID: TTypeID;
                                     const Name: String; IntfType: TInterfaceType;
                                     const GUID: TGUID;
@@ -1044,6 +1074,25 @@ begin
     Fields[I] := FieldDef;
     FieldNames[I] := FieldName;
   end;
+
+  Result := True;
+end;
+
+function TOPDFReader.ReadSet(out Def: TDefSet; out Name: String): Boolean;
+begin
+  Result := False;
+
+  if FStream.Position + SizeOf(TDefSet) > FStream.Size then
+    Exit;
+
+  FStream.Read(Def, SizeOf(Def));
+
+  if FStream.Position + Def.NameLen > FStream.Size then
+    Exit;
+
+  SetLength(Name, Def.NameLen);
+  if Def.NameLen > 0 then
+    FStream.Read(Name[1], Def.NameLen);
 
   Result := True;
 end;

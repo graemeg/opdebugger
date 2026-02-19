@@ -121,6 +121,14 @@ type
     function CanHandle(const TypeInfo: TTypeInfo): Boolean;
   end;
 
+  { Set Type Evaluator - decodes a bitfield using the base enum's member names }
+  TSetEvaluator = class(TInterfacedObject, ITypeEvaluator)
+  public
+    function Evaluate(const VarInfo: TVariableInfo; const TypeInfo: TTypeInfo;
+      ProcessController: IProcessController; TypeSystem: TTypeSystem): TVariableValue;
+    function CanHandle(const TypeInfo: TTypeInfo): Boolean;
+  end;
+
   { Type System - manages type evaluators }
   TTypeSystem = class
   private
@@ -946,6 +954,86 @@ begin
   else
     Result.Value := IntToStr(OrdValue);
 
+  Result.IsValid := True;
+end;
+
+{ TSetEvaluator }
+
+function TSetEvaluator.CanHandle(const TypeInfo: TTypeInfo): Boolean;
+begin
+  Result := (TypeInfo.Category = tcSet);
+end;
+
+function TSetEvaluator.Evaluate(const VarInfo: TVariableInfo;
+  const TypeInfo: TTypeInfo; ProcessController: IProcessController;
+  TypeSystem: TTypeSystem): TVariableValue;
+var
+  Buffer: array[0..7] of Byte;
+  BaseTypeInfo: TTypeInfo;
+  HasBaseEnum: Boolean;
+  BitNum: Integer;
+  OrdValue: Int64;
+  I: Integer;
+  MemberName: String;
+  Members: String;
+  ByteIdx: Integer;
+  BitIdx: Integer;
+  First: Boolean;
+begin
+  Result.Name := TFPCDemangler.Demangle(VarInfo.Name);
+  Result.TypeName := TypeInfo.Name;
+  Result.Address := VarInfo.Address;
+  Result.IsValid := False;
+
+  if TypeInfo.Size = 0 then
+  begin
+    Result.Value := '[]';
+    Result.IsValid := True;
+    Exit;
+  end;
+
+  FillChar(Buffer, SizeOf(Buffer), 0);
+  if not ProcessController.ReadMemory(VarInfo.Address, TypeInfo.Size, Buffer) then
+  begin
+    Result.Value := '<error: failed to read memory>';
+    Exit;
+  end;
+
+  { Look up base enum type for member names }
+  HasBaseEnum := (TypeInfo.ElementTypeID <> 0) and
+    TypeSystem.FDebugInfoReader.FindType(TypeInfo.ElementTypeID, BaseTypeInfo) and
+    (Length(BaseTypeInfo.EnumMembers) > 0);
+
+  Members := '';
+  First := True;
+  for BitNum := 0 to Integer(TypeInfo.Size) * 8 - 1 do
+  begin
+    ByteIdx := BitNum div 8;
+    BitIdx  := BitNum mod 8;
+    if (Buffer[ByteIdx] and (1 shl BitIdx)) <> 0 then
+    begin
+      OrdValue := TypeInfo.SetLowerBound + BitNum;
+      MemberName := '';
+
+      if HasBaseEnum then
+        for I := 0 to High(BaseTypeInfo.EnumMembers) do
+          if BaseTypeInfo.EnumMembers[I].Value = OrdValue then
+          begin
+            MemberName := BaseTypeInfo.EnumMembers[I].Name;
+            Break;
+          end;
+
+      if not First then
+        Members := Members + ', ';
+      if MemberName <> '' then
+        Members := Members + MemberName
+      else
+        Members := Members + IntToStr(OrdValue);
+      First := False;
+    end;
+  end;
+
+  Result.Value := '[' + Members + ']';
   Result.IsValid := True;
 end;
 

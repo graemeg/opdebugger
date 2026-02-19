@@ -65,7 +65,8 @@ type
     recLineInfo      = 14, // Source line to address mapping
     recFunctionScope = 15, // Function scope (for local variable resolution)
     recInterface     = 16, // Interface definition (COM/CORBA)
-    recEnum          = 17  // Enumeration type with member names
+    recEnum          = 17, // Enumeration type with member names
+    recSet           = 18  // Set type (bitfield over ordinal/enum base)
   );
 
   { Generic Record Header - 5 bytes }
@@ -285,6 +286,16 @@ type
     // Followed by Name (NameLen bytes)
   end;
 
+  { Set Type Definition }
+  TDefSet = packed record
+    TypeID: TTypeID;        // 4 bytes - this type's ID
+    BaseTypeID: TTypeID;    // 4 bytes - ID of base ordinal/enum type
+    SizeInBytes: Byte;      // 1 byte - storage size (1, 2, 4, or 8)
+    LowerBound: LongInt;    // 4 bytes - lowest valid ordinal value (setlow)
+    NameLen: TNameLen;      // 2 bytes
+    // Followed by Name (NameLen bytes)
+  end;
+
   TEnumMemberArray = array of TEnumMember;
   TInterfaceMethodDescriptorArray = array of TInterfaceMethodDescriptor;
 
@@ -334,6 +345,7 @@ begin
     recFunctionScope: Result := 'FunctionScope';
     recInterface:  Result := 'Interface';
     recEnum:       Result := 'Enum';
+    recSet:        Result := 'Set';
     else           Result := 'Unknown';
   end;
 end;
