@@ -147,15 +147,16 @@ Integration of OPDF generation directly into the Free Pascal Compiler, eliminati
 * [x] appendsym_fieldvar — No-op: fields emitted inline within record/class records
 * [x] appendsym_property — Emit REC_PROPERTY records (ClassTypeID, PropertyTypeID, ReadType/Addr, WriteType/Addr) from within appenddef_object class iteration
 * [x] appendprocdef — Function scope records with label-based LowPC/HighPC (REC_FUNCSCOPE)
-* [x] OPDF format extended: TDefEnum, TEnumMember, TDefInterface, TInterfaceMethodDescriptor added to ogopdf.pas
-* [x] OPDF I/O extended: WriteEnum, WriteInterface, WriteRecord, WriteParameter + Read counterparts in opdf_io.pas
+* [x] appenddef_set — Set types emitted as REC_SET = 18 (new record type) with base enum TypeID, storage size, lower bound; debugger decodes bitfield to display as [Mon, Tue, Wed, Thu, Fri]
+* [x] OPDF format extended: TDefEnum, TEnumMember, TDefInterface, TInterfaceMethodDescriptor, TDefSet added to ogopdf.pas
+* [x] OPDF I/O extended: WriteEnum, WriteInterface, WriteRecord, WriteParameter, WriteSet + Read counterparts in opdf_io.pas
 * [x] Verified: test_phase2_types.pas compiles with -gO, produces valid .opdf section with 15 variables, 4 function scopes, 59 line mappings
 
 === Debugger Reader and Evaluator Updates
 
 * [x] Mark type definitions as used in FPC compiler (mark_defs_used, mark_used_unit_defs in dbgopdf.pas)
 * [x] Add pointer, record, enum type evaluators to pdr_typesys.pas
-* [x] Add recPointer, recRecord, recEnum, recParameter, recInterface handlers to pdr_opdf_adapter.pas
+* [x] Add recPointer, recRecord, recEnum, recSet, recParameter, recInterface handlers to pdr_opdf_adapter.pas
 * [x] Add tcFloat type category and TFloatEvaluator for Single/Double/Extended display
 * [x] Fix stream alignment in OPDF reader (RecStartPos tracking after each record)
 * [x] Fix Cardinal underflow bugs in opdf_io.pas reader methods (ReadClass, ReadRecord, ReadEnum, ReadInterface)
@@ -172,23 +173,26 @@ Integration of OPDF generation directly into the Free Pascal Compiler, eliminati
   ** `EvaluateVariableInfo`: `LocationExpr=2` follows saved RBP chain — `parent_RBP = *(breakpoint_RBP)`, `address = parent_RBP + LocationData`
   ** Root cause: single-step in `HandleBreakpointHit` moves RIP/RBP into called code; fix uses `GetLastBreakpointAddress` + `GetLastBreakpointRBP` for scope/address lookup
   ** `GetLastBreakpointRBP: QWord` added to `IProcessController`; `TLinuxPtraceAdapter` saves RBP before single-step
+* [x] Add TSetEvaluator: decodes bitfield using base enum's member names; displays as [Mon, Tue, Wed, Thu, Fri]
+* [x] Add tcSet to TTypeCategory, SetLowerBound to TTypeInfo, recSet = 18 to OPDF format
+* [x] Add verbose mode: gVerbose global, `verbose on|off` command, `--verbose`/`-v` CLI flag; suppress [DEBUG] output by default
+* [x] Integration test suite: 13/13 passing; added test_12_teaser_demo (nested scope), test_13_sets (set types)
 
 == Current Work Item
 
-**Nested procedure variable access complete** — Variables from enclosing procedure scopes are now visible from inner nested procedures. Supports one level of nesting via saved-RBP-chain traversal.
+**Set type support complete** — Set types are now fully supported across the OPDF pipeline: the FPC compiler emits `REC_SET = 18` records, the debugger reader loads them, and the `TSetEvaluator` decodes the bitfield using the base enum's member names.
 
-**Verified with TeaserDemo.pas**:
+**Verified with test_13_sets.pas**:
 
-* `ParentVar` = 'Initial Value' at line 43 (before assignment in InnerNested) ✓
-* `ParentVar` = 'Modified by Nest' at line 45 (after assignment) ✓
-* `Names` array shows 'Monday'/'Tuesday' correctly from inside InnerNested ✓
-* Call stack shows `InnerNested → OuterProcedure → main` ✓
+* `WorkingDays = [Mon, Tue, Wed, Thu, Fri]` ✓
+* `Weekend = [Sat, Sun]` ✓
+* `EmptySet = []` ✓
 
 **Known limitations**:
 
-* `set of Enum` types have no evaluator — display as `<error: type not found>` (TDaySet)
 * Arrays indexed by enum type (e.g. `array[TDays] of string`) display as `[0..6]` rather than `[Mon..Sun]`
 * Nested procedure static link not modelled in OPDF — using saved RBP chain as approximation (works for one level of nesting)
+* `set of` non-enum ordinal types show raw ordinal values (e.g. `set of 3..7` shows numbers, not names)
 
 [[Embedding Decision]]
 === Embedding Decision: External File vs ELF Section (RESOLVED)
@@ -240,7 +244,7 @@ x86_64/cputarg.pas   → dbgopdf registration
 i386/cputarg.pas     → dbgopdf registration
 ----
 
-=== Test Programs (13 integration tests)
+=== Test Programs (15 test programs, 13 automated)
 
 ----
 test_01_primitives.pas      → Integer and Boolean variables
@@ -255,6 +259,8 @@ test_08_static_arrays.pas   → Static array bounds
 test_09_dynamic_arrays.pas  → Dynamic array length/elements
 test_10_arguments.pas       → Function arguments
 test_11_callstack.pas       → Stack traces
+test_12_teaser_demo.pas     → Nested scope variable access (OuterProcedure / InnerNested)
+test_13_sets.pas            → Set type display ([Mon, Tue, Wed, Thu, Fri])
 test_bool_only.pas          → Boolean type testing
 test_phase2_types.pas       → All Phase 2 types (float, string, enum, pointer, array, record, class, interface, locals, params)
 ----
@@ -308,5 +314,6 @@ step / s                     Single instruction step
 print <var>                  Print variable value
 callstack / cs               Show call stack
 delete <num>                 Remove breakpoint
+verbose on|off               Toggle verbose/debug output
 quit                         Exit debugger
 ----
