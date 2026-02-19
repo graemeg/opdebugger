@@ -14,7 +14,7 @@ unit pdr_engine;
 interface
 
 uses
-  Classes, SysUtils, pdr_ports, pdr_typesys, ogopdf;
+  Classes, SysUtils, pdr_ports, pdr_typesys, opdf_types;
 
 type
   { Breakpoint tracking record }

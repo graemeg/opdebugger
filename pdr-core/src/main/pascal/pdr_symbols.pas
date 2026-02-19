@@ -15,7 +15,7 @@ unit pdr_symbols;
 interface
 
 uses
-  Classes, SysUtils, ogopdf, pdr_ports;
+  Classes, SysUtils, opdf_types, pdr_ports;
 
 type
   { Symbol Resolver - provides symbol lookup functionality }

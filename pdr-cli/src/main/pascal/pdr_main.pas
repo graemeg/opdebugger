@@ -16,7 +16,7 @@ uses
   cthreads,
   {$ENDIF}
   Classes, SysUtils,
-  ogopdf, pdr_ports, pdr_engine, pdr_typesys, pdr_symbols,
+  opdf_types, pdr_ports, pdr_engine, pdr_typesys, pdr_symbols,
   pdr_linux_ptrace, pdr_arch_adapters, pdr_opdf_adapter;
 
 type

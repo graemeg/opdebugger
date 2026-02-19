@@ -7,7 +7,7 @@
 
   This unit defines the core binary structures for the OPDF format.
 }
-unit ogopdf;
+unit opdf_types;
 
 {$mode objfpc}{$H+}
 

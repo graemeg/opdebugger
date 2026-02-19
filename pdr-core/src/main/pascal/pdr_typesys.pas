@@ -15,7 +15,7 @@ unit pdr_typesys;
 interface
 
 uses
-  Classes, SysUtils, Contnrs, ogopdf, opdf_demangle, pdr_ports;
+  Classes, SysUtils, Contnrs, opdf_types, opdf_demangle, pdr_ports;
 
 type
   { Forward declarations }

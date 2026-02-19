@@ -14,7 +14,7 @@ unit opdf_io;
 interface
 
 uses
-  Classes, SysUtils, ogopdf;
+  Classes, SysUtils, opdf_types;
 
 type
   { Array dimension bounds - Int64 for future-proofing }

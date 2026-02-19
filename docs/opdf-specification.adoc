@@ -755,7 +755,7 @@ Key source files:
 |===
 |File |Role
 
-|`opdf-lib/ogopdf.pas`
+|`opdf-lib/opdf_types.pas`
 |Binary format type definitions and record structures
 
 |`opdf-lib/opdf_io.pas`
@@ -770,6 +770,6 @@ Key source files:
 |`compiler/dbgopdf.pas`
 |FPC compiler OPDF emission (asm list output)
 
-|`compiler/tpdf_type_mapper.pas`
+|`compiler/dbgopdf_typemap.pas`
 |Type ID allocation within the FPC compiler
 |===

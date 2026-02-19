@@ -14,7 +14,7 @@ unit pdr_opdf_adapter;
 interface
 
 uses
-  Classes, SysUtils, Contnrs, ogopdf, opdf_io, opdf_demangle, elf_reader, pdr_ports;
+  Classes, SysUtils, Contnrs, opdf_types, opdf_io, opdf_demangle, elf_reader, pdr_ports;
 
 type
   { Pointer types for caching }

@@ -16,7 +16,7 @@ program opdf_generator;
 {$mode objfpc}{$H+}
 
 uses
-  Classes, SysUtils, Process, Math, ogopdf, opdf_io;
+  Classes, SysUtils, Process, Math, opdf_types, opdf_io;
 
 type
   TDwarfTypeKind = (dtkUnknown, dtkPrimitive, dtkShortString, dtkAnsiString, dtkUnicodeString, dtkWideString, dtkClass, dtkArray);

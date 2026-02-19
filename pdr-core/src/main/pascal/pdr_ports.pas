@@ -14,7 +14,7 @@ unit pdr_ports;
 interface
 
 uses
-  Classes, SysUtils, ogopdf;
+  Classes, SysUtils, opdf_types;
 
 type
   { Debugger state }

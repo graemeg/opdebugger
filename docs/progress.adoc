@@ -15,7 +15,7 @@ This document tracks the implementation progress of the Object Pascal Debug Form
 === Phase 0: Foundation
 
 * [x] Project structure (PasBuild multi-module)
-* [x] OPDF shared library (`opdf-lib/`: ogopdf.pas, opdf_io.pas)
+* [x] OPDF shared library (`opdf-lib/`: opdf_types.pas, opdf_io.pas)
 * [x] Hexagonal architecture ports and adapters (pdr_ports.pas)
 * [x] FPC symbol demangling (opdf_demangle.pas)
 * [x] OPDF generator tool (extracts debug info from DWARF binaries)
@@ -92,7 +92,7 @@ Integration of OPDF generation directly into the Free Pascal Compiler, eliminati
 
 === Phase 1C: Type Mapper
 
-* [x] Create tpdf_type_mapper.pas with TTypeMapper class
+* [x] Create dbgopdf_typemap.pas with TTypeMapper class
 * [x] Type ID allocation using global sequence approach
 * [x] Fix Word underflow bug in GetTypeID (changed to Longint/Cardinal)
 
@@ -148,7 +148,7 @@ Integration of OPDF generation directly into the Free Pascal Compiler, eliminati
 * [x] appendsym_property — Emit REC_PROPERTY records (ClassTypeID, PropertyTypeID, ReadType/Addr, WriteType/Addr) from within appenddef_object class iteration
 * [x] appendprocdef — Function scope records with label-based LowPC/HighPC (REC_FUNCSCOPE)
 * [x] appenddef_set — Set types emitted as REC_SET = 18 (new record type) with base enum TypeID, storage size, lower bound; debugger decodes bitfield to display as [Mon, Tue, Wed, Thu, Fri]
-* [x] OPDF format extended: TDefEnum, TEnumMember, TDefInterface, TInterfaceMethodDescriptor, TDefSet added to ogopdf.pas
+* [x] OPDF format extended: TDefEnum, TEnumMember, TDefInterface, TInterfaceMethodDescriptor, TDefSet added to opdf_types.pas
 * [x] OPDF I/O extended: WriteEnum, WriteInterface, WriteRecord, WriteParameter, WriteSet + Read counterparts in opdf_io.pas
 * [x] Verified: test_phase2_types.pas compiles with -gO, produces valid .opdf section with 15 variables, 4 function scopes, 59 line mappings
 
@@ -236,7 +236,7 @@ tools/         → 1,293 lines (OPDF generator from DWARF)
 
 ----
 dbgopdf.pas          → OPDF debug writer (emits into al_opdf asm list)
-tpdf_type_mapper.pas → Type ID allocation
+dbgopdf_typemap.pas → Type ID allocation
 aasmdata.pas         → al_opdf enum in TAsmListType
 systems.inc          → dbg_opdf enum entry
 options.pas          → -gO flag handling
