@@ -830,6 +830,44 @@ begin
       end;
     end;
 
+    tcInterface:
+    begin
+      if TypeInfo.InterfaceInfo <> nil then
+      begin
+        AddLine('[INSPECT] ' + Expr + ': ' + TypeInfo.Name + ' (interface)');
+
+        { Show parent interface if any }
+        if TypeInfo.InterfaceInfo^.ParentTypeID <> 0 then
+        begin
+          if FDebugInfoReader.FindType(TypeInfo.InterfaceInfo^.ParentTypeID, ParentTypeInfo) then
+            AddLine('[INSPECT] parent: ' + ParentTypeInfo.Name)
+          else
+            AddLine('[INSPECT] parent TypeID: ' + IntToStr(TypeInfo.InterfaceInfo^.ParentTypeID));
+        end;
+
+        { Show current pointer value }
+        SingleValue := EvaluateExpression(Expr);
+        if SingleValue.IsValid then
+          AddLine('[INSPECT] value: ' + SingleValue.Value);
+
+        { Show method list — format matches class method-backed properties }
+        if Length(TypeInfo.InterfaceInfo^.Methods) > 0 then
+        begin
+          AddLine('[INSPECT] methods (' +
+                  IntToStr(Length(TypeInfo.InterfaceInfo^.Methods)) + '):');
+          for I := 0 to High(TypeInfo.InterfaceInfo^.Methods) do
+            AddLine(TypeInfo.InterfaceInfo^.Methods[I] + ' = <method>');
+        end;
+      end
+      else
+      begin
+        { Fallback: no interface info loaded }
+        SingleValue := EvaluateExpression(Expr);
+        if SingleValue.IsValid then
+          AddLine(SingleValue.Name + ' = ' + SingleValue.Value);
+      end;
+    end;
+
   else
     begin
       { For primitives, floats, strings, enums, sets, pointers, arrays: same as print }

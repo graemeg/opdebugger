@@ -97,6 +97,14 @@ type
   end;
   PDebuggerClass = ^TDebuggerClass;
 
+  { Interface type info (method list from OPDF) }
+  TDebuggerInterface = record
+    ParentTypeID: TTypeID;
+    IntfType: Byte;         { 0=COM, 1=CORBA, 2=Dispatch }
+    Methods: array of String;
+  end;
+  PDebuggerInterface = ^TDebuggerInterface;
+
   { Enum member for display }
   TDebuggerEnumMember = record
     Name: String;
@@ -139,6 +147,8 @@ type
     Bounds: TArrayBounds;    // Array bounds for each dimension
     // Enum-specific
     EnumMembers: TDebuggerEnumMemberArray;  // Enum member names and values
+    // Interface-specific
+    InterfaceInfo: PDebuggerInterface; // For interfaces: method list
     // Record-specific
     RecordInfo: PDebuggerRecord;  // For records: field layout
     // Set-specific (ElementTypeID holds base enum/ordinal TypeID)

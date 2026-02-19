@@ -130,6 +130,9 @@ begin
     // Free RecordInfo if it's a record type
     if (TypeInfo.Category = tcRecord) and (TypeInfo.RecordInfo <> nil) then
       Dispose(TypeInfo.RecordInfo);
+    // Free InterfaceInfo if it's an interface type
+    if (TypeInfo.Category = tcInterface) and (TypeInfo.InterfaceInfo <> nil) then
+      Dispose(TypeInfo.InterfaceInfo);
     Dispose(PTypeInfo(FTypes[I]));
   end;
   FTypes.Clear;
@@ -672,6 +675,13 @@ begin
             PType^.IsSigned := False;
             PType^.Category := tcInterface;
             PType^.MaxLength := 0;
+
+            New(PType^.InterfaceInfo);
+            PType^.InterfaceInfo^.ParentTypeID := DefInterface.ParentTypeID;
+            PType^.InterfaceInfo^.IntfType := DefInterface.IntfType;
+            SetLength(PType^.InterfaceInfo^.Methods, Length(IntfMethodNames));
+            for I := 0 to High(IntfMethodNames) do
+              PType^.InterfaceInfo^.Methods[I] := IntfMethodNames[I];
 
             FTypes.Add(IntToStr(DefInterface.TypeID), PType);
           end;
