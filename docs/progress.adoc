@@ -1,242 +1,257 @@
 = OPDF Project Progress Tracker
 :toc: left
 :toclevels: 3
-:date: 2026-02-16
+:date: 2026-02-19
 
 == Overview
 
-This document tracks the implementation progress of the Object Pascal Debug Format (OPDF) project, covering both the standalone debugger toolchain and the FPC compiler integration.
+This document tracks the implementation progress of the Object Pascal Debug Format (OPDF)
+project, covering both the standalone debugger toolchain and the FPC compiler integration.
 
 **Repository**: `/data/devel/opdebugger` (standalone debugger + opdf-lib) +
 **FPC Branch**: `feature/opdf-support` in `/data/devel/fpc-3.3.1/src`
 
-== Standalone Debugger Toolchain
+---
 
-=== Phase 0: Foundation
+== Completed Work
 
-* [x] Project structure (PasBuild multi-module)
-* [x] OPDF shared library (`opdf-lib/`: opdf_types.pas, opdf_io.pas)
-* [x] Hexagonal architecture ports and adapters (pdr_ports.pas)
-* [x] FPC symbol demangling (opdf_demangle.pas)
-* [x] OPDF generator tool (extracts debug info from DWARF binaries)
+=== Standalone Debugger (Phases 0–2)
 
-=== Phase 1: Integer MVP
-
-* [x] Primitive type definitions (ordinals, booleans)
-* [x] Global variable support
-* [x] Breakpoint management (INT3 injection/restoration)
+* [x] Project structure (PasBuild multi-module), hexagonal architecture
+* [x] OPDF shared library (`opdf_types.pas`, `opdf_io.pas`, `opdf_demangle.pas`)
+* [x] ELF64 section reader (`elf_reader.pas`) for embedded `.opdf` data
+* [x] Primitive, boolean, float, enum, set type evaluators
+* [x] ShortString, AnsiString, UnicodeString, WideString evaluators
+* [x] Pointer evaluator
+* [x] Static and dynamic array evaluators (with element limit and truncation)
+* [x] Record evaluator with field access
+* [x] Class evaluator with inheritance, nil-pointer handling, dot notation
+* [x] Interface type loading and display
+* [x] Field-backed property evaluation; method-backed properties report gracefully
+* [x] Set type evaluator — decodes bitfield using base enum member names
+* [x] Global variable support (linker-resolved addresses)
+* [x] Local variable and parameter support (RBP-relative stack addressing)
+* [x] Nested procedure scope variable access via saved RBP chain
+* [x] Function scope records with low/high PC
+* [x] Breakpoint management (INT3 injection/restoration + single-step)
 * [x] `file:line` breakpoint syntax
-* [x] Debugger engine with state machine (pdr_engine.pas)
-* [x] Linux ptrace adapter (pdr_linux_ptrace.pas)
-* [x] CLI debugger interface (pdr_main.pas)
-* [x] Integration test infrastructure (run_tests.sh, run_launch_tests.sh)
-
-=== Phase 1.5: Source Line Mapping
-
-* [x] DWARF line table parsing in opdf_generator
-* [x] Line info records in OPDF format
-* [x] `break file.pas:line` resolution in debugger
-* [x] `run` command for direct program launching
-
-=== Phase 2: String Types
-
-* [x] ShortString evaluator (length byte + char data)
-* [x] AnsiString evaluator (heap-allocated with refcount header)
-* [x] UnicodeString evaluator (UTF-16 to UTF-8 conversion)
-* [x] WideString evaluator
-
-=== Phase 3: Classes and Properties
-
-* [x] Class type definitions in OPDF
-* [x] TClassEvaluator with recursive field evaluation
-* [x] Property support
-* [x] Inheritance and nil-pointer handling
-
-=== Phase 4A: Local Variables
-
-* [x] Function scope records in OPDF
-* [x] Stack-based variable lookup (RBP-relative addressing)
-* [x] Variable shadowing and scope management
-
-=== Phase 4B: Array Types
-
-* [x] Static array bounds and element access
-* [x] Dynamic array length and element access
-
-=== Phase 4C: Command-Line Arguments and Call Stack
-
+* [x] `run` command — fork/exec with ptrace, pause at entry point
+* [x] `next` — step to next source line (single-step loop)
+* [x] `callstack` / `backtrace` — frame traversal
 * [x] Command-line argument passing to debugged programs
-* [x] Call stack introspection (`backtrace`/`callstack` command)
-* [x] Frame traversal
+* [x] `verbose on|off` command, `--verbose`/`-v` CLI flag
+* [x] Linux ptrace adapter (x86_64 and i386 register structs both implemented)
+* [x] Integration test suite: 13/13 automated tests passing
 
-=== Phase 5: Platform Expansion (not started)
+=== FPC Compiler Integration (Phases 1A–2)
 
-* [ ] Windows support (debug API adapter)
-* [ ] macOS support (Mach ports adapter)
-* [ ] FreeBSD support
+* [x] `dbg_opdf` enum in `systems.inc`; `-gO` flag in `options.pas`
+* [x] `dbgopdf_typemap.pas` — TTypeMapper (type ID allocation)
+* [x] `dbgopdf.pas` — TOPDFDebugWriter emitting into `al_opdf` asm list
+* [x] Registered in `x86_64/cputarg.pas` and `i386/cputarg.pas`
+* [x] All type handlers: ordinal, float, string, enum, set, pointer, array, record, class, interface
+* [x] All symbol handlers: global var, local var, parameter, property, function scope
+* [x] Line information: per-procedure labels, accumulated in FLineInfoList, merged at inserttypeinfo
+* [x] Embedded `.opdf` ELF section — linker resolves all symbol references
+* [x] Verified: 481 types, 16 variables, 4 function scopes, 61 line mappings in test binary
 
-== FPC Compiler Integration
+=== Design Decisions (Resolved)
 
-Integration of OPDF generation directly into the Free Pascal Compiler, eliminating the need for the standalone opdf_generator tool.
+* **External file vs embedded section** — Embedded ELF section chosen. External `.opdf`
+  files cannot carry line information because code addresses are only known after linking.
+  All address fields use symbol references resolved by the assembler/linker. See
+  `docs/design-decisions.adoc` for full rationale.
 
-=== Phase 1A: Build System Integration
+* **ogopdf.pas → opdf_types.pas** — The `og` prefix is FPC's Output Generator convention
+  (ogelf.pas, ogcoff.pas) and is inappropriate for the standalone opdf-lib. All units in
+  opdf-lib follow the `opdf_*` naming convention.
 
-* [x] Copy opdf-lib sources into FPC compiler directory
-* [x] Verify opdf-lib units compile within FPC build context
+* **tpdf_type_mapper.pas → dbgopdf_typemap.pas** — FPC debug subsystem units use the `dbg`
+  prefix (dbgbase.pas, dbgdwarf.pas). The type mapper is part of that subsystem.
 
-=== Phase 1B: Debug Format Registration
+* **FPC compiler isolation** — `dbgopdf.pas` imports only FPC-internal units plus
+  `dbgopdf_typemap`. No opdf-lib units are imported. `REC_*` constants are duplicated
+  locally with `{ must match opdf_types.pas }` comments.
 
-* [x] Add `dbg_opdf` to `tdbg` enumeration (systems.inc)
-* [x] Add `-gO` flag parsing in options.pas (`Interpret_G_l`)
-* [x] Add `-gO` to compiler help output (`-h`)
+---
 
-=== Phase 1C: Type Mapper
+== Known Limitations
 
-* [x] Create dbgopdf_typemap.pas with TTypeMapper class
-* [x] Type ID allocation using global sequence approach
-* [x] Fix Word underflow bug in GetTypeID (changed to Longint/Cardinal)
+* Arrays indexed by an enum type (e.g. `array[TDays] of String`) display bounds as
+  `[0..6]` rather than `[Mon..Sun]` — enum-keyed array bounds not yet decoded
+* Nested procedure static link not modelled in OPDF — the saved RBP chain approximation
+  works for one level of nesting only
+* `set of` non-enum ordinal types (e.g. `set of 3..7`) show raw bit positions, not names
+* Method-backed properties cannot be evaluated — prints an informative message; requires
+  method call injection (Phase 3, Feature 8)
+* `GetPointerSize` in `pdr_opdf_adapter.pas` is conditioned on the debugger's compile-time
+  architecture, not the debuggee's — will be wrong when a 64-bit debugger debugs a 32-bit
+  binary; fixed by the PointerSize prerequisite below
+* `elf_reader.pas` only supports ELF64; ELF32 (Linux i386) requires a format extension
 
-=== Phase 1D: OPDF Writer Skeleton
+---
 
-* [x] Create dbgopdf.pas with TOPDFDebugWriter class
-* [x] Extend TDebugInfo base class
-* [x] Register via `dbg_opdf_info` constant
-* [x] Add to x86_64/cputarg.pas and i386/cputarg.pas
+== Phase 3: Next Work Items
 
-=== Phase 1E: Working Type and Symbol Emission
+Full specification: `docs/phase3-plan.adoc`
 
-* [x] Initialize defnumberlist/deftowritelist (required by base class)
-* [x] Create output .opdf file stream in inserttypeinfo
-* [x] appenddef_ord: Write primitive types with name, size, signedness
-* [x] appendsym_staticvar: Write global variables with type IDs
-* [x] insertmoduleinfo: Finalize OPDF output
-* [x] Verified: `ppcx64 -gO` produces valid .opdf with types and variables
+=== Prerequisite: OPDF Format Fix
 
-=== Phase 1F: Embedded ELF Section
+* [ ] Add `PointerSize: Byte` to `TOPDFHeader` in `opdf_types.pas`
+* [ ] Emit `SizeOf(Pointer)` into that field in `dbgopdf.pas`
+* [ ] Update `opdf_io.pas` reader to use header pointer size for address fields
+* [ ] Update `pdr_opdf_adapter.pas` to derive pointer size from the loaded header
+* [ ] Rebuild all integration test binaries after format change
 
-* [x] Add `al_opdf` asm list type to `TAsmListType` in aasmdata.pas
-* [x] Rewrite dbgopdf.pas to emit via `tai_const` into asm list (no more external file)
-* [x] Use `sec_user` with `.opdf` section name (non-loadable debug section)
-* [x] Global variable addresses resolved by linker via symbol references
-* [x] Remove dependency on opdf_io, classes, sysutils from compiler writer
-* [x] Create `elf_reader.pas` — minimal ELF64 parser for section extraction
-* [x] Update `pdr_opdf_adapter.pas` to load from embedded `.opdf` section (with external file fallback)
-* [x] Verified: `readelf -S` shows `.opdf` section, `readelf -x .opdf` shows valid OPDF magic bytes
-* [x] Verified: PDR debugger loads 2 variables from embedded section
+=== Tier 1: High Value, Lower Complexity
 
-=== Phase 1G: Line Information
+==== Feature 1: `locals` Command
 
-* [x] Implement `insertlineinfo` — emit line records with label-based addresses
-* [x] Insert labels at line boundaries (same pattern as DWARF `alt_dbgline`)
-* [x] Emit `recLineInfo` records with symbol references for code addresses
-* [x] Source file name and line number mapping
-* [x] Accumulate line records in private FLineInfoList, merge into al_opdf during inserttypeinfo
-* [x] Verify with PDR debugger: `break file.pas:line` works with embedded data (12 line mappings, breakpoint hit)
+* [ ] Add `EnumerateScopeVariables(ScopeID, Callback)` to `IDebugInfoReader` / `pdr_opdf_adapter.pas`
+* [ ] Add `HandleLocals` to `pdr_engine.pas`
+* [ ] Register `locals` and `locals globals` commands in `pdr_main.pas`
+* [ ] Integration test: `test_14_locals.pas`
 
-=== Phase 2: Remaining Type Handlers
+==== Feature 2: `inspect` Command
 
-* [x] appenddef_float — Float types emitted as REC_PRIMITIVE (signed, with size)
-* [x] appenddef_enum — Full enum type with member names and ordinal values (new REC_ENUM = 17)
-* [x] appenddef_string — ShortString (REC_SHORTSTR), AnsiString (REC_ANSISTR), UnicodeString/WideString (REC_UNICODESTR)
-* [x] appenddef_pointer — Pointer types with target type ID (REC_POINTER), void pointer support
-* [x] appenddef_array — Static arrays with bounds, dynamic arrays (REC_ARRAY)
-* [x] appenddef_record — Record types with inline field descriptors (REC_RECORD)
-* [x] appenddef_object — Class/object types with parent, VMT, fields (REC_CLASS); interface types with GUID, methods (new REC_INTERFACE = 16)
-* [x] appendsym_localvar — Local variables with RBP-relative stack offset (REC_LOCALVAR)
-* [x] appendsym_paravar — Parameters with var/const flags (REC_PARAMETER)
-* [x] appendsym_fieldvar — No-op: fields emitted inline within record/class records
-* [x] appendsym_property — Emit REC_PROPERTY records (ClassTypeID, PropertyTypeID, ReadType/Addr, WriteType/Addr) from within appenddef_object class iteration
-* [x] appendprocdef — Function scope records with label-based LowPC/HighPC (REC_FUNCSCOPE)
-* [x] appenddef_set — Set types emitted as REC_SET = 18 (new record type) with base enum TypeID, storage size, lower bound; debugger decodes bitfield to display as [Mon, Tue, Wed, Thu, Fri]
-* [x] OPDF format extended: TDefEnum, TEnumMember, TDefInterface, TInterfaceMethodDescriptor, TDefSet added to opdf_types.pas
-* [x] OPDF I/O extended: WriteEnum, WriteInterface, WriteRecord, WriteParameter, WriteSet + Read counterparts in opdf_io.pas
-* [x] Verified: test_phase2_types.pas compiles with -gO, produces valid .opdf section with 15 variables, 4 function scopes, 59 line mappings
+* [ ] Add `Methods: TStringArray` to `TDebuggerClass` in `pdr_ports.pas`
+* [ ] Populate method list at load time via demangled `REC_FUNCSCOPE` names in `pdr_opdf_adapter.pas`
+* [ ] Add `HandleInspect(VarExpr)` to `pdr_engine.pas` with per-category structured output
+* [ ] Register `inspect` command in `pdr_main.pas`
+* [ ] Integration test: `test_15_inspect.pas`
 
-=== Debugger Reader and Evaluator Updates
+==== Feature 3: Array Slice Display
 
-* [x] Mark type definitions as used in FPC compiler (mark_defs_used, mark_used_unit_defs in dbgopdf.pas)
-* [x] Add pointer, record, enum type evaluators to pdr_typesys.pas
-* [x] Add recPointer, recRecord, recEnum, recSet, recParameter, recInterface handlers to pdr_opdf_adapter.pas
-* [x] Add tcFloat type category and TFloatEvaluator for Single/Double/Extended display
-* [x] Fix stream alignment in OPDF reader (RecStartPos tracking after each record)
-* [x] Fix Cardinal underflow bugs in opdf_io.pas reader methods (ReadClass, ReadRecord, ReadEnum, ReadInterface)
-* [x] Fix static array element count (was displaying too many elements due to inverted logic)
-* [x] Fix dynamic array length reading (x86_64: high value at offset -8 as SizeInt, not -4 as LongInt)
-* [x] Add dot-notation field access for class and record types (MyShape.FName, MyPoint.X)
-* [x] Add recProperty handler to pdr_opdf_adapter.pas: field-backed properties exposed as TDebuggerProperty with ReadOffset
-* [x] Add ResolveClassProperty to TTypeSystem: walks inheritance chain, evaluates field-backed props, marks method-backed as non-evaluable
-* [x] 32-bit dynamic array support: use GetPointerSize to select between PLongInt (32-bit) and PInt64 (64-bit) for high-value read
-* [x] Verified: 481 types, 16 variables, 4 function scopes, 61 line mappings loaded from test_phase2_types binary
-* [x] Property access verified: MyShape.Name (field-backed, inherited) evaluates correctly; method-backed prints informative message
-* [x] Fix nested procedure scope variable access (ParentVar, Names visible from InnerNested)
-  ** `FindVariableWithScope`: after current scope fails, searches all other scopes; returns `LocationExpr=2` (parent frame) for enclosing scope variables
-  ** `EvaluateVariableInfo`: `LocationExpr=2` follows saved RBP chain — `parent_RBP = *(breakpoint_RBP)`, `address = parent_RBP + LocationData`
-  ** Root cause: single-step in `HandleBreakpointHit` moves RIP/RBP into called code; fix uses `GetLastBreakpointAddress` + `GetLastBreakpointRBP` for scope/address lookup
-  ** `GetLastBreakpointRBP: QWord` added to `IProcessController`; `TLinuxPtraceAdapter` saves RBP before single-step
-* [x] Add TSetEvaluator: decodes bitfield using base enum's member names; displays as [Mon, Tue, Wed, Thu, Fri]
-* [x] Add tcSet to TTypeCategory, SetLowerBound to TTypeInfo, recSet = 18 to OPDF format
-* [x] Add verbose mode: gVerbose global, `verbose on|off` command, `--verbose`/`-v` CLI flag; suppress [DEBUG] output by default
-* [x] Integration test suite: 13/13 passing; added test_12_teaser_demo (nested scope), test_13_sets (set types)
+* [ ] Add `TArraySlice` record and `TryParseArraySlice` parser in `pdr_engine.pas`
+* [ ] Extend array evaluators in `pdr_typesys.pas` to accept optional slice bounds
+* [ ] Clamp out-of-bounds indices with warning message
+* [ ] Support 2D slicing for static multi-dimensional arrays
+* [ ] Register `print MyArray[N..M]` syntax in `pdr_main.pas`
+* [ ] Integration test: `test_15_array_slice.pas`
 
-== Current Work Item
+==== Feature 4: Variable Assignment (`set`)
 
-**Set type support complete** — Set types are now fully supported across the OPDF pipeline: the FPC compiler emits `REC_SET = 18` records, the debugger reader loads them, and the `TSetEvaluator` decodes the bitfield using the base enum's member names.
+* [ ] Add `HandleSet(Expr)` to `pdr_engine.pas` — parses `VarName = Value`
+* [ ] Value conversion: integer literals, `True`/`False`, enum member names, `$`hex
+* [ ] Sub-word write via read-modify-write with `ptrace(PTRACE_POKEDATA)`
+* [ ] Register `set <var> = <value>` command in `pdr_main.pas`
+* [ ] Integration test: `test_16_set_variable.pas`
 
-**Verified with test_13_sets.pas**:
+==== Feature 5: Conditional Breakpoints (hit-count form)
 
-* `WorkingDays = [Mon, Tue, Wed, Thu, Fri]` ✓
-* `Weekend = [Sat, Sun]` ✓
-* `EmptySet = []` ✓
+* [ ] Extend `TBreakpoint` record with `ConditionType`, `HitCount`, `CurrentHitCount`
+* [ ] Evaluate hit-count condition in `HandleBreakpointHit`; re-arm and continue if not met
+* [ ] Parse `break foo.pas:N if count=K` syntax
+* [ ] Show condition in `info breakpoints` output
+* [ ] Integration test: `test_17_conditional_break.pas`
 
-**Known limitations**:
+==== Feature 6: `display` Command
 
-* Arrays indexed by enum type (e.g. `array[TDays] of string`) display as `[0..6]` rather than `[Mon..Sun]`
-* Nested procedure static link not modelled in OPDF — using saved RBP chain as approximation (works for one level of nesting)
-* `set of` non-enum ordinal types show raw ordinal values (e.g. `set of 3..7` shows numbers, not names)
+* [ ] Add `FDisplayList: TStringList` to `pdr_engine.pas`
+* [ ] Print all display entries after every breakpoint stop
+* [ ] Register `display <var>`, `undisplay <var>`, `undisplay`, `info display`
+* [ ] Handle out-of-scope variables gracefully
 
-[[Embedding Decision]]
-=== Embedding Decision: External File vs ELF Section (RESOLVED)
+==== Feature 7: Hardware Watchpoints
 
-==== Problem
+* [ ] Add `SetWatchpoint`, `ClearWatchpoint`, `GetFiredWatchpoint` to `IProcessController`
+* [ ] Implement via `PTRACE_POKEUSER` on x86_64 DR0–DR3 / DR7 in `pdr_linux_ptrace.pas`
+* [ ] Add `HandleWatch` / `HandleUnwatch` to `pdr_engine.pas`
+* [ ] Register `watch`, `rwatch`, `awatch`, `unwatch` commands
+* [ ] Enforce 4-slot hardware limit
+* [ ] Integration test: `test_18_watch.pas`
 
-The FPC `TDebugInfo` infrastructure is designed around emitting debug data into asm lists that flow through the assembler and linker. All existing debug formats (DWARF, Stabs, CodeView) work this way. The external .opdf file approach fights this architecture and makes line information impossible without a post-link fixup step.
+=== Tier 2: High Value, Higher Complexity
 
-==== Decision
+==== Feature 8: Method Call Injection
 
-Pivot to embedding OPDF data inside the binary as a custom ELF section (`.opdf`). This aligns with FPC's debug writer infrastructure and enables:
+* [ ] Add `GetFPRegisters` / `SetRegisters` / `SetFPRegisters` to `IProcessController`
+* [ ] Implement in `pdr_linux_ptrace.pas` (x86_64 System V ABI; i386 register convention)
+* [ ] Add `InjectCall(MethodAddr, SelfPtr, Args)` to `pdr_engine.pas`
+* [ ] Add sentinel INT3 management (find or inject; restore after call)
+* [ ] Add wall-clock timeout for hung calls
+* [ ] Evaluate method-backed properties in `pdr_typesys.pas` via `InjectCall`
+* [ ] Register `call MyObj.Method(args)` command
+* [ ] Integration test: `test_19_getter_props.pas`
 
-* Label-based address resolution through the assembler/linker
-* Line information support (critical for a working debugger)
-* Single-file distribution (no separate .opdf file to manage)
-* The OPDF specification already planned for embedded storage
+==== Feature 9: Expression Evaluator
 
-==== Implementation (completed in Phase 1F)
+* [ ] Write `pdr_expr_preproc.pas` — tokeniser resolving dot notation and `[N]` indexing
+* [ ] Integrate `fpexprpars` (FPC unit `packages/fcl-base/src/fpexprpars.pp`) as eval core
+* [ ] Register variable resolver callback using `TTypeSystem.EvaluateVariable`
+* [ ] Workaround for missing `div`/`shl`/`shr` in fpexprpars (rewrite in pre-processor)
+* [ ] Open upstream FPC issue and submit patch for `div`/`shl`/`shr` in fpexprpars
+* [ ] Enable `print <expr>` for compound expressions
+* [ ] Integration test: `test_20_expression.pas`
 
-* [x] Define OPDF ELF section name and structure
-* [x] Register a new asm list for OPDF data emission
-* [x] Rewrite TOPDFDebugWriter to emit tai_const values into asm list
-* [x] Update PDR debugger to read OPDF section from ELF binary
-* [x] Implement insertlineinfo with label insertion and line records
-* [ ] Update OPDF specification to document embedded storage format
-* [ ] Update test infrastructure to work with embedded OPDF
+==== Feature 5 (form 2): Conditional Breakpoints — expression form
+
+* [ ] Parse `break foo.pas:N if <expr>` using Feature 9 evaluator
+* [ ] Evaluate expression condition in `HandleBreakpointHit`
+
+=== Tier 3: Language Completeness
+
+==== Feature 10: Variant Records
+
+* [ ] Extend `REC_RECORD` in `opdf_types.pas` with variant group descriptors
+* [ ] Update `dbgopdf.pas` `appenddef_record` to emit variant fields
+* [ ] Add `TVariantRecordEvaluator` to `pdr_typesys.pas`
+* [ ] Integration test: `test_21_variant_record.pas`
+
+==== Feature 11: Generics (Basic Containers)
+
+* [ ] Hardcode `TList<T>`, `TObjectList<T>`, `TDictionary<K,V>` layout knowledge
+* [ ] Recognise container type names by prefix in `pdr_typesys.pas`
+* [ ] Integration test: `test_22_generics.pas`
+
+==== Feature 12: Exception Metadata
+
+* [ ] Intercept `SIGSEGV` / `SIGFPE` / `SIGABRT` in `pdr_linux_ptrace.pas`
+* [ ] Locate `ExceptObject` via OPDF global table or ELF symbol table
+* [ ] Read class name from VMT; read `FMessage` at known offset
+* [ ] Integration test: `test_22_exception.pas`
+
+==== Feature 13: Optimized Code — Register-Allocated Variables
+
+* [ ] Extend `LocationExpr` encoding: value `3` = register-allocated
+* [ ] Update `dbgopdf.pas` `appendsym_localvar` to emit `LocationExpr = 3` for `LOC_REGISTER`
+* [ ] Update `EvaluateVariableInfo` to read from live register state for `LocationExpr = 3`
+* [ ] Increment `TOPDFHeader.Version`; update `opdf-specification.adoc`
+
+=== Upstream Contribution (Independent)
+
+* [ ] Submit patch to FPC: add `div`, `shl`, `shr` operators to `fpexprpars.pp`
+
+---
+
+== Phase 4: Platform Expansion
+
+* [ ] Extend `elf_reader.pas` for ELF32 (Linux i386 support)
+* [ ] Write `pe_reader.pas` — PE/COFF section extraction (Windows binaries)
+* [ ] Write `pdr_windows_debug.pas` — `IProcessController` via Windows debug API
+* [ ] Wire format dispatch in `pdr_opdf_adapter.pas` (ELF vs PE detection)
+* [ ] Windows i386: i386 `CONTEXT` struct variant in `pdr_windows_debug.pas`
+* [ ] macOS: Mach-O section reader + Mach port process controller (deferred)
+
+---
 
 == Architecture Summary
 
-=== Standalone Debugger (~6,873 lines)
+=== Standalone Debugger
 
 ----
-opdf-lib/      → 1,302 lines (core format, I/O, demangling)
-pdr-core/      → 1,903 lines (engine, type system, ports)
-pdr-adapters/  → 2,008 lines (Linux ptrace, OPDF reader, arch adapters)
-pdr-cli/       →   367 lines (command-line interface)
-tools/         → 1,293 lines (OPDF generator from DWARF)
+opdf-lib/      → core OPDF format, I/O, ELF reader, demangling
+pdr-core/      → engine, type system, evaluators, port interfaces
+pdr-adapters/  → Linux ptrace, OPDF reader adapter, arch helpers
+pdr-cli/       → command-line interface (REPL)
+tools/         → opdf_generator (DWARF→OPDF, used during development)
 ----
 
-=== FPC Integration (~700 lines across 5 files)
+=== FPC Integration
 
 ----
 dbgopdf.pas          → OPDF debug writer (emits into al_opdf asm list)
-dbgopdf_typemap.pas → Type ID allocation
+dbgopdf_typemap.pas  → Type ID allocation (TTypeMapper)
 aasmdata.pas         → al_opdf enum in TAsmListType
 systems.inc          → dbg_opdf enum entry
 options.pas          → -gO flag handling
@@ -244,26 +259,26 @@ x86_64/cputarg.pas   → dbgopdf registration
 i386/cputarg.pas     → dbgopdf registration
 ----
 
-=== Test Programs (15 test programs, 13 automated)
+=== Integration Tests (13 automated)
 
 ----
-test_01_primitives.pas      → Integer and Boolean variables
-test_01_loop.pas            → Loop and breakpoint testing
-test_02_breakpoint_next.pas → Break and next commands
-test_03_strings.pas         → All string types
-test_04_classes.pas         → Class instances and fields
-test_05_properties.pas      → Properties with getters/setters
-test_06_local_variables.pas → Stack-based locals
-test_07_variable_shadowing.pas → Scope resolution
-test_08_static_arrays.pas   → Static array bounds
-test_09_dynamic_arrays.pas  → Dynamic array length/elements
-test_10_arguments.pas       → Function arguments
-test_11_callstack.pas       → Stack traces
-test_12_teaser_demo.pas     → Nested scope variable access (OuterProcedure / InnerNested)
-test_13_sets.pas            → Set type display ([Mon, Tue, Wed, Thu, Fri])
-test_bool_only.pas          → Boolean type testing
-test_phase2_types.pas       → All Phase 2 types (float, string, enum, pointer, array, record, class, interface, locals, params)
+test_01_primitives       → Integer and Boolean variables
+test_01_loop             → Loop and breakpoint testing
+test_02_breakpoint_next  → Break and next commands
+test_03_strings          → All string types
+test_04_classes          → Class instances and fields
+test_05_properties       → Properties with getters/setters
+test_06_local_variables  → Stack-based locals
+test_07_variable_shadowing → Scope resolution
+test_08_static_arrays    → Static array bounds
+test_09_dynamic_arrays   → Dynamic array length/elements
+test_10_arguments        → Function arguments
+test_11_callstack        → Stack traces
+test_12_teaser_demo      → Nested scope (OuterProcedure / InnerNested)
+test_13_sets             → Set type display ([Mon, Tue, Wed, Thu, Fri])
 ----
+
+---
 
 == Quick Reference
 
@@ -285,9 +300,11 @@ make -C compiler cycle
 [source,bash]
 ----
 # Compile test with FPC OPDF support (use ppcx64 directly, not fpc driver)
-/data/devel/fpc-3.3.1/src/compiler/ppcx64 -gO test_01_primitives.pas
+/data/devel/fpc-3.3.1/x86_64-linux/lib/fpc/3.3.1/ppcx64 \
+  @/data/devel/fpc-3.3.1/x86_64-linux/lib/fpc/3.3.1/fpc.cfg \
+  -gO test.pas
 
-# Compile test with DWARF + opdf_generator (current working approach)
+# Compile integration tests with DWARF (for opdf_generator pipeline)
 cd tests/integration
 fpc -g test_01_primitives.pas
 ../../tools/target/opdf_generator test_01_primitives
@@ -295,12 +312,14 @@ fpc -g test_01_primitives.pas
 # Run debugger
 ../../pdr-cli/target/pdr test_01_primitives
 
-# Run automated test suite
+# Run full automated test suite
 bash run_launch_tests.sh
-bash run_launch_tests.sh test_01_primitives  # single test
+
+# Run single test
+bash run_launch_tests.sh test_01_primitives
 ----
 
-=== Debugger Commands
+=== Debugger Commands (current)
 
 [source]
 ----
@@ -312,8 +331,27 @@ continue / c                 Resume execution
 next / n                     Step to next source line
 step / s                     Single instruction step
 print <var>                  Print variable value
+print <var>.<field>          Dot notation for class/record fields
 callstack / cs               Show call stack
 delete <num>                 Remove breakpoint
 verbose on|off               Toggle verbose/debug output
 quit                         Exit debugger
+----
+
+=== Planned Commands (Phase 3)
+
+[source]
+----
+locals                       List all in-scope variables with values
+locals globals               Include global variables
+inspect <var>                Structured view: fields, properties, methods
+print <arr>[N..M]            Array slice — elements N to M inclusive
+set <var> = <value>          Assign value to a primitive variable
+display <var>                Auto-print variable on every break
+undisplay <var>              Remove from auto-display list
+watch <var>                  Break when variable is written
+unwatch <var>                Remove watchpoint
+call <method>(<args>)        Invoke a method in the debugged process
+break foo.pas:N if count=K   Conditional breakpoint (hit count)
+break foo.pas:N if <expr>    Conditional breakpoint (expression)
 ----
