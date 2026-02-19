@@ -56,7 +56,7 @@ end;
 procedure TCLIDebugger.PrintHelp;
 begin
   WriteLn('PDR Debugger Commands:');
-  WriteLn('  run            - Start program (automatically done on launch)');
+  WriteLn('  run, r         - Start program (automatically done on launch)');
   WriteLn('  args <args>    - Set command-line arguments for program');
   WriteLn('  print <var>    - Print variable value');
   WriteLn('  callstack [n]  - Show call stack (limit to n frames, 0 for all)');
@@ -73,8 +73,8 @@ begin
   WriteLn('      MyGlobalInt        - Variable name');
   WriteLn('  delete <num>   - Remove breakpoint by number');
   WriteLn('  verbose [on|off] - Enable/disable diagnostic output (default: off)');
-  WriteLn('  help           - Show this help');
-  WriteLn('  quit           - Exit debugger');
+  WriteLn('  help, h        - Show this help');
+  WriteLn('  quit, q        - Exit debugger');
   WriteLn;
 end;
 
