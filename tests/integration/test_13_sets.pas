@@ -10,11 +10,11 @@ var
   WorkingDays: TDaySet;
   Weekend: TDaySet;
   EmptySet: TDaySet;
+  Sentinel: Integer;   { dummy breakpoint target after all assignments }
 
 begin
   WorkingDays := [Mon, Tue, Wed, Thu, Fri];
   Weekend := [Sat, Sun];
   EmptySet := [];
-  WriteLn('[PROG] WorkingDays set test');
-  WriteLn('[PROG] Done');
+  Sentinel := 1;       { break here: line 20, all sets are assigned }
 end.

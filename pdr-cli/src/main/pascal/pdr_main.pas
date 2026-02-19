@@ -72,6 +72,8 @@ begin
   WriteLn('      0x401000           - Hex address');
   WriteLn('      MyGlobalInt        - Variable name');
   WriteLn('  delete <num>   - Remove breakpoint by number');
+  WriteLn('  locals         - List all local variables in current scope');
+  WriteLn('  locals globals - Also include global variables');
   WriteLn('  verbose [on|off] - Enable/disable diagnostic output (default: off)');
   WriteLn('  help, h        - Show this help');
   WriteLn('  quit, q        - Exit debugger');
@@ -88,6 +90,8 @@ var
   BpNum: Integer;
   Limit: Integer;
   CallStack: TStringArray;
+  LocalVars: TVariableValueArray;
+  GlobalNames: TStringArray;
   I: Integer;
 begin
   if Trim(CmdLine) = '' then
@@ -236,6 +240,36 @@ begin
           WriteLn('[CALLSTACK]');
           for I := 0 to High(CallStack) do
             WriteLn(CallStack[I]);
+        end;
+      end;
+
+    'locals', 'lo':
+      begin
+        LocalVars := FEngine.GetLocalVariables;
+
+        if Length(LocalVars) = 0 then
+          WriteLn('[INFO] No local variables in current scope')
+        else
+          for I := 0 to High(LocalVars) do
+          begin
+            if LocalVars[I].IsValid then
+              WriteLn(LocalVars[I].Name, ' = ', LocalVars[I].Value)
+            else
+              WriteLn('[WARN] ', LocalVars[I].Name, ': ', LocalVars[I].Value);
+          end;
+
+        { 'locals globals' also lists global variables }
+        if (Length(Parts) > 1) and (LowerCase(Parts[1]) = 'globals') then
+        begin
+          GlobalNames := FDebugInfoReader.GetGlobalVariables;
+          for I := 0 to High(GlobalNames) do
+          begin
+            VarValue := FEngine.EvaluateExpression(GlobalNames[I]);
+            if VarValue.IsValid then
+              WriteLn(VarValue.Name, ' = ', VarValue.Value)
+            else if gVerbose then
+              WriteLn('[DEBUG] ', VarValue.Name, ': ', VarValue.Value);
+          end;
         end;
       end;
 

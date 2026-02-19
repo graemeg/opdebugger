@@ -82,6 +82,7 @@ type
     function FindLineByAddress(Address: QWord; out LineInfo: TLineInfo): Boolean;
     function GetFileLineEntries(const FileName: String): TLineInfoArray;
     function FindFunctionByAddress(Address: QWord; out FuncInfo: TFunctionInfo): Boolean;
+    function GetScopeLocals(RIP: QWord): TVariableInfoArray;
   end;
 
 implementation
@@ -1046,6 +1047,34 @@ begin
   SetLength(Result, LocalList.Count);
   for I := 0 to LocalList.Count - 1 do
     Result[I] := PLocalVariableInfo(LocalList[I])^;
+end;
+
+{ Return all local variables in scope at the given RIP }
+function TOPDFReaderAdapter.GetScopeLocals(RIP: QWord): TVariableInfoArray;
+var
+  ScopeID: Cardinal;
+  Locals: TLocalVariableArray;
+  I: Integer;
+begin
+  SetLength(Result, 0);
+
+  if not FLoaded then
+    Exit;
+
+  ScopeID := GetCurrentFunctionScope(RIP);
+  if ScopeID = 0 then
+    Exit;
+
+  Locals := FindLocalVariablesInScope(ScopeID);
+  SetLength(Result, Length(Locals));
+  for I := 0 to High(Locals) do
+  begin
+    Result[I].Name := Locals[I].Name;
+    Result[I].TypeID := Locals[I].TypeID;
+    Result[I].Address := 0;                 { computed from RBP + LocationData }
+    Result[I].LocationExpr := Locals[I].LocationExpr;
+    Result[I].LocationData := Locals[I].LocationData;
+  end;
 end;
 
 { Find function by address }

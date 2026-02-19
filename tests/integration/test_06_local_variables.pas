@@ -19,6 +19,4 @@ begin
   X := 5;
   Y := 10;
   ResultValue := Calculate(X, Y);
-  WriteLn('Result = ', ResultValue);
-  ReadLn;
 end.

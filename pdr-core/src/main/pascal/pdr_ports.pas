@@ -187,6 +187,7 @@ type
 
   { Dynamic array types - declared after record types }
   TStringArray = array of String;
+  TVariableInfoArray = array of TVariableInfo;
   TVariableValueArray = array of TVariableValue;
   TLineInfoArray = array of TLineInfo;
   TFunctionInfoArray = array of TFunctionInfo;
@@ -286,6 +287,9 @@ type
 
     { Find function by address }
     function FindFunctionByAddress(Address: QWord; out FuncInfo: TFunctionInfo): Boolean;
+
+    { Get all local variables in scope at the given RIP }
+    function GetScopeLocals(RIP: QWord): TVariableInfoArray;
   end;
 
   { Architecture Adapter Port - Architecture-specific operations }

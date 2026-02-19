@@ -662,10 +662,26 @@ begin
 end;
 
 function TDebuggerEngine.GetLocalVariables: TVariableValueArray;
+var
+  RIP: QWord;
+  Locals: TVariableInfoArray;
+  I: Integer;
 begin
   SetLength(Result, 0);
-  WriteLn('[WARNING] GetLocalVariables not implemented yet');
-  // TODO: Get local variables from current stack frame
+
+  if FState = dsIdle then
+    Exit;
+
+  RIP := FProcessController.GetLastBreakpointAddress;
+  if RIP = 0 then
+    RIP := FProcessController.GetCurrentAddress;
+  if RIP = 0 then
+    Exit;
+
+  Locals := FDebugInfoReader.GetScopeLocals(RIP);
+  SetLength(Result, Length(Locals));
+  for I := 0 to High(Locals) do
+    Result[I] := FTypeSystem.EvaluateVariableInfo(Locals[I]);
 end;
 
 function TDebuggerEngine.GetCallStack(Limit: Integer = 0): TStringArray;
