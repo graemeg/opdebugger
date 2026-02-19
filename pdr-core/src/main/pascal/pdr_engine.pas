@@ -69,6 +69,7 @@ type
     { ICommandHandler - Inspection }
     function EvaluateExpression(const Expr: String): TVariableValue;
     function GetLocalVariables: TVariableValueArray;
+    function GetInspectLines(const Expr: String): TStringArray;
     function GetCallStack(Limit: Integer = 0): TStringArray;
 
     { ICommandHandler - State query }
@@ -682,6 +683,160 @@ begin
   SetLength(Result, Length(Locals));
   for I := 0 to High(Locals) do
     Result[I] := FTypeSystem.EvaluateVariableInfo(Locals[I]);
+end;
+
+function TDebuggerEngine.GetInspectLines(const Expr: String): TStringArray;
+
+  procedure AddLine(const S: String);
+  begin
+    SetLength(Result, Length(Result) + 1);
+    Result[High(Result)] := S;
+  end;
+
+var
+  RIP: QWord;
+  VarInfo: TVariableInfo;
+  TypeInfo: TTypeInfo;
+  ParentTypeInfo: TTypeInfo;
+  ParentTypeID: TTypeID;
+  ParentChain: String;
+  FieldValue: TVariableValue;
+  I: Integer;
+  SingleValue: TVariableValue;
+begin
+  SetLength(Result, 0);
+
+  if FState = dsIdle then
+  begin
+    AddLine('[INSPECT] Error: not attached to process');
+    Exit;
+  end;
+
+  RIP := FProcessController.GetLastBreakpointAddress;
+  if RIP = 0 then
+    RIP := FProcessController.GetCurrentAddress;
+
+  { Find the variable }
+  if not FDebugInfoReader.FindVariableWithScope(Expr, RIP, VarInfo) then
+  begin
+    AddLine('[INSPECT] Error: variable not found: ' + Expr);
+    Exit;
+  end;
+
+  { Find its type }
+  if not FDebugInfoReader.FindType(VarInfo.TypeID, TypeInfo) then
+  begin
+    AddLine('[INSPECT] Error: type not found for: ' + Expr);
+    Exit;
+  end;
+
+  case TypeInfo.Category of
+
+    tcRecord:
+    begin
+      AddLine('[INSPECT] ' + Expr + ': ' + TypeInfo.Name +
+              ' (record, ' + IntToStr(TypeInfo.Size) + ' bytes)');
+      if (TypeInfo.RecordInfo <> nil) and (Length(TypeInfo.RecordInfo^.Fields) > 0) then
+      begin
+        AddLine('[INSPECT] fields (' +
+                IntToStr(Length(TypeInfo.RecordInfo^.Fields)) + '):');
+        for I := 0 to High(TypeInfo.RecordInfo^.Fields) do
+        begin
+          FieldValue := EvaluateExpression(Expr + '.' + TypeInfo.RecordInfo^.Fields[I].Name);
+          if FieldValue.IsValid then
+            AddLine(TypeInfo.RecordInfo^.Fields[I].Name + ' = ' + FieldValue.Value)
+          else
+            AddLine(TypeInfo.RecordInfo^.Fields[I].Name + ' = <error>');
+        end;
+      end;
+    end;
+
+    tcClass:
+    begin
+      if TypeInfo.ClassInfo <> nil then
+      begin
+        { Build parent chain }
+        ParentChain := TypeInfo.Name;
+        ParentTypeID := TypeInfo.ClassInfo^.ParentTypeID;
+        while ParentTypeID <> 0 do
+        begin
+          if FDebugInfoReader.FindType(ParentTypeID, ParentTypeInfo) then
+          begin
+            ParentChain := ParentChain + ' -> ' + ParentTypeInfo.Name;
+            if ParentTypeInfo.ClassInfo <> nil then
+              ParentTypeID := ParentTypeInfo.ClassInfo^.ParentTypeID
+            else
+              ParentTypeID := 0;
+          end
+          else
+            ParentTypeID := 0;
+        end;
+
+        AddLine('[INSPECT] ' + Expr + ': ' + TypeInfo.Name +
+                ' (class, ' + IntToStr(TypeInfo.ClassInfo^.InstanceSize) + ' bytes)');
+        if ParentChain <> TypeInfo.Name then
+          AddLine('[INSPECT] parent chain: ' + ParentChain);
+
+        if Length(TypeInfo.ClassInfo^.Fields) > 0 then
+        begin
+          AddLine('[INSPECT] fields (' +
+                  IntToStr(Length(TypeInfo.ClassInfo^.Fields)) + '):');
+          for I := 0 to High(TypeInfo.ClassInfo^.Fields) do
+          begin
+            FieldValue := EvaluateExpression(Expr + '.' + TypeInfo.ClassInfo^.Fields[I].Name);
+            if FieldValue.IsValid then
+              AddLine(TypeInfo.ClassInfo^.Fields[I].Name + ' = ' + FieldValue.Value)
+            else
+              AddLine(TypeInfo.ClassInfo^.Fields[I].Name + ' = <error>');
+          end;
+        end;
+
+        if Length(TypeInfo.ClassInfo^.Properties) > 0 then
+        begin
+          AddLine('[INSPECT] properties (' +
+                  IntToStr(Length(TypeInfo.ClassInfo^.Properties)) + '):');
+          for I := 0 to High(TypeInfo.ClassInfo^.Properties) do
+          begin
+            if TypeInfo.ClassInfo^.Properties[I].ReadKind = pakField then
+            begin
+              FieldValue := EvaluateExpression(
+                Expr + '.' + TypeInfo.ClassInfo^.Properties[I].Name);
+              if FieldValue.IsValid then
+                AddLine(TypeInfo.ClassInfo^.Properties[I].Name + ' = ' + FieldValue.Value)
+              else
+                AddLine(TypeInfo.ClassInfo^.Properties[I].Name + ' = <error>');
+            end
+            else
+              AddLine(TypeInfo.ClassInfo^.Properties[I].Name + ' = <method>');
+          end;
+        end;
+
+        if Length(TypeInfo.ClassInfo^.Methods) > 0 then
+        begin
+          AddLine('[INSPECT] methods (' +
+                  IntToStr(Length(TypeInfo.ClassInfo^.Methods)) + '):');
+          for I := 0 to High(TypeInfo.ClassInfo^.Methods) do
+            AddLine('[INSPECT]   ' + TypeInfo.ClassInfo^.Methods[I]);
+        end;
+      end
+      else
+      begin
+        SingleValue := EvaluateExpression(Expr);
+        if SingleValue.IsValid then
+          AddLine(SingleValue.Name + ' = ' + SingleValue.Value);
+      end;
+    end;
+
+  else
+    begin
+      { For primitives, floats, strings, enums, sets, pointers, arrays: same as print }
+      SingleValue := EvaluateExpression(Expr);
+      if SingleValue.IsValid then
+        AddLine(SingleValue.Name + ' = ' + SingleValue.Value)
+      else
+        AddLine('[INSPECT] ' + SingleValue.Value);
+    end;
+  end;
 end;
 
 function TDebuggerEngine.GetCallStack(Limit: Integer = 0): TStringArray;

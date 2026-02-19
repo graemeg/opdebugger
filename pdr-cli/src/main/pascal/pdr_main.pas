@@ -74,6 +74,7 @@ begin
   WriteLn('  delete <num>   - Remove breakpoint by number');
   WriteLn('  locals         - List all local variables in current scope');
   WriteLn('  locals globals - Also include global variables');
+  WriteLn('  inspect <var>  - Show structured type layout with all fields/properties');
   WriteLn('  verbose [on|off] - Enable/disable diagnostic output (default: off)');
   WriteLn('  help, h        - Show this help');
   WriteLn('  quit, q        - Exit debugger');
@@ -271,6 +272,23 @@ begin
               WriteLn('[DEBUG] ', VarValue.Name, ': ', VarValue.Value);
           end;
         end;
+      end;
+
+    'inspect', 'ins':
+      begin
+        if Length(Parts) < 2 then
+        begin
+          WriteLn('[ERROR] Usage: inspect <variable>');
+          Exit;
+        end;
+
+        CallStack := FEngine.GetInspectLines(Parts[1]);
+
+        if Length(CallStack) = 0 then
+          WriteLn('[INFO] No information available for: ', Parts[1])
+        else
+          for I := 0 to High(CallStack) do
+            WriteLn(CallStack[I]);
       end;
 
     'verbose', 'v':

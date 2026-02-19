@@ -1,0 +1,5 @@
+run
+break test_15_inspect.pas:19
+continue
+inspect MyPt
+quit

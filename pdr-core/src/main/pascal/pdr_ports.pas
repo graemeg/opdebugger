@@ -93,6 +93,7 @@ type
     InstanceSize: Cardinal;
     Fields: TDebuggerFieldArray;
     Properties: TDebuggerPropertyArray;
+    Methods: array of String;     { method names (from matching function scopes) }
   end;
   PDebuggerClass = ^TDebuggerClass;
 
