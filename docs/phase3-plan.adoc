@@ -1,0 +1,1200 @@
+= PDR Phase 3 Implementation Plan
+:toc: left
+:toclevels: 4
+:sectnums:
+:version: 1.2.0
+:date: 2026-02-19
+
+== Overview
+
+=== Context
+
+Phases 0 through 2 of the OPDF project are complete. The FPC compiler emits all Object Pascal type categories into embedded `.opdf` ELF sections, and the PDR debugger reads, parses, and evaluates all those types. The 13-test integration suite passes.
+
+The system can currently:
+
+* Inspect global and local variables of any type
+* Navigate class field hierarchies with dot notation
+* Display field-backed properties
+* Show call stacks and step through source lines
+* Load embedded OPDF data from FPC-compiled binaries
+
+Phase 3 addresses the gap between a functional proof-of-concept and a debugger that is genuinely useful during day-to-day development. The features are ordered by the ratio of value delivered to implementation complexity.
+
+=== Scope
+
+Phase 3 covers the following feature areas:
+
+. **Prerequisites** — OPDF format fix required before platform expansion
+. **`locals` command** — enumerate all in-scope variables at the current breakpoint
+. **`inspect` command** — structured view of a variable's full type layout with fields, properties, and methods
+. **Array slice display** — view a sub-range of array elements (`MyArray[80..90]`)
+. **Variable assignment** — write primitive values into the debugged process
+. **Conditional breakpoints** — break only when a condition is satisfied
+. **`display` command** — automatically print a variable on every stop
+. **Hardware watchpoints** — break when a memory location changes
+. **Method call injection** — invoke getter methods; enable `call` command
+. **Expression evaluator** — evaluate Pascal sub-expressions against live memory
+. **Variant records** — display tagged variant parts
+. **Generics** — basic display of common generic containers
+. **Exception metadata** — report current exception type and message
+. **Optimized code** — handle register-allocated local variables
+
+UI and platform expansion (TUI, Windows, Lazarus/VSCode integration) are addressed in Phase 4.
+
+=== Dependency Graph
+
+----
+OPDF PointerSize fix ──────────────────────────────▶ required for platform expansion
+locals ────────────────────────────────────────────▶ (standalone)
+inspect ───────────────────────────────────────────▶ depends on locals infrastructure
+array slice display ───────────────────────────────▶ extends existing array evaluator
+set ───────────────────────────────────────────────▶ (standalone)
+display ───────────────────────────────────────────▶ (standalone)
+conditional breakpoint (hit count) ───────────────▶ (standalone)
+watchpoint ────────────────────────────────────────▶ (standalone)
+method call injection ─────────────────────────────▶ enables getter props, call cmd
+expression evaluator ──────────────────────────────▶ enables conditional (expr form)
+  ├── fpexprpars pre-processor ──────────────────▶ handles dot/bracket syntax
+  └── fpexprpars core (existing FPC unit) ───────▶ arithmetic/logical evaluation
+variant records ───────────────────────────────────▶ (standalone)
+generics ──────────────────────────────────────────▶ (standalone)
+exception metadata ────────────────────────────────▶ (standalone)
+optimized code ────────────────────────────────────▶ (standalone)
+----
+
+---
+
+== Prerequisites: OPDF Format Fix
+
+=== Pointer Size in Header
+
+==== Problem
+
+Address fields in `opdf_types.pas` (`TDefGlobalVar.Address`, `TDefLineInfo.Address`,
+`TDefFuncScope.LowPC/HighPC`) are declared as `QWord` (8 bytes). However, the FPC compiler
+emits them via `tai_const.Create_sym`, which produces a **pointer-sized** relocation — 4 bytes
+on i386, 8 bytes on x86_64. The binary layout of the embedded `.opdf` section therefore differs
+by target architecture.
+
+`pdr_opdf_adapter.pas` has a `GetPointerSize` helper, but it is conditioned on the
+**debugger's** compile-time architecture, not the **debuggee's**. On a 64-bit host debugging
+a 32-bit binary, this is incorrect.
+
+==== Fix
+
+. Add `PointerSize: Byte` to `TOPDFHeader` in `opdf_types.pas`.
+. Update `dbgopdf.pas` to write `SizeOf(Pointer)` (4 or 8) into that field at emit time.
+. Update `opdf_io.pas` reader to use the header's pointer size when reading address-sized fields, rather than `SizeOf(QWord)`.
+. Update `pdr_opdf_adapter.pas` to derive pointer size from the loaded header.
+
+This is a one-commit breaking format change. All existing test binaries must be recompiled after it lands. It should be the first commit in Phase 3, before any other work.
+
+==== Impact on Existing Tests
+
+All 13 integration tests will require recompilation of their binaries. The test logic itself is unchanged.
+
+---
+
+== Tier 1: High Value, Lower Complexity
+
+=== Feature 1: `locals` Command
+
+==== Description
+
+A `locals` command that prints all variables visible in the current scope — local variables, parameters, and (optionally) globals — with their current values. This mirrors GDB's `info locals` and Delphi's "Local Variables" panel.
+
+==== Current State
+
+The debugger already holds all the necessary data:
+
+* `IDebugInfoReader.FindScopeForAddress` locates the current function scope
+* `TVariableInfo` records for local variables and parameters exist in the OPDF adapter
+* `TTypeSystem.EvaluateVariableInfo` evaluates any variable given its address and type
+
+The only missing piece is a command handler that iterates the scope's variables and calls the existing evaluator on each.
+
+==== Implementation
+
+===== pdr_ports.pas
+
+Add a method to `IDebugInfoReader` to enumerate all variables in a scope:
+
+[source,pascal]
+----
+{ Enumerate all variables (locals + params) visible in the given scope }
+procedure EnumerateScopeVariables(ScopeID: QWord;
+  const Callback: TVariableEnumCallback);
+----
+
+Where `TVariableEnumCallback = procedure(const VarInfo: TVariableInfo) of object`.
+
+===== pdr_opdf_adapter.pas
+
+Implement `EnumerateScopeVariables`: iterate `FVariables`, filter to those whose `ScopeID` matches (or `ScopeID = 0` for globals if the `--include-globals` flag is set).
+
+===== pdr_engine.pas
+
+Add `HandleLocals` method:
+
+[source,pascal]
+----
+procedure TDebuggerEngine.HandleLocals;
+var
+  CurrentIP: QWord;
+  ScopeID: QWord;
+begin
+  CurrentIP := FProcessController.GetCurrentIP;
+  if not FDebugInfoReader.FindScopeForAddress(CurrentIP, ScopeID) then
+  begin
+    WriteLn('Not in a known function scope.');
+    Exit;
+  end;
+  FDebugInfoReader.EnumerateScopeVariables(ScopeID, @PrintVariable);
+end;
+----
+
+===== pdr_main.pas
+
+----
+locals            Print all local variables in the current scope
+locals globals    Include global variables
+----
+
+==== Test
+
+Add integration test `test_14_locals.pas` with a function containing multiple local variables of different types. The `.commands` file issues `run`, `break foo.pas:N`, `continue`, `locals`. The `.expected` file lists all variables and their values in declaration order.
+
+==== Acceptance Criteria
+
+* `locals` lists all local variables and parameters for the current function
+* Variables appear with name, type category, and evaluated value
+* The command produces a clear message when called outside any known scope
+* Parameters and locals are both included; globals are opt-in
+
+---
+
+=== Feature 2: `inspect` Command
+
+==== Description
+
+An `inspect <var>` command that produces a structured, multi-line view of a variable's complete type layout. For primitive types it behaves like `print`. For complex types (records, classes, interfaces) it shows all fields, properties, and method names in an indented tree format.
+
+This mirrors the Borland Kylix Debug Inspector window, adapted for a CLI context.
+
+==== Example Output
+
+[source]
+----
+(pdr) inspect MyShape
+MyShape: TCircle at $7F4A23B0
+  class: TCircle
+  parent chain: TCircle → TShape → TObject
+  instance size: 48 bytes
+
+  fields:
+    FRadius     3.14159     [Double, offset +8]
+    FColor      clRed (2)   [TColor, offset +16]
+    FName       'Circle A'  [AnsiString, offset +24]
+
+  properties:
+    Radius      3.14159     [read FRadius]
+    Color       clRed (2)   [read FColor]
+    Name        'Circle A'  [read FName]
+    Area        <method>    [read get_Area — use 'call' to evaluate]
+
+  methods:
+    Draw  Move  Resize  get_Area
+----
+
+For a record:
+
+[source]
+----
+(pdr) inspect MyPoint
+MyPoint: TPoint
+  record size: 16 bytes
+  fields:
+    X    100    [Double, offset +0]
+    Y    200    [Double, offset +8]
+----
+
+For an interface variable:
+
+[source]
+----
+(pdr) inspect MyComObj
+MyComObj: IMyInterface
+  interface type: IMyInterface
+  GUID: {12345678-...}
+  methods:
+    GetValue  SetValue  Reset
+----
+
+Dot notation works for drilling down:
+
+[source]
+----
+(pdr) inspect MyShape.FName
+'Circle A': AnsiString
+  length: 8
+  refcount: 1
+  data at: $7F2B00A0
+----
+
+==== Current State
+
+All data required is already loaded in the OPDF adapter:
+
+* Class fields from `TDebuggerClass.Fields`
+* Properties (with `ReadKind` distinguishing field vs. method access) from `TDebuggerClass.Properties`
+* Parent chain via `ParentTypeID` traversal
+* Interface GUID and method descriptors from `TDefInterface`
+
+The one gap is connecting method names to classes. `REC_FUNCSCOPE` records carry mangled names (e.g., `TCircle_Draw$...`). `opdf_demangle.pas` can strip the class prefix. The link between scopes and classes should be built at load time in `pdr_opdf_adapter.pas`: when a funcscope's demangled name matches `ClassName_MethodName`, append it to the class's method name list.
+
+==== Implementation
+
+===== pdr_ports.pas
+
+Add `Methods: TStringArray` to `TDebuggerClass`.
+
+===== pdr_opdf_adapter.pas
+
+After loading all `REC_FUNCSCOPE` records, iterate them and attempt demangle. If the prefix matches a known class name, append the method name to that class's `Methods` list.
+
+===== pdr_engine.pas
+
+Add `HandleInspect(const VarExpr: String)`. Resolve the variable, then dispatch on type category:
+
+* `tcPrimitive`, `tcFloat`, `tcEnum`, `tcSet`: single-line (same as `print`)
+* `tcShortString`, `tcAnsiString`, `tcUnicodeString`: multi-line with length, refcount, data pointer
+* `tcRecord`: fields with offsets
+* `tcClass`: full layout (parent chain, fields, properties, methods)
+* `tcInterface`: GUID, methods
+* `tcArray`: element type, bounds, first N elements
+
+==== Acceptance Criteria
+
+* `inspect MyObj` shows parent chain, all fields with offsets, properties with access kind, method names
+* `inspect MyRecord` shows fields with byte offsets
+* Field-backed properties show their current value; method-backed properties show `<method>` with guidance
+* `inspect MyObj.FChild` drills into nested objects
+* Output for primitive types is equivalent to `print`
+
+---
+
+=== Feature 3: Array Slice Display
+
+==== Description
+
+When debugging large arrays, printing all elements is impractical. This feature adds
+range-slice syntax to the `print` and `inspect` commands, allowing a specific sub-range
+of array elements to be displayed using Pascal's natural `..` range notation.
+
+==== Syntax
+
+[source]
+----
+print MyArray[80..90]          { elements 80 to 90 inclusive (11 elements) }
+print MyMatrix[2..4][0..2]     { rows 2-4, columns 0-2 of a 2D array }
+print MyDynArray[0..9]         { first 10 elements of a dynamic array }
+print MyDynArray[90..99]       { last 10 elements (if length >= 100) }
+----
+
+The range is always **inclusive** on both ends, consistent with Pascal subrange convention.
+Out-of-bounds indices are clamped to the actual array bounds with a warning.
+
+The existing single-element form `print MyArray[I]` continues to work unchanged.
+
+==== Eclipse Parallel
+
+The feature is equivalent to Eclipse Java Debugger's array subrange view, where a large
+array can be inspected by specifying start and end indices in the Variables panel. The PDR
+implementation uses `[N..M]` rather than `[N:M]` because `..` is Pascal's native range
+operator, making the syntax consistent with the rest of the language.
+
+==== Current State
+
+The existing array evaluators (`TStaticArrayEvaluator`, `TDynamicArrayEvaluator` in
+`pdr_typesys.pas`) display up to a hardcoded maximum element count, then truncate with
+`...`. Single-element access `MyArray[I]` is handled by the dot/bracket parser in
+`pdr_engine.pas`. Neither handles a range.
+
+==== Implementation
+
+===== Command Parsing (`pdr_engine.pas` / `pdr_main.pas`)
+
+Extend the `print` command parser to recognise `[N..M]` within an array reference. This
+is handled before the expression evaluator's Stage 1 pre-processor, because the slice
+notation is not a general sub-expression — it modifies how the array evaluator is invoked.
+
+Detection pattern: if the expression contains `[` followed by an integer literal, `..`,
+and a second integer literal, followed by `]`, extract the bounds and pass them to the
+array evaluator.
+
+[source,pascal]
+----
+type
+  TArraySlice = record
+    HasSlice: Boolean;
+    LowIndex: Int64;
+    HighIndex: Int64;
+  end;
+
+{ Parse "VarName[N..M]" or "VarName[N..M][P..Q]" from a print expression }
+function TryParseArraySlice(const Expr: String;
+  out VarName: String; out Slices: array of TArraySlice): Boolean;
+----
+
+===== Array Evaluator Extension (`pdr_typesys.pas`)
+
+Add an optional `Slice: TArraySlice` parameter to the array evaluator's `Evaluate` method.
+When a slice is present, the evaluator iterates only `Slice.LowIndex..Slice.HighIndex`
+instead of `0..Min(Length-1, MaxDisplayElements)`.
+
+For multi-dimensional arrays, slices are applied per dimension in nesting order.
+
+===== Bounds Validation
+
+* If `LowIndex < LowerBound`, clamp to `LowerBound` and print a warning: `[WARN] Low index clamped from N to LowerBound`.
+* If `HighIndex > HighBound`, clamp to `HighBound` with a similar warning.
+* If `LowIndex > HighIndex` after clamping, print an error and display nothing.
+* Dynamic arrays: bounds validated against the actual length read from the heap header.
+
+===== Expression Evaluator Integration (Feature 9)
+
+Once the Stage 1 pre-processor (Feature 9) is implemented, `[N..M]` slice notation can
+also appear inside compound expressions. The pre-processor resolves array slices to an
+inline list of values, enabling constructs like:
+
+[source]
+----
+print MyMatrix[Row][0..3]      { row fixed by variable, columns sliced }
+----
+
+This integration requires no additional work in the slice evaluator itself; the pre-processor
+expands the slice into its constituent elements before evaluation.
+
+==== Output Format
+
+[source]
+----
+(pdr) print Buffer[80..85]
+Buffer[80..85]: array [0..255] of Byte — showing [80..85]
+  [80]  $A3
+  [81]  $00
+  [82]  $FF
+  [83]  $7C
+  [84]  $12
+  [85]  $00
+----
+
+For a 2D matrix:
+
+[source]
+----
+(pdr) print MyMatrix[1..2][0..2]
+MyMatrix[1..2][0..2]: array [0..3] of array [0..4] of Integer — showing rows [1..2], cols [0..2]
+  [1][0]  10    [1][1]  20    [1][2]  30
+  [2][0]  40    [2][1]  50    [2][2]  60
+----
+
+==== Test
+
+Integration test `test_15_array_slice.pas` (renumbering subsequent tests): a static array
+of 20 integers and a 4×4 integer matrix. Commands:
+
+----
+print BigArray[5..9]
+print BigArray[18..22]     { tests high-end clamping }
+print Matrix[1..2][2..3]
+----
+
+Expected output confirms correct values at the specified indices and a clamping warning
+for the out-of-range access.
+
+==== Acceptance Criteria
+
+* `print MyArray[80..90]` displays exactly elements 80 through 90 inclusive
+* Out-of-bounds indices are clamped, not rejected; a warning is printed
+* The existing `print MyArray[I]` (single element) continues to work unchanged
+* The existing default truncated display (first N elements) continues when no slice is given
+* Multi-dimensional slicing works for 2D arrays; higher dimensions are a stretch goal
+* Dynamic array slicing validates against the actual runtime length
+
+---
+
+=== Feature 4: Variable Assignment (`set` Command)
+
+==== Description
+
+A `set <variable> = <value>` command that writes a new value into the debugged process's memory for the named variable.
+
+==== Scope
+
+Phase 3 supports assignment for primitive types only:
+
+* Signed and unsigned integers of all widths
+* Boolean
+* Char / WideChar
+* Enumeration values (by ordinal or by member name)
+* Pointer values (by hex address)
+
+String types (AnsiString, UnicodeString) and reference types (class instances, dynamic arrays) require allocator cooperation and are deferred.
+
+==== Implementation
+
+===== IProcessController
+
+`WriteMemory` already exists in the interface and is implemented in `TLinuxPtraceAdapter`. No interface changes are required.
+
+===== pdr_engine.pas
+
+Add `HandleSet(const Expr: String)`:
+
+[source,pascal]
+----
+procedure TDebuggerEngine.HandleSet(const Expr: String);
+{ Parses "VarName = Value" or "VarName.Field = Value" }
+{ Resolves VarName to address, converts Value to bytes, calls WriteMemory }
+----
+
+Value conversion:
+
+* Decimal integer literals → encode as little-endian bytes matching variable size
+* `True` / `False` → 1 / 0 (one byte)
+* Enum member name → look up ordinal in `TTypeInfo.EnumMembers`
+* `$NNNN` or `0xNNNN` → raw hex for pointer types
+
+===== pdr_main.pas
+
+----
+set <var> = <value>    Assign a value to a variable
+set Count = 10
+set IsEnabled = True
+set Status = ssRunning
+----
+
+==== Safety Constraints
+
+* Write is performed via `ptrace(PTRACE_POKEDATA, ...)`, which operates at word granularity. Sub-word writes (e.g., a `Byte` variable within a larger word) require a read-modify-write pattern.
+* If the address is not writable (read-only section), ptrace returns `EFAULT`. The command must report this clearly.
+* No range validation is performed — the debugger is a low-level tool; the user is responsible for type correctness.
+
+==== Test
+
+Integration test `test_16_set_variable.pas`: a loop counter is modified during debugging to cause early exit. Verify the program's output changes accordingly.
+
+==== Acceptance Criteria
+
+* `set MyInt = 42` writes the value; a subsequent `print MyInt` confirms the change
+* `set MyFlag = True` correctly updates a Boolean variable
+* `set Status = ssRunning` resolves the enum member name to its ordinal
+* Writing to a read-only address produces a clear error message
+
+---
+
+=== Feature 4: Conditional Breakpoints
+
+==== Description
+
+Breakpoints that only pause execution when a condition is satisfied. Two condition forms are supported:
+
+. **Hit count**: pause only on the N-th hit (e.g., `break foo.pas:20 if count=5`)
+. **Expression**: pause only when a variable satisfies a comparison (e.g., `break foo.pas:20 if I > 100`)
+
+Expression conditions depend on the expression evaluator (Feature 8). Hit-count conditions are independent and can be implemented immediately.
+
+==== Implementation
+
+===== pdr_engine.pas — Breakpoint Record Extension
+
+[source,pascal]
+----
+TBreakpointConditionType = (bctNone, bctHitCount, bctExpression);
+
+TBreakpoint = record
+  Address: QWord;
+  OriginalByte: Byte;
+  Number: Integer;
+  ConditionType: TBreakpointConditionType;
+  HitCount: Integer;         { target hit count for bctHitCount }
+  CurrentHitCount: Integer;  { running counter }
+  ConditionExpr: String;     { raw expression string for bctExpression }
+end;
+----
+
+===== HandleBreakpointHit Extension
+
+After restoring the original byte and before notifying the user, evaluate the condition. If not met, re-insert the INT3 and call `Continue` without pausing.
+
+===== pdr_main.pas
+
+Extended `break` syntax:
+
+----
+break foo.pas:20 if count=5      { hit-count condition }
+break foo.pas:20 if I > 100      { expression condition (requires Feature 8) }
+----
+
+==== Test
+
+Integration test `test_16_conditional_break.pas`: a loop from 1 to 10 with a hit-count condition of 7. Verify the program pauses exactly once, at iteration 7.
+
+==== Acceptance Criteria
+
+* `break foo.pas:N if count=K` stops only on the K-th hit
+* `info breakpoints` shows the condition alongside the address and hit count
+* Expression conditions require Feature 8; if used before then, a "not yet implemented" message is produced
+
+---
+
+=== Feature 5: `display` Command
+
+==== Description
+
+A `display <var>` command that registers a variable for automatic printing on every breakpoint stop. Useful for tracking a variable across multiple continue/next cycles.
+
+==== Implementation
+
+Maintain a `FDisplayList: TStringList` in `pdr_engine.pas`. After every stop, iterate the list and call `HandlePrint` for each entry.
+
+----
+display <var>         Add variable to automatic display list
+undisplay <var>       Remove from display list
+undisplay             Remove all display entries
+info display          List all registered display variables
+----
+
+==== Acceptance Criteria
+
+* After `display MyVar`, every subsequent break prints `MyVar = <value>` before the prompt
+* If a variable goes out of scope, `(out of scope)` is printed rather than an error
+* Display list persists across `continue` / `next` cycles
+
+---
+
+=== Feature 6: Hardware Watchpoints
+
+==== Description
+
+A `watch <var>` command that breaks execution whenever the value of a variable changes. Implemented using x86_64 hardware debug registers (DR0–DR3 for addresses, DR7 for configuration), accessed via `ptrace(PTRACE_POKEUSER, ...)`.
+
+==== x86_64 Hardware Debug Register Layout
+
+----
+DR0–DR3   Watchpoint addresses (up to 4 simultaneous)
+DR6       Status register (which watchpoint triggered)
+DR7       Control register — local enable, condition, and size per slot
+----
+
+A write watchpoint on a 4-byte variable at address A is configured by:
+
+* Writing A to DR0 via `PTRACE_POKEUSER` at offset `offsetof(user, u_debugreg[0])`
+* Writing the appropriate DR7 control word: local enable bit 1, write condition (01), 4-byte size (11)
+
+==== Implementation
+
+===== pdr_ports.pas
+
+[source,pascal]
+----
+function SetWatchpoint(Address: QWord; Size: Byte): Integer; { returns slot 0-3 }
+procedure ClearWatchpoint(Slot: Integer);
+function GetFiredWatchpoint: Integer;                        { returns slot or -1 }
+----
+
+===== pdr_linux_ptrace.pas
+
+Implement using `PTRACE_POKEUSER` with the `user.u_debugreg` offsets.
+
+===== pdr_engine.pas
+
+`HandleWatch(VarName)`: resolve the variable's address and size, call `SetWatchpoint`. On stop, check `GetFiredWatchpoint` and print old and new values.
+
+----
+watch <var>           Break when variable is written
+rwatch <var>          Break when variable is read
+awatch <var>          Break on read or write
+unwatch <var>         Remove watchpoint
+----
+
+==== Acceptance Criteria
+
+* `watch MyVar` stops execution when `MyVar` is next written; old and new values are shown
+* Maximum of 4 simultaneous watchpoints enforced with a clear error on overflow
+* `unwatch` correctly clears the hardware register
+
+---
+
+== Tier 2: High Value, Higher Complexity
+
+=== Feature 7: Method Call Injection
+
+==== Description
+
+Infrastructure for invoking a method in the context of the debugged process. This is the prerequisite for:
+
+* Evaluating method-backed properties (e.g., `print MyObj.Name` where `get_Name` is a function)
+* A `call` command for arbitrary method invocation
+* Interface method evaluation
+
+==== Technical Approach
+
+Method call injection on x86_64 Linux follows this sequence:
+
+. **Save state**: read all general-purpose registers and floating-point state via `PTRACE_GETREGS` / `PTRACE_GETFPREGS`.
+. **Set up call frame**: align RSP to 16 bytes; push the address of a known `int3` instruction (the sentinel return address).
+. **Set arguments**: place `Self` (instance pointer) in RDI per System V AMD64 ABI; additional arguments in RSI, RDX, RCX, R8, R9, then stack.
+. **Set RIP**: point to the method's entry address.
+. **Continue to sentinel**: `PTRACE_CONT`; wait for SIGTRAP at the sentinel INT3.
+. **Read return value**: RAX (integer/pointer), XMM0 (floating-point).
+. **Restore state**: `PTRACE_SETREGS` with the saved registers.
+
+==== Calling Conventions
+
+[cols="2,3"]
+|===
+|Platform |Calling convention
+
+|Linux x86_64
+|System V AMD64 ABI: `Self` in RDI, args in RSI, RDX, RCX, R8, R9
+
+|Linux i386
+|FPC `register` convention: `Self` in EAX, first 2 args in EDX, ECX
+
+|Windows x86_64
+|Microsoft x64 ABI: `Self` in RCX, args in RDX, R8, R9; shadow space required
+
+|Windows i386
+|`register` (Borland) convention: `Self` in EAX, first 2 args in EDX, ECX
+|===
+
+==== Side Effects and Limitations
+
+* Methods with observable side effects (I/O, file writes, network) will execute those effects during evaluation.
+* A hung call (infinite loop in getter) requires a timeout mechanism that aborts by restoring the saved register state.
+* Re-entrant breakpoints (the called method hits a PDR breakpoint) are handled by skipping the PDR-managed INT3 and continuing.
+* A `--safe-eval` mode restricts calls to methods that the user explicitly approves via a `call` prefix.
+
+==== OPDF Format Update
+
+`TDefProperty` should carry the getter's mangled symbol name alongside `ReadAddr`, allowing the debugger to resolve the getter address from the binary's symbol table without relying on runtime VMT traversal.
+
+==== Acceptance Criteria
+
+* Field-backed properties continue to work as before
+* `print MyObj.ComputedProp` calls the getter and displays the return value
+* `call MyObj.Reset` invokes the method; side effects are visible in subsequent `print`
+* If the method raises an exception, the debugger detects the signal and reports it without crashing
+
+---
+
+=== Feature 8: Expression Evaluator
+
+==== Description
+
+An evaluator for a subset of Pascal expressions using live memory values. This enables:
+
+* `print <expr>` for computed values (e.g., `print MyArray[3].Name`)
+* Expression-condition breakpoints (e.g., `break foo.pas:N if I > 100 and J < 5`)
+* Arithmetic and logical combinations of variables
+
+==== Architecture: Two-Stage Evaluation
+
+The expression evaluator is built from two layers. They are complementary, not alternatives.
+
+===== Stage 1: Pascal Pre-Processor (new code, ~200-300 lines)
+
+Handles syntax that is specific to Pascal's object model and is not appropriate for a general-purpose expression library:
+
+* **Dot notation**: `MyObj.Field`, `MyObj.Items[0].Name`
+* **Array indexing**: `MyArray[I]`, `Arr[I + 1]`
+
+The pre-processor tokenises the input expression, identifies compound references, resolves each to its current runtime value using `TTypeSystem`, and replaces them with literal values. For example, if `MyList.Count` currently equals 7 and `I` currently equals 2, the expression `MyList.Count - I` is transformed into `7 - 2` before being passed to the evaluation core.
+
+This keeps debugger-specific memory-reading logic out of the general-purpose library.
+
+===== Stage 2: `fpexprpars` (existing FPC unit — `packages/fcl-base/src/fpexprpars.pp`)
+
+Handles arithmetic and logical evaluation of the pre-processed expression. This unit provides:
+
+* Correct operator precedence and associativity
+* `and`, `or`, `xor`, `not` with both boolean and integer semantics
+* `mod` (arithmetic remainder)
+* Comparison operators (`=`, `<>`, `<`, `>`, `<=`, `>=`)
+* Integer, float, boolean, string literals; hex with `$` prefix
+* Custom variable resolver callbacks (`TFPExprVariableCallBack`)
+* Custom function registration
+
+===== Missing Operators in fpexprpars
+
+`fpexprpars` currently lacks `div` (integer division), `shl`, and `shr`. These are valid Pascal operators and absent only because the unit predates this need. The appropriate action is to **contribute these operators upstream to the FPC project** as a standalone patch, independent of PDR's development schedule. After they are accepted, we remove any workaround; until then, we handle them in the pre-processor by rewriting them before the expression reaches fpexprpars (e.g., `A div B` → `trunc(A / B)`, `A shl B` → a registered custom function `shl(A, B)`).
+
+This is not a trade-off between writing the pre-processor or contributing upstream — both are done, for different reasons. The pre-processor exists because dot notation and array indexing are debugger-specific and do not belong in fpexprpars. The upstream contribution exists because `div`/`shl`/`shr` are general Pascal operators that belong there.
+
+===== Expression Grammar (Phase 3 Subset — after pre-processing)
+
+After Stage 1, the expression seen by fpexprpars contains only:
+
+* Integer, float, boolean, string literals
+* Simple identifiers (already resolved from compound references)
+* Arithmetic operators: `+`, `-`, `*`, `/`, `mod`
+* Logical operators: `and`, `or`, `xor`, `not`
+* Comparison operators: `=`, `<>`, `<`, `>`, `<=`, `>=`
+* Parentheses
+
+==== Implementation Files
+
+* `pdr_expr_preproc.pas` — tokeniser and compound reference resolver (Stage 1)
+* fpexprpars integration in `pdr_typesys.pas` — Stage 2 wiring
+
+==== Acceptance Criteria
+
+* `print I + 1` evaluates and displays the result
+* `print MyArray[I]` uses the current value of `I` as the array index
+* `print MyObj.Field.SubField` navigates nested fields
+* `break foo.pas:N if I > 10` stops only when the condition holds
+* Division by zero and nil dereference in expressions produce clear error messages
+
+---
+
+== Tier 3: Language Completeness
+
+=== Feature 9: Variant Records
+
+==== Description
+
+Display of Pascal variant records where the active variant is determined by a tag field.
+
+[source,pascal]
+----
+type
+  TShape = record
+    case ShapeType: TShapeKind of
+      skCircle:    (Radius: Double);
+      skRectangle: (Width, Height: Double);
+  end;
+----
+
+==== OPDF Format Extension
+
+Extend `REC_RECORD` to include variant field descriptors. Each variant group carries the tag-field index, the selector value, and the fields active for that selector:
+
+----
+VariantTagFieldIndex: Cardinal;  { MaxCardinal = no variant }
+VariantGroupCount: Cardinal;
+{ Each TVariantGroup: SelectorValue(Int64) + FieldCount(Cardinal) + Fields[] }
+----
+
+==== Debugger Evaluator
+
+`TVariantRecordEvaluator`: reads the tag field value, selects the matching `TVariantGroup`, evaluates only those fields.
+
+==== Acceptance Criteria
+
+* A record with `case ShapeType of skCircle: (Radius)` displays `Radius` when `ShapeType = skCircle`
+* Fields from non-active variants are not displayed
+* The tag field itself is always displayed
+
+---
+
+=== Feature 10: Generics (Basic Container Support)
+
+==== Description
+
+Display of instances of common FPC generic containers. Full generic type system support is not in scope; this feature hardcodes knowledge of the FPC RTL's concrete container layouts.
+
+Targeted containers:
+
+* `TList<T>` — dynamic array of `T`, `FList` field and `FCount: Integer`
+* `TDictionary<K,V>` — hash table; display key-value pairs up to a configurable limit
+* `TObjectList<T>` — same as `TList<T>` with owned references
+
+==== Approach
+
+A set of `TGenericContainerEvaluator` subclasses recognise container type names by prefix and apply hardcoded memory layout knowledge from the FPC RTL source. This approach is pragmatic but sensitive to FPC version changes.
+
+==== Acceptance Criteria
+
+* `print MyList` displays `TList<Integer>(Count=3, [42, 17, 99])`
+* Elements beyond the display limit show a `...` truncation indicator
+
+---
+
+=== Feature 11: Exception Metadata
+
+==== Description
+
+When execution stops due to a signal or inside an `except` block, display the current exception class and message.
+
+==== Implementation
+
+FPC's exception object is referenced by the `ExceptObject` thread-local variable in `sysutils`. Its VMT pointer gives the class name. The `FMessage: AnsiString` field is at a known offset within `Exception`.
+
+* Intercept `SIGSEGV`/`SIGFPE`/`SIGABRT` in `HandleSignal`
+* Locate `ExceptObject` via the OPDF global variable table or ELF symbol table
+* Read the class name from the VMT; read `FMessage` at the known offset
+
+==== Acceptance Criteria
+
+* An unhandled exception prints: `Exception: EInvalidOperation — 'Divide by zero'`
+* A SIGSEGV prints the faulting address and a nil-pointer diagnosis
+
+---
+
+=== Feature 12: Optimized Code — Register-Allocated Variables
+
+==== Description
+
+When compiled with optimizations, local variables may be register-allocated. The OPDF `REC_LOCALVAR` currently only supports `LocationExpr = 1` (RBP-relative). Register-allocated variables display as `<optimized out>`.
+
+==== OPDF Format Extension
+
+Extend `LocationExpr` encoding:
+
+[cols="1,3"]
+|===
+|Value |Meaning
+
+|0 |Unknown / optimized out
+|1 |RBP-relative stack slot
+|2 |Parent frame RBP-relative (nested procedure)
+|3 |Register: `LocationData` encodes the register number per DWARF x86_64 convention
+|===
+
+x86_64 DWARF register numbers: `0=RAX, 1=RDX, 2=RCX, 3=RBX, 4=RSI, 5=RDI, 6=RBP, 7=RSP, 8=R8 … 15=R15`.
+
+==== FPC Compiler Extension
+
+In `appendsym_localvar`, check `sym.localloc.loc`. For `LOC_REGISTER`/`LOC_CREGISTER`, emit `LocationExpr = 3` with the DWARF register number as `LocationData`.
+
+==== Acceptance Criteria
+
+* A register-allocated variable reports its value from the live register state
+* Variables genuinely optimized out display `<optimized out>` with a clear message
+
+---
+
+== Test Strategy
+
+=== New Integration Tests
+
+[cols="2,3,1"]
+|===
+|Test File |Coverage |Feature
+
+|`test_14_locals.pas`
+|`locals` lists all in-scope variables and params
+|Feature 1
+
+|`test_15_inspect.pas`
+|`inspect` shows full class layout with parent chain
+|Feature 2
+
+|`test_15_array_slice.pas`
+|`print MyArray[80..90]` shows correct slice; clamping warned
+|Feature 3
+
+|`test_16_set_variable.pas`
+|`set` modifies a loop counter; program behaviour changes
+|Feature 4
+
+|`test_17_conditional_break.pas`
+|Hit-count conditional breakpoint stops at correct iteration
+|Feature 5
+
+|`test_18_watch.pas`
+|Watchpoint fires when variable written; old/new values shown
+|Feature 7
+
+|`test_19_getter_props.pas`
+|Method-backed property evaluation via call injection
+|Feature 8
+
+|`test_20_expression.pas`
+|`print` with arithmetic and dot/bracket expressions
+|Feature 9
+
+|`test_21_variant_record.pas`
+|Correct field display based on tag value
+|Feature 10
+
+|`test_22_exception.pas`
+|Exception class and message displayed on unhandled raise
+|Feature 12
+|===
+
+=== Regression Policy
+
+All existing tests must pass after each feature commit. A full `run_launch_tests.sh` run is required before any commit touching `pdr_engine.pas`, `pdr_typesys.pas`, or `pdr_opdf_adapter.pas`.
+
+---
+
+== Implementation Order
+
+[cols="1,3,2"]
+|===
+|Step |Feature |Rationale
+
+|0
+|OPDF PointerSize header fix
+|Required for platform expansion; do once, before anything else
+
+|1
+|`locals` command (Feature 1)
+|Maximum value, minimum risk; uses only existing infrastructure
+
+|2
+|`inspect` command (Feature 2)
+|Builds directly on locals infrastructure; high daily-use value
+
+|3
+|Array slice display (Feature 3)
+|Extends existing array evaluator; self-contained, immediately useful
+
+|4
+|`set` command (Feature 4)
+|Independent; rounds out basic variable interaction
+
+|5
+|`display` command (Feature 6)
+|One-day effort; immediately useful alongside the above
+
+|6
+|Hardware watchpoints (Feature 7)
+|Independent; significant debugging power
+
+|7
+|Conditional breakpoints — hit count (Feature 5, form 1)
+|Independent; frequently needed; no expr evaluator required
+
+|8
+|Method call injection (Feature 8)
+|Core infrastructure; unlocks property evaluation and `call`
+
+|9
+|Expression evaluator — pre-processor + fpexprpars wiring (Feature 9)
+|Enables `print <expr>` and expression conditions
+
+|10
+|Conditional breakpoints — expression (Feature 5, form 2)
+|Depends on Feature 9
+
+|11
+|Variant records (Feature 10)
+|Self-contained language completeness
+
+|12
+|Exception metadata (Feature 12)
+|Self-contained; high diagnostic value
+
+|13
+|Generics (Feature 11)
+|Deferred because layout knowledge is fragile against RTL version changes
+
+|14
+|Optimized code (Feature 13)
+|Requires OPDF format extension and FPC compiler change
+|===
+
+---
+
+== Architecture Notes
+
+=== Call Injection Safety Model
+
+* The injected call must complete (reach the sentinel INT3) before any other debugger operation is permitted.
+* A wall-clock timeout aborts a hung call by restoring the saved register state.
+* Re-entrant breakpoints (the called method hits a PDR INT3) are detected and skipped silently.
+
+=== Expression Evaluator Isolation
+
+The expression evaluator must not share mutable state with the engine's main variable lookup path. All memory reads during expression evaluation go through `IProcessController.ReadMemory`, ensuring consistent error handling.
+
+=== fpexprpars Upstream Contribution
+
+The `div`, `shl`, and `shr` operators should be submitted to the FPC project as a standalone patch to `packages/fcl-base/src/fpexprpars.pp`. This is an independent contribution that benefits all consumers of the unit. The PDR expression evaluator should include a workaround (pre-processor rewrite) until the patch is accepted and the minimum FPC version used to build PDR is updated to include it. The workaround must be documented with a `{ TODO: remove when fpexprpars includes div/shl/shr — see FPC issue #NNNNN }` comment.
+
+=== OPDF Format Versioning
+
+Features 9 (variant records) and 12 (optimized code) require changes to the OPDF binary format. These changes must:
+
+. Increment `TOPDFHeader.Version`.
+. Maintain backward compatibility: the debugger treats missing variant data as "no variants" and unknown `LocationExpr` values as `0` (optimized out).
+. Update `opdf-specification.adoc` before implementing the corresponding reader changes.
+
+---
+
+== Phase 4: Platform Expansion
+
+=== Reuse Summary
+
+The following table shows what is reusable across the planned new platforms. The core (type system, evaluators, engine, CLI, OPDF library, FPC compiler integration) is fully portable.
+
+[cols="3,1,1,1"]
+|===
+|Component |Linux i386 |Windows x86_64 |Windows i386
+
+|`opdf-lib/` (all 4 units)
+|100%
+|100%
+|100%
+
+|`pdr_ports.pas` (incl. `TRegisters`)
+|100% — i386 variant already defined
+|100%
+|100%
+
+|`pdr-core/` (engine, typesys, symbols)
+|100%
+|100%
+|100%
+
+|`pdr_cli/pdr_main.pas`
+|100%
+|100%
+|100%
+
+|`pdr_linux_ptrace.pas`
+|100% — `{$IFDEF CPUI386}` blocks already complete
+|N/A
+|N/A
+
+|`elf_reader.pas`
+|Extend for ELF32 (~20% new code)
+|N/A
+|N/A
+
+|`pdr_opdf_adapter.pas`
+|Minor fix (use header PointerSize)
+|Minor fix
+|Minor fix
+
+|FPC `dbgopdf.pas`
+|Already supports i386
+|Already supports Windows
+|Already supports Windows
+
+|**New: `pe_reader.pas`**
+|N/A
+|Required
+|Required
+
+|**New: `pdr_windows_debug.pas`**
+|N/A
+|Required
+|Required
+|===
+
+=== Linux i386
+
+The ptrace adapter is already complete for i386 — every register-sensitive function uses
+`{$IFDEF CPUI386}` blocks. Recompiling PDR targeting i386 is sufficient for the process
+control layer.
+
+The only required change is extending `elf_reader.pas` to support ELF32.
+
+`elf_reader.pas` currently rejects binaries where `e_ident[4] <> ELFCLASS64`. The fix:
+detect the ELF class byte, then dispatch to either `TElf32SectionHeader`-based parsing or
+the existing `TElf64SectionHeader`-based parsing. The section-scanning logic is identical;
+only the record field widths differ (all addresses shrink from 8 to 4 bytes).
+
+=== Windows x86_64 and i386
+
+Two new files are required.
+
+==== `pe_reader.pas`
+
+Extracts a named section from a PE/COFF binary. The interface is identical to
+`elf_reader.pas` — `IsPEBinary(FilePath)` and `ExtractSection(BinaryPath, SectionName)` —
+so `pdr_opdf_adapter.pas` dispatches to it with no further changes. The PE format requires
+parsing the DOS stub, PE signature, COFF header, optional header, and section table.
+Approximately the same size as `elf_reader.pas`.
+
+`pdr_opdf_adapter.pas` gets a thin dispatch function:
+
+[source,pascal]
+----
+function OpenOPDFSection(const BinaryPath: String): TMemoryStream;
+begin
+  if TELFSectionReader.IsELFBinary(BinaryPath) then
+    Result := TELFSectionReader.ExtractSection(BinaryPath, '.opdf')
+  else if TPESectionReader.IsPEBinary(BinaryPath) then
+    Result := TPESectionReader.ExtractSection(BinaryPath, '.opdf')
+  else
+    Result := nil;
+end;
+----
+
+==== `pdr_windows_debug.pas`
+
+Implements `IProcessController` using the Windows debug API. No code is shared with the
+Linux ptrace adapter; only the interface is reused.
+
+Key API mapping:
+
+[cols="2,2"]
+|===
+|Linux ptrace |Windows equivalent
+
+|`FpFork` + `PTRACE_TRACEME` + `FpExecV`
+|`CreateProcess` with `DEBUG_PROCESS` flag
+
+|`FpWaitPid`
+|`WaitForDebugEvent`
+
+|`PTRACE_CONT`
+|`ContinueDebugEvent`
+
+|`PTRACE_PEEKDATA` / `PTRACE_POKEDATA`
+|`ReadProcessMemory` / `WriteProcessMemory`
+
+|`PTRACE_GETREGS` / `PTRACE_SETREGS`
+|`GetThreadContext` / `SetThreadContext`
+
+|`PTRACE_SINGLESTEP`
+|`SetThreadContext` with `CONTEXT_CONTROL.EFLAGS.TF = 1`, then `ContinueDebugEvent`
+
+|`PTRACE_POKEUSER` (debug registers)
+|`GetThreadContext(CONTEXT_DEBUG_REGISTERS)` / `SetThreadContext`
+|===
+
+The Windows debug event loop (`WaitForDebugEvent`) handles `EXCEPTION_DEBUG_EVENT`
+(for breakpoints and single steps) and `EXIT_PROCESS_DEBUG_EVENT` (for termination),
+mapping directly to the signal-based logic in the Linux adapter.
+
+=== Calling Convention Impact on Method Call Injection
+
+Method call injection (Feature 7) requires a separate implementation per calling convention.
+The platform adapter is extended with a `CallConvention` property. The injection logic in
+`pdr_engine.pas` dispatches on this property when setting up argument registers.
+
+=== Platform Expansion Order
+
+. OPDF PointerSize fix (prerequisite for all platform work)
+. Linux i386 — extend `elf_reader.pas`; compile and test
+. Windows x86_64 — write `pe_reader.pas` and `pdr_windows_debug.pas`
+. Windows i386 — same adapter, i386 `CONTEXT` struct variant
+
+Linux i386 and Windows x86_64 are independent and can be developed in parallel.
+
+---
+
+== Success Criteria
+
+Phase 3 is considered complete when all of the following hold:
+
+* All 23 integration tests (13 existing + 10 new) pass
+* `locals` enumerates variables correctly at any breakpoint
+* `inspect` shows the full type layout for class, record, and interface types, including method names
+* `print MyArray[80..90]` displays exactly the specified slice; out-of-bounds indices are clamped with a warning
+* `set` modifies primitive variables; change confirmed by `print`
+* `watch` fires reliably when a variable is written
+* Conditional breakpoints (hit-count form) work without false stops
+* `print MyObj.ComputedProp` evaluates the getter method and displays the result
+* The expression evaluator handles the defined grammar subset
+* Variant records display only the active variant's fields
+* An unhandled exception is reported with class name and message
+* All existing tests continue to pass
