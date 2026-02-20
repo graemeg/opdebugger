@@ -235,6 +235,8 @@ var
   IntfMethodNames: TStringArray;
   TypeName: String;
   VarName: String;
+  ReadMethName: String;
+  WriteMethName: String;
   FileName: String;
   FunctionName: String;
   LocationData: ShortInt;
@@ -629,7 +631,7 @@ begin
 
       recProperty:
         begin
-          if FReader.ReadProperty(DefProperty, VarName) then
+          if FReader.ReadProperty(DefProperty, VarName, ReadMethName, WriteMethName) then
           begin
             { Find the owning class by ClassTypeID and add this property }
             for I := 0 to FTypes.Count - 1 do
@@ -649,6 +651,8 @@ begin
                   WriteKind := TPropertyAccessKind(DefProperty.WriteType);
                   ReadOffset  := DefProperty.ReadAddr;
                   WriteOffset := DefProperty.WriteAddr;
+                  ReadMethodName := ReadMethName;
+                  WriteMethodName := WriteMethName;
                 end;
                 Break;
               end;

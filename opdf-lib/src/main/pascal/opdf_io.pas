@@ -68,7 +68,9 @@ type
     { Write property definition }
     procedure WriteProperty(ClassTypeID: TTypeID; PropTypeID: TTypeID;
                            const Name: String; ReadType, WriteType: TPropertyAccessType;
-                           ReadAddr, WriteAddr: QWord);
+                           ReadAddr, WriteAddr: QWord;
+                           const ReadMethodName: String = '';
+                           const WriteMethodName: String = '');
 
     { Write source line information }
     procedure WriteLineInfo(Address: QWord; const FileName: String;
@@ -145,7 +147,8 @@ type
     function ReadLineInfo(out Def: TDefLineInfo; out FileName: String): Boolean;
     function ReadFunctionScope(out Def: TDefFunctionScope; out FunctionName: String): Boolean;
     function ReadClass(out Def: TDefClass; out Name: String; out Fields: TFieldDescriptorArray; out FieldNames: TStringArray): Boolean;
-    function ReadProperty(out Def: TDefProperty; out Name: String): Boolean;
+    function ReadProperty(out Def: TDefProperty; out Name: String;
+                          out ReadMethodName, WriteMethodName: String): Boolean;
     function ReadRecord(out Def: TDefRecord; out Name: String;
                        out Fields: TFieldDescriptorArray; out FieldNames: TStringArray): Boolean;
     function ReadSet(out Def: TDefSet; out Name: String): Boolean;
@@ -464,7 +467,9 @@ end;
 
 procedure TOPDFWriter.WriteProperty(ClassTypeID: TTypeID; PropTypeID: TTypeID;
                                    const Name: String; ReadType, WriteType: TPropertyAccessType;
-                                   ReadAddr, WriteAddr: QWord);
+                                   ReadAddr, WriteAddr: QWord;
+                                   const ReadMethodName: String = '';
+                                   const WriteMethodName: String = '');
 var
   RecHeader: TOPDFRecordHeader;
   Payload: TDefProperty;
@@ -478,13 +483,18 @@ begin
   Payload.WriteType := Ord(WriteType);
   Payload.ReadAddr := ReadAddr;
   Payload.WriteAddr := WriteAddr;
+  Payload.ReadMethodNameLen := Length(ReadMethodName);
+  Payload.WriteMethodNameLen := Length(WriteMethodName);
   Payload.NameLen := Length(Name);
 
   RecHeader.RecType := Ord(recProperty);
-  RecHeader.RecSize := SizeOf(TDefProperty) + Length(Name);
+  RecHeader.RecSize := SizeOf(TDefProperty) + Length(ReadMethodName) +
+                       Length(WriteMethodName) + Length(Name);
 
   FStream.Write(RecHeader, SizeOf(RecHeader));
   FStream.Write(Payload, SizeOf(Payload));
+  WriteString(ReadMethodName);
+  WriteString(WriteMethodName);
   WriteString(Name);
 
   Inc(FRecordCount);
@@ -1009,17 +1019,29 @@ begin
   Result := True;
 end;
 
-function TOPDFReader.ReadProperty(out Def: TDefProperty; out Name: String): Boolean;
+function TOPDFReader.ReadProperty(out Def: TDefProperty; out Name: String;
+                                  out ReadMethodName, WriteMethodName: String): Boolean;
 begin
   Result := False;
+  ReadMethodName := '';
+  WriteMethodName := '';
 
   if FStream.Position + SizeOf(TDefProperty) > FStream.Size then
     Exit;
 
   FStream.Read(Def, SizeOf(Def));
 
-  if FStream.Position + Def.NameLen > FStream.Size then
+  if FStream.Position + Def.ReadMethodNameLen + Def.WriteMethodNameLen +
+     Def.NameLen > FStream.Size then
     Exit;
+
+  SetLength(ReadMethodName, Def.ReadMethodNameLen);
+  if Def.ReadMethodNameLen > 0 then
+    FStream.Read(ReadMethodName[1], Def.ReadMethodNameLen);
+
+  SetLength(WriteMethodName, Def.WriteMethodNameLen);
+  if Def.WriteMethodNameLen > 0 then
+    FStream.Read(WriteMethodName[1], Def.WriteMethodNameLen);
 
   SetLength(Name, Def.NameLen);
   if Def.NameLen > 0 then

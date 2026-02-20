@@ -187,8 +187,10 @@ type
     WriteType: Byte;          // 1 byte (TPropertyAccessType)
     ReadAddr: QWord;          // 8 bytes (field offset or method address)
     WriteAddr: QWord;         // 8 bytes (field offset or method address)
+    ReadMethodNameLen: TNameLen;  // 2 bytes (0 if not method-backed)
+    WriteMethodNameLen: TNameLen; // 2 bytes (0 if not method-backed)
     NameLen: TNameLen;        // 2 bytes
-    // Followed by Name (NameLen bytes)
+    // Followed by ReadMethodName + WriteMethodName + Name
   end;
 
   { Method/Function Definition }

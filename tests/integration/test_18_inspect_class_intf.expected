@@ -1,6 +1,6 @@
-FWidth = 30
-FHeight = 20
-Width = 30
-Height = 20
+FWidth = 30     [LongInt, offset +16]
+FHeight = 20     [LongInt, offset +20]
+Width = 30     [read FWidth]
+Height = 20     [read FHeight]
 Increment = <method>
 GetValue = <method>

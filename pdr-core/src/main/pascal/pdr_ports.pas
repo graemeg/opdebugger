@@ -84,6 +84,8 @@ type
     WriteKind: TPropertyAccessKind;
     ReadOffset: QWord;          // Byte offset in instance (if ReadKind=pakField)
     WriteOffset: QWord;         // Byte offset in instance (if WriteKind=pakField)
+    ReadMethodName: String;     // Getter method name (if ReadKind=pakMethod)
+    WriteMethodName: String;    // Setter method name (if WriteKind=pakMethod)
   end;
   TDebuggerPropertyArray = array of TDebuggerProperty;
 

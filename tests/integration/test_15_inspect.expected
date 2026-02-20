@@ -1,2 +1,2 @@
-PX = 100
-PY = 200
+PX = 100     [LongInt, offset +0]
+PY = 200     [LongInt, offset +4]

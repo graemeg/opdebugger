@@ -704,7 +704,9 @@ var
   ParentTypeID: TTypeID;
   ParentChain: String;
   FieldValue: TVariableValue;
-  I: Integer;
+  FieldTypeInfo: TTypeInfo;
+  I, J: Integer;
+  BackingField: String;
   SingleValue: TVariableValue;
 begin
   SetLength(Result, 0);
@@ -746,10 +748,15 @@ begin
         for I := 0 to High(TypeInfo.RecordInfo^.Fields) do
         begin
           FieldValue := EvaluateExpression(Expr + '.' + TypeInfo.RecordInfo^.Fields[I].Name);
-          if FieldValue.IsValid then
-            AddLine(TypeInfo.RecordInfo^.Fields[I].Name + ' = ' + FieldValue.Value)
+          if FDebugInfoReader.FindType(TypeInfo.RecordInfo^.Fields[I].TypeID, FieldTypeInfo) then
+            BackingField := '     [' + FieldTypeInfo.Name + ', offset +' +
+                            IntToStr(TypeInfo.RecordInfo^.Fields[I].Offset) + ']'
           else
-            AddLine(TypeInfo.RecordInfo^.Fields[I].Name + ' = <error>');
+            BackingField := '';
+          if FieldValue.IsValid then
+            AddLine(TypeInfo.RecordInfo^.Fields[I].Name + ' = ' + FieldValue.Value + BackingField)
+          else
+            AddLine(TypeInfo.RecordInfo^.Fields[I].Name + ' = <error>' + BackingField);
         end;
       end;
     end;
@@ -787,10 +794,15 @@ begin
           for I := 0 to High(TypeInfo.ClassInfo^.Fields) do
           begin
             FieldValue := EvaluateExpression(Expr + '.' + TypeInfo.ClassInfo^.Fields[I].Name);
-            if FieldValue.IsValid then
-              AddLine(TypeInfo.ClassInfo^.Fields[I].Name + ' = ' + FieldValue.Value)
+            if FDebugInfoReader.FindType(TypeInfo.ClassInfo^.Fields[I].TypeID, FieldTypeInfo) then
+              BackingField := '     [' + FieldTypeInfo.Name + ', offset +' +
+                              IntToStr(TypeInfo.ClassInfo^.Fields[I].Offset) + ']'
             else
-              AddLine(TypeInfo.ClassInfo^.Fields[I].Name + ' = <error>');
+              BackingField := '';
+            if FieldValue.IsValid then
+              AddLine(TypeInfo.ClassInfo^.Fields[I].Name + ' = ' + FieldValue.Value + BackingField)
+            else
+              AddLine(TypeInfo.ClassInfo^.Fields[I].Name + ' = <error>' + BackingField);
           end;
         end;
 
@@ -802,15 +814,33 @@ begin
           begin
             if TypeInfo.ClassInfo^.Properties[I].ReadKind = pakField then
             begin
+              { Find backing field name by matching offset }
+              BackingField := '';
+              for J := 0 to High(TypeInfo.ClassInfo^.Fields) do
+                if TypeInfo.ClassInfo^.Fields[J].Offset = TypeInfo.ClassInfo^.Properties[I].ReadOffset then
+                begin
+                  BackingField := TypeInfo.ClassInfo^.Fields[J].Name;
+                  Break;
+                end;
               FieldValue := EvaluateExpression(
                 Expr + '.' + TypeInfo.ClassInfo^.Properties[I].Name);
-              if FieldValue.IsValid then
-                AddLine(TypeInfo.ClassInfo^.Properties[I].Name + ' = ' + FieldValue.Value)
+              if BackingField <> '' then
+                BackingField := '     [read ' + BackingField + ']'
               else
-                AddLine(TypeInfo.ClassInfo^.Properties[I].Name + ' = <error>');
+                BackingField := '     [read field]';
+              if FieldValue.IsValid then
+                AddLine(TypeInfo.ClassInfo^.Properties[I].Name + ' = ' + FieldValue.Value + BackingField)
+              else
+                AddLine(TypeInfo.ClassInfo^.Properties[I].Name + ' = <error>' + BackingField);
             end
             else
-              AddLine(TypeInfo.ClassInfo^.Properties[I].Name + ' = <method>');
+            begin
+              if TypeInfo.ClassInfo^.Properties[I].ReadMethodName <> '' then
+                AddLine(TypeInfo.ClassInfo^.Properties[I].Name + ' = <method>     [read ' +
+                        TypeInfo.ClassInfo^.Properties[I].ReadMethodName + '() - use ''call'' to evaluate]')
+              else
+                AddLine(TypeInfo.ClassInfo^.Properties[I].Name + ' = <method>     [use ''call'' to evaluate]');
+            end;
           end;
         end;
 
