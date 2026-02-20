@@ -7,6 +7,7 @@ var
   DynIntArray: array of Integer;
   DynStringArray: array of String;
   NilArray: array of Integer;
+  Sentinel: Integer;
 
 begin
   { Create and initialize dynamic integer array }
@@ -25,6 +26,7 @@ begin
 
   { Leave NilArray as nil }
 
-  WriteLn('Dynamic arrays initialized');  { Breakpoint here: line 28 }
+  WriteLn('Dynamic arrays initialized');
   ReadLn;
+  Sentinel := 1;
 end.

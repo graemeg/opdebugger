@@ -8,6 +8,7 @@ var
   CharArray: array[1..3] of Char;
   StringArray: array[0..2] of String;
   TwoDArray: array[0..1, 0..2] of Integer;
+  Sentinel: Integer;
 
 begin
   { Initialize integer array }
@@ -37,4 +38,5 @@ begin
 
   WriteLn('Arrays initialized');  { Breakpoint here: line 38 }
   ReadLn;
+  Sentinel := 1;
 end.

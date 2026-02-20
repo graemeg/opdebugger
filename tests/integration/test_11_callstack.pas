@@ -26,6 +26,7 @@ end;
 
 var
   X, Y: Integer;
+  Sentinel: Integer;
 
 begin
   WriteLn('Call Stack Test');
@@ -34,4 +35,5 @@ begin
   Level1;
   WriteLn('Done');
   ReadLn;
+  Sentinel := 1;
 end.

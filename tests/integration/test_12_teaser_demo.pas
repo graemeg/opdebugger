@@ -47,9 +47,11 @@ end;
 
 var
   Obj: TTeaser;
+  Sentinel: Integer;
 begin
   Obj := TTeaser.Create('FPC Mystery', Wed);
   WriteLn('[PROG] Obj.FData=', Obj.FData);
   OuterProcedure;
   Obj.Free;
+  Sentinel := 1;
 end.

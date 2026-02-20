@@ -37,6 +37,7 @@ type
 var
   Instance: TDerivedClass;
   BaseInstance: TBaseClass;
+  Sentinel: Integer;
 
 { TBaseClass implementation }
 
@@ -88,4 +89,5 @@ begin
   Instance.Free;
   BaseInstance.Free;
   WriteLn('Instances freed.');
+  Sentinel := 1;
 end.

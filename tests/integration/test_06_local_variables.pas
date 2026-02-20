@@ -15,8 +15,10 @@ end;
 
 var
   X, Y, ResultValue: Integer;
+  Sentinel: Integer;
 begin
   X := 5;
   Y := 10;
   ResultValue := Calculate(X, Y);
+  Sentinel := 1;
 end.

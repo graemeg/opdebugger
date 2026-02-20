@@ -1,6 +1,8 @@
 run
-break test_04_classes.pas:48
+break test_04_classes.pas:49
 continue
 print myinstance
 print mynilinstance
+break test_04_classes.pas:55
+continue
 quit

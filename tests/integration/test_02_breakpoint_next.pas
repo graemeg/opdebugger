@@ -4,6 +4,7 @@ program test_02_breakpoint_next;
 
 var
   MyInt: Integer;
+  Sentinel: Integer;
 
 begin
   WriteLn('Test: Breakpoint and Next');
@@ -18,4 +19,5 @@ begin
   WriteLn('Set MyInt to 30');
   
   WriteLn('Done');
+  Sentinel := 1;
 end.

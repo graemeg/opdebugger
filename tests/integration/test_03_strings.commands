@@ -1,5 +1,5 @@
 run
-break test_03_strings.pas:33
+break test_03_strings.pas:34
 continue
 print MyShortString
 print MyAnsiString
@@ -9,4 +9,6 @@ print EmptyShort
 print EmptyAnsi
 print EmptyUnicode
 print EmptyWide
+break test_03_strings.pas:40
+continue
 quit

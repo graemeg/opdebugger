@@ -1,7 +1,9 @@
 run
-break test_08_static_arrays.pas:38
+break test_08_static_arrays.pas:39
 continue
 print IntArray
 print CharArray
 print StringArray
+break test_08_static_arrays.pas:41
+continue
 quit

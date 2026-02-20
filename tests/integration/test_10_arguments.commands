@@ -1,6 +1,8 @@
 args arg1 arg2 arg3
 run
-break test_10_arguments.pas:32
+break test_10_arguments.pas:33
 continue
 print ArgCount
+break test_10_arguments.pas:34
+continue
 quit

@@ -1,5 +1,7 @@
-break test_04_classes.pas:48
+break test_04_classes.pas:49
 continue
 print U_$P$TEST_04_CLASSES_$$_MYINSTANCE
 print TC_$P$TEST_04_CLASSES_$$_MYNILINSTANCE
+break test_04_classes.pas:55
+continue
 quit

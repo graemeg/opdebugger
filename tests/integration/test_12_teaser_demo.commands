@@ -2,4 +2,6 @@ run
 break test_12_teaser_demo.pas:37
 continue
 print ParentVar
+break test_12_teaser_demo.pas:56
+continue
 quit

@@ -1,8 +1,10 @@
 run
-break test_07_variable_shadowing.pas:13
+break test_07_variable_shadowing.pas:14
 continue
 print Counter
-break test_07_variable_shadowing.pas:21
+break test_07_variable_shadowing.pas:22
 continue
 print Counter
+break test_07_variable_shadowing.pas:37
+continue
 quit

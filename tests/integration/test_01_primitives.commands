@@ -1,6 +1,8 @@
 run
-break test_01_primitives.pas:19
+break test_01_primitives.pas:20
 continue
 print MyGlobalInt
 print MyBoolean
+break test_01_primitives.pas:29
+continue
 quit

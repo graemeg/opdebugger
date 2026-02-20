@@ -11,6 +11,7 @@ uses
 var
   MyGlobalInt: LongInt;
   MyBoolean: Boolean;
+  Sentinel: Integer;
 
 begin
   MyGlobalInt := 42;
@@ -25,4 +26,5 @@ begin
   ReadLn;
 
   WriteLn('Program exiting.');
+  Sentinel := 1;
 end.

@@ -5,6 +5,7 @@ program test_07_variable_shadowing;
 
 var
   Counter: Integer;  // Global variable Counter = 100
+  Sentinel: Integer;
 
 procedure ModifyCounter;
 var
@@ -33,4 +34,5 @@ begin
   WriteLn('After PrintOtherCounter, global Counter = ', Counter);  // Should still be 100
 
   ReadLn;
+  Sentinel := 1;
 end.

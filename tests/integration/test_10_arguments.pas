@@ -10,6 +10,7 @@ var
   I: Integer;
   AllArgs: String;
   ArgCount: Integer;
+  Sentinel: Integer;
 
 begin
   ArgCount := ParamCount;
@@ -28,6 +29,7 @@ begin
   WriteLn;
   WriteLn('Combined arguments: ', AllArgs);
   WriteLn;
-  WriteLn('Argument processing complete');  { Breakpoint here: line 28 }
+  WriteLn('Argument processing complete');
   ReadLn;
+  Sentinel := 1;
 end.

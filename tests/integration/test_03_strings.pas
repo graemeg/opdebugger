@@ -17,6 +17,7 @@ var
   EmptyAnsi: AnsiString;
   EmptyUnicode: UnicodeString;
   EmptyWide: WideString;
+  Sentinel: Integer;
 
 begin
   WriteLn('Test Program: String Types');
@@ -36,4 +37,5 @@ begin
   ReadLn;
 
   WriteLn('Program exiting.');
+  Sentinel := 1;
 end.

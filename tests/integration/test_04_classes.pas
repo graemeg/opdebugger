@@ -20,6 +20,7 @@ type
 var
   MyInstance: TMyClass;
   MyNilInstance: TMyClass = nil;
+  Sentinel: Integer;
 
 { TMyClass }
 
@@ -51,4 +52,5 @@ begin
 
   MyInstance.Free;
   WriteLn('Instance freed.');
+  Sentinel := 1;
 end.

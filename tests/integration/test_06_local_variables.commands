@@ -5,4 +5,6 @@ print A
 print B
 print Sum
 print Product
+break test_06_local_variables.pas:23
+continue
 quit

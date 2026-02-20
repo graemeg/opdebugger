@@ -5,6 +5,7 @@ program test_14_locals;
 
 var
   GlobalCount: Integer = 42;
+  Sentinel: Integer;
 
 function Compute(A, B: Integer): Integer;
 var
@@ -19,4 +20,5 @@ end;
 begin
   WriteLn(Compute(3, 7));
   WriteLn(GlobalCount);
+  Sentinel := 1;
 end.

@@ -2,4 +2,6 @@ run
 break test_11_callstack.pas:10
 continue
 callstack
+break test_11_callstack.pas:38
+continue
 quit

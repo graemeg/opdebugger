@@ -1,7 +1,9 @@
 run
-break test_09_dynamic_arrays.pas:28
+break test_09_dynamic_arrays.pas:29
 continue
 print DynIntArray
 print DynStringArray
 print NilArray
+break test_09_dynamic_arrays.pas:31
+continue
 quit
