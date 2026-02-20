@@ -17,7 +17,7 @@ The Object Pascal Debug Format (OPDF) is a custom debug information format desig
 * Decoupling from GDB and DWARF limitations
 * Optimized for fast lookup by Pascal runtime debuggers
 * Platform-agnostic core with platform-specific containers
-* Support for both embedded and external debug information
+* Embedded debug information within the compiled binary
 
 === Goals
 
@@ -29,46 +29,33 @@ The Object Pascal Debug Format (OPDF) is a custom debug information format desig
 
 == File Structure
 
-=== Storage Containers
+=== Storage Container
 
-OPDF debug information can be stored in two modes:
+OPDF debug information is embedded directly in the compiled binary. The FPC compiler emits OPDF records into the assembler list, and the linker places them into a dedicated section. This approach enables the linker to resolve label-based address references for line information and function scopes — something that is not possible with external debug files generated as a post-compilation step.
 
 .Platform Support Matrix
-[cols="1,2,2,1"]
+[cols="1,2,2"]
 |===
-|Platform |Binary Format |Embedded Location |External File
+|Platform |Binary Format |Section
 
 |Linux
 |ELF
-|Section `.opdf`
 |`.opdf`
 
 |FreeBSD
 |ELF
-|Section `.opdf`
 |`.opdf`
 
 |Windows
 |PE/COFF
-|Custom Resource or Section `.opdf`
 |`.opdf`
 
 |macOS
 |Mach-O
-|Segment `__OPDF`
-|`.opdf`
+|Segment `__OPDF`, section `__debug`
 |===
 
-The embedded form (ELF `.opdf` section) is the primary form produced by the FPC compiler integration. All data is emitted into the assembler list and resolved by the linker, enabling label-based address resolution for line information and function scopes.
-
-=== Build ID Linking
-
-When debug information is stored externally, a UUID-based handshake ensures correct matching:
-
-. Compiler generates a unique GUID during build
-. GUID is embedded in both the binary (note section) and debug file header
-. Debugger verifies GUID match before loading external debug info
-. Mismatch triggers error requiring rebuild
+NOTE: An earlier approach generated external `.opdf` files by translating DWARF debug information as a post-compilation step. This was abandoned because FPC's debug information generator emits line information during code generation using assembler labels, which the linker resolves to final addresses. An external tool operating on the compiled binary cannot access these labels, making accurate line-to-address mapping unreliable. Direct compiler integration solves this by emitting OPDF records alongside the existing debug generators, using the same label resolution mechanism.
 
 == Binary Format
 
@@ -664,27 +651,11 @@ Load command: `LC_SEGMENT_64`
 
 Section within segment: `__debug`
 
-== External Debug Files
+== Distribution Notes
 
-=== File Format
-
-External `.opdf` files use identical binary structure to embedded sections, stored as standalone files.
-
-=== Discovery
-
-Debugger searches for debug information in this order:
-
-. Check for embedded `.opdf` section in the binary (primary)
-. Extract BuildID from binary
-. Look for `<binary_name>.opdf` in the same directory
-. Verify BuildID matches before loading
-. Report an error on BuildID mismatch (stale debug file)
-
-=== Distribution
-
-* Release builds: strip the `.opdf` section or ship without `.opdf` file
-* Development: keep `.opdf` embedded for full debugging
-* Security: `.opdf` data contains all symbol names; treat as sensitive
+* Release builds: strip the `.opdf` section from the binary to reduce file size
+* Development: keep `.opdf` embedded for full debugging support
+* Security: `.opdf` data contains all symbol names; treat as sensitive in production environments
 
 == Version History
 

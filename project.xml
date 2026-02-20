@@ -17,6 +17,5 @@
     <module>pdr-core</module>
     <module>pdr-adapters</module>
     <module>pdr-cli</module>
-    <module>tools</module>
   </modules>
 </project>

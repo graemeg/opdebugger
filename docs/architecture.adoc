@@ -1,0 +1,265 @@
+= PDR Debugger Architecture
+:toc:
+:toclevels: 3
+
+== Overview
+
+The PDR debugger is a native Free Pascal debugger built around a custom debug information format called OPDF (Open Pascal Debug Format). The system consists of two main components:
+
+Compiler side:: The FPC compiler (branch `feature/opdf-support`) emits OPDF debug records into a `.opdf` ELF section when compiling with the `-gO` flag. The compiler maintains its own implementation of the OPDF record format — it does not depend on any debugger-side code.
+
+Debugger side:: A standalone debugger that reads OPDF records from compiled binaries, controls process execution via Linux ptrace, and presents debugging commands through a CLI interface. The debugger uses a Hexagonal Architecture (Ports & Adapters) to cleanly separate concerns.
+
+== Module Structure
+
+The debugger is organised into five modules, each with a distinct responsibility.
+
+=== opdf-lib
+
+The OPDF format library. Contains the binary format definitions, reader/writer, and supporting utilities.
+
+[cols="1,3"]
+|===
+| Unit | Purpose
+
+| `opdf_types.pas`
+| Record type constants (`REC_LOCALVAR`, `REC_PARAMETER`, etc.), data structures, and format definitions
+
+| `opdf_io.pas`
+| `TOPDFReader` and `TOPDFWriter` — low-level binary OPDF record parsing and serialisation
+
+| `opdf_demangle.pas`
+| FPC symbol name demangling (e.g. `TEASERDEMO_$$_CALCULATEAREA$TCIRCLE$$DOUBLE` to `TeaserDemo.CalculateArea`)
+
+| `elf_reader.pas`
+| ELF binary parsing — locates and extracts the `.opdf` section from compiled executables
+|===
+
+This module is format-neutral: it has no knowledge of debugging, ptrace, or UI. It provides the vocabulary for reading OPDF data, which the adapter layer consumes.
+
+NOTE: The FPC compiler does _not_ currently use this library. The compiler has its own implementation of OPDF record emission in `dbgopdf.pas`. Both sides must agree on the binary format defined in the OPDF specification. A future possibility is to integrate opdf-lib into the FPC source tree, making it the single source of truth for the OPDF format and eliminating the need to maintain parallel implementations.
+
+=== pdr-core
+
+The hexagonal core — domain logic and port interfaces.
+
+[cols="1,3"]
+|===
+| Unit | Purpose
+
+| `pdr_ports.pas`
+| Port interface definitions: `IProcessController`, `IDebugInfoReader`, `ICommandHandler`, `IArchAdapter`. These are the contracts that adapters must implement.
+
+| `pdr_engine.pas`
+| `TDebuggerEngine` — the orchestrator. Implements `ICommandHandler` and coordinates between the port interfaces to execute debugger commands (break, step, locals, inspect, etc.). Contains all debugger logic but has zero knowledge of ptrace, OPDF, or any specific platform.
+
+| `pdr_typesys.pas`
+| `TTypeSystem` and type evaluators. Computes variable values by reading process memory and formatting according to type category (primitives, records, classes, enums, sets, strings, arrays).
+
+| `pdr_symbols.pas`
+| Symbol resolution helpers
+|===
+
+The core depends only on the port interfaces, never on concrete adapter implementations. This is the central tenet of the hexagonal architecture.
+
+=== pdr-adapters
+
+Concrete implementations of the port interfaces.
+
+[cols="1,3"]
+|===
+| Unit | Purpose
+
+| `pdr_opdf_adapter.pas`
+| `TOPDFReaderAdapter` — implements `IDebugInfoReader`. Reads the `.opdf` section from an ELF binary (using opdf-lib), caches all type, variable, scope, and line information, and answers queries such as "what local variables exist in this scope?" or "what line maps to this address?"
+
+| `pdr_linux_ptrace.pas`
+| `TLinuxPtraceAdapter` — implements `IProcessController`. Handles process launch/attach, ptrace-based memory reads, breakpoint insertion (INT3), single-stepping, and register access. All Linux-specific code lives here.
+
+| `pdr_arch_adapters.pas`
+| Implements `IArchAdapter` for x86_64 and i386 — calling convention details, register layouts, and architecture-specific behaviour.
+|===
+
+=== pdr-cli
+
+The thin CLI client. `pdr_main.pas` wires the adapters into the engine and provides the REPL (read-eval-print loop). It parses user commands, calls `ICommandHandler` methods on the engine, and displays the results. Intentionally minimal — all logic lives in the core.
+
+=== tools
+
+Auxiliary command-line tools (e.g. OPDF dump utilities).
+
+== Hexagonal Architecture
+
+The architecture follows the Ports & Adapters pattern. The core engine defines abstract port interfaces, and concrete adapters plug in from the outside.
+
+....
+                     ┌───────────────────────────────┐
+                     │          pdr-cli              │
+                     │   (CLI REPL — thin client)    │
+                     └──────────────┬────────────────┘
+                                    │ ICommandHandler
+                     ┌──────────────▼─────────────────┐
+                     │          pdr-core              │
+                     │  TDebuggerEngine + TTypeSystem │
+                     │    (domain logic, no I/O)      │
+                     └──────┬───────────────┬─────────┘
+               IDebugInfoReader         IProcessController
+                     │                      │
+          ┌──────────▼─────────┐  ┌─────────▼───────────┐
+          │   pdr-adapters     │  │   pdr-adapters      │
+          │ TOPDFReaderAdapter │  │ TLinuxPtraceAdapter │
+          └──────────┬─────────┘  └─────────┬───────────┘
+                     │                      │
+          ┌──────────▼─────────┐       ptrace syscalls
+          │     opdf-lib       │
+          │ TOPDFReader + ELF  │
+          └────────────────────┘
+....
+
+=== Port Interfaces
+
+The port interfaces are defined in `pdr_ports.pas`:
+
+`ICommandHandler`:: The inbound port. Exposes debugger operations to clients: `LoadProgram`, `Run`, `Continue`, `Step`, `SetBreakpoint`, `GetLocalVariables`, `EvaluateVariable`, `Inspect`, etc. The CLI calls these methods; any future IDE plugin would call the same interface.
+
+`IDebugInfoReader`:: An outbound port. Provides access to debug information: type lookup, variable lookup, scope resolution, line-to-address mapping, and function scope queries. The core engine calls this port; the OPDF adapter implements it.
+
+`IProcessController`:: An outbound port. Provides process control and memory access: launch, attach, continue, step, read/write memory, get/set registers, breakpoint management. The core engine and type system call this port; the Linux ptrace adapter implements it.
+
+`IArchAdapter`:: An outbound port. Provides architecture-specific behaviour such as calling conventions and register mappings.
+
+=== Substitutability
+
+The hexagonal design means each adapter can be replaced independently:
+
+- Replace `TOPDFReaderAdapter` with a DWARF reader to debug binaries compiled with `-gw`
+- Replace `TLinuxPtraceAdapter` with a Windows debugging API adapter for cross-platform support
+- Replace the CLI with an IDE plugin — same engine, same adapters, different UI
+
+== Command Trace: `locals`
+
+This section traces the complete execution path of the `locals` command through all architectural layers. It demonstrates how the hexagonal design separates concerns while coordinating the work.
+
+=== Step 1: CLI — Command Parsing
+
+`pdr_main.pas` — `TCLIDebugger.ProcessCommand`
+
+The REPL reads user input, splits it into tokens, and matches the command. For `locals` (or its alias `lo`), it calls `FEngine.GetLocalVariables` and prints each returned variable's name and value.
+
+=== Step 2: Core — Engine Orchestration
+
+`pdr_engine.pas` — `TDebuggerEngine.GetLocalVariables`
+
+The engine orchestrates the response:
+
+. Obtain the current execution address via `IProcessController.GetLastBreakpointAddress`. This returns the address where the breakpoint was hit _before_ the single-step instruction, which is critical for correct scope resolution (see <<breakpoint-state>>).
+. Call `IDebugInfoReader.GetScopeLocals(RIP)` to retrieve all local variables belonging to the function scope that contains the current address.
+. For each local variable, call `TTypeSystem.EvaluateVariableInfo` to compute the variable's value.
+. Return the array of evaluated variables to the CLI.
+
+=== Step 3: Debug Info Adapter — Scope and Variable Lookup
+
+`pdr_opdf_adapter.pas` — `TOPDFReaderAdapter.GetScopeLocals`
+
+The OPDF adapter resolves which function scope contains the given RIP and returns its locals:
+
+. `GetCurrentFunctionScope(RIP)` — iterates the cached `FFunctionScopes` list, finding the scope where `LowPC \<= RIP < HighPC`.
+. `FindLocalVariablesInScope(ScopeID)` — retrieves the cached list of `TLocalVariableInfo` records associated with that scope ID.
+
+All data was pre-loaded from the `.opdf` ELF section during `Load` using `TOPDFReader` from opdf-lib. At command time, this is a pure cache lookup — no binary parsing occurs.
+
+=== Step 4: Type System — Variable Evaluation
+
+`pdr_typesys.pas` — `TTypeSystem.EvaluateVariableInfo`
+
+For each variable, the type system:
+
+. Looks up the type via `IDebugInfoReader.FindType(TypeID)`.
+. Computes the memory address:
+  - `LocationExpr = 1` (RBP-relative, current frame): `Address = RBP + LocationData`
+  - `LocationExpr = 2` (nested procedure): reads the parent frame's RBP via `IProcessController.ReadMemory`, then computes `Address = ParentRBP + LocationData`
+. Selects the appropriate type evaluator using the Strategy pattern — each evaluator implements `CanHandle` and `Evaluate`:
+
+[cols="1,2"]
+|===
+| Evaluator | Handles
+
+| `TPrimitiveEvaluator` | Integer, Boolean, Char
+| `TFloatEvaluator` | Single, Double, Extended, Currency, Comp
+| `TEnumEvaluator` | Enumeration types
+| `TSetEvaluator` | Set types (decodes bitfield to element names)
+| `TAnsiStringEvaluator` | AnsiString
+| `TUnicodeStringEvaluator` | UnicodeString
+| `TShortStringEvaluator` | ShortString
+| `TArrayEvaluator` | Static and dynamic arrays
+| `TRecordEvaluator` | Record/struct types (recursive field evaluation)
+| `TClassEvaluator` | Class instances (dereferences instance pointer, evaluates fields)
+| `TInterfaceEvaluator` | Interface references
+| `TPointerEvaluator` | Pointer types
+|===
+
+Evaluators that handle composite types (records, classes, arrays) recursively call back into `TTypeSystem.EvaluateVariableInfo` for each contained element.
+
+=== Step 5: Process Controller — Memory Access
+
+`pdr_linux_ptrace.pas` — `TLinuxPtraceAdapter.ReadMemory`
+
+Every variable value read ultimately flows through this single method:
+
+. Loop reading word-sized chunks (8 bytes on x86_64) using `ptrace(PTRACE_PEEKDATA, PID, Address, nil)`.
+. Copy the bytes into the caller's buffer.
+
+This is the lowest layer — the boundary between the debugger and the operating system.
+
+=== Complete Call Graph
+
+....
+USER: "locals"
+  │
+  ▼
+TCLIDebugger.ProcessCommand()                         [pdr_main.pas]
+  │
+  ▼
+TDebuggerEngine.GetLocalVariables()                   [pdr_engine.pas]
+  ├──► IProcessController.GetLastBreakpointAddress()  [pdr_linux_ptrace.pas]
+  │      returns saved breakpoint RIP
+  │
+  ├──► IDebugInfoReader.GetScopeLocals(RIP)           [pdr_opdf_adapter.pas]
+  │      ├──► GetCurrentFunctionScope(RIP)
+  │      │      searches FFunctionScopes cache
+  │      └──► FindLocalVariablesInScope(ScopeID)
+  │             returns FLocalVariables[ScopeID] cache
+  │
+  └──► for each variable:
+       TTypeSystem.EvaluateVariableInfo(VarInfo)      [pdr_typesys.pas]
+         ├──► IDebugInfoReader.FindType(TypeID)       [pdr_opdf_adapter.pas]
+         │      searches FTypes cache
+         │
+         ├──► IProcessController.GetLastBreakpointRBP()
+         │      returns saved breakpoint RBP          [pdr_linux_ptrace.pas]
+         │
+         ├──► compute address: RBP + LocationData
+         │
+         └──► TypeEvaluator.Evaluate()                [pdr_typesys.pas]
+                └──► IProcessController.ReadMemory()  [pdr_linux_ptrace.pas]
+                       ptrace(PTRACE_PEEKDATA)
+....
+
+[[breakpoint-state]]
+== Design Note: Breakpoint State Preservation
+
+When a breakpoint is hit, the ptrace adapter saves `FLastBreakpointAddr` (RIP) and `FLastBreakpointRBP` (frame base pointer) _before_ executing the single-step that resumes past the breakpoint instruction. This is necessary because the single-step may land inside a called function (e.g. `call WriteLn`), where RIP and RBP point to the wrong scope and stack frame.
+
+The engine and type system consistently use `GetLastBreakpointAddress` and `GetLastBreakpointRBP` instead of the live register values. This ensures correct scope resolution and stack-relative address computation for variable evaluation.
+
+== Compiler Side
+
+The FPC compiler emits OPDF debug records via `dbgopdf.pas` (`TOPDFDebugWriter`). This unit:
+
+- Walks the compiler's symbol tables and type definitions
+- Emits OPDF records (types, variables, function scopes, line info, parameters) into the `al_opdf` assembler list
+- The assembler and linker place these records into the `.opdf` ELF section
+
+The compiler maintains its own copy of the OPDF record constants and emission logic. It does not import or link against the debugger's opdf-lib. Both sides must agree on the binary record format as specified in `opdf-specification.adoc`.
+
+Type ID allocation is handled by `dbgopdf_typemap.pas` (`TTypeMapper`), which assigns unique IDs to each type definition encountered during compilation.
