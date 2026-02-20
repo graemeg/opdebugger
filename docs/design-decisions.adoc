@@ -28,9 +28,10 @@ opdebugger/                          # Aggregator (packaging=pom)
 ├── opdf-lib/                        # Library module (packaging=library)
 │   ├── project.xml
 │   └── src/main/pascal/
-│       ├── ogopdf.pas               # Core OPDF structures
-│       ├── opdf_io.pas              # I/O utilities
-│       └── opdf_factory.pas         # Factory patterns
+│       ├── opdf_types.pas           # Core OPDF structures and constants
+│       ├── opdf_io.pas              # Reader/writer for binary OPDF format
+│       ├── opdf_demangle.pas        # FPC symbol name demangling
+│       └── elf_reader.pas           # ELF binary parsing
 ├── pdr-core/                        # Library module (packaging=library)
 │   ├── project.xml
 │   └── src/
@@ -53,12 +54,9 @@ opdebugger/                          # Aggregator (packaging=pom)
 ├── pdr-cli/                         # Application module (packaging=application)
 │   ├── project.xml
 │   └── src/main/pascal/
-│       ├── pdr_main.pas             # CLI entry point
-│       └── pdr_cli_commands.pas     # Command pattern impl
-├── tools/                           # Application module (packaging=application)
-│   ├── project.xml
-│   └── src/main/pascal/
-│       └── opdf_generator.pas       # Standalone OPDF generator
+│       └── pdr_main.pas             # CLI entry point and REPL
+├── tools/                           # Standalone utilities
+│   └── opdf_dump.py                 # OPDF section dump tool
 └── tests/                           # Integration tests
     └── integration/
         ├── test_01_primitives.pas
@@ -86,7 +84,6 @@ opdebugger/                          # Aggregator (packaging=pom)
     <module>pdr-core</module>
     <module>pdr-adapters</module>
     <module>pdr-cli</module>
-    <module>tools</module>
   </modules>
 </project>
 ----
@@ -136,6 +133,8 @@ cp opdebugger/opdf-lib/src/main/pascal/*.pas fpc/packages/opdf/
 ```
 
 **Rationale**: Symlink allows rapid development without manual copying; copy for clean upstream submission.
+
+NOTE: During implementation, the symlink approach was not used. The FPC compiler's `dbgopdf.pas` has its own self-contained implementation of OPDF record emission — it does not import any units from opdf-lib. The two sides share the binary format as defined in the OPDF specification but maintain independent code. The relevant FPC compiler files are `dbgopdf.pas` (main debug writer) and `dbgopdf_typemap.pas` (type ID allocation), both in the `compiler/` directory on the `feature/opdf-support` branch. A future possibility is to integrate opdf-lib into the FPC source tree as the single source of truth for the OPDF format.
 
 == Architecture Pattern
 
@@ -345,6 +344,8 @@ begin
 end;
 ----
 
+NOTE: The external .opdf approach was abandoned during implementation. FPC's debug information generator emits line information during code generation using assembler labels, which the linker resolves to final addresses. An external post-compilation tool cannot access these labels, making accurate line-to-address mapping unreliable. The project moved directly to embedded OPDF via FPC compiler integration (`-gO` flag), where OPDF records are emitted into the assembler list alongside existing debug generators and benefit from the same linker label resolution. The standalone `opdf_generator` tool has been removed.
+
 == Vertical Slice Workflow
 
 === Decision: Type-by-Type Implementation
@@ -359,14 +360,14 @@ end;
 │    └─ docs/opdf-specification.adoc                          │
 │                                                             │
 │ 2. Add to Shared Library                                    │
-│    ├─ opdf-lib/src/main/pascal/ogopdf.pas                   │
+│    ├─ opdf-lib/src/main/pascal/opdf_types.pas               │
 │    │    └─ Add TDefTypeX record                             │
 │    └─ opdf-lib/src/main/pascal/opdf_io.pas                  │
-│         └─ Add WriteTypeX() method                          │
+│         └─ Add ReadTypeX() method                           │
 │                                                             │
-│ 3. Update Generator Tool                                    │
-│    └─ tools/src/main/pascal/opdf_generator.pas              │
-│         └─ Emit Type X for test programs                    │
+│ 3. Update FPC Compiler                                      │
+│    └─ compiler/dbgopdf.pas                                  │
+│         └─ Emit REC_TYPEX in appendsym/appenddef            │
 │                                                             │
 │ 4. Write Integration Test                                   │
 │    ├─ tests/integration/test_typeX.pas (test program)       │
@@ -400,6 +401,8 @@ end;
 . **Phase 2**: ShortString, AnsiString
 . **Phase 3**: Pointer, Class, Property (field-backed)
 . **Phase 4**: Dynamic arrays, Sets, Generics, Property (getter/setter)
+
+NOTE: All types listed above have been implemented, with the exception of Generics. The actual implementation order differed from the plan — all type categories (primitives, floats, enums, sets, strings, pointers, static and dynamic arrays, records, classes, interfaces, and properties including method-backed) were completed during Phases 1-3.
 
 **Benefits**:
 
@@ -500,6 +503,8 @@ end;
 
 **Benefit**: Easy to add new commands without modifying core loop.
 
+NOTE: During implementation, a simpler approach was adopted. `TCLIDebugger.ProcessCommand` uses a single `case` statement dispatching on the command string, with each branch directly calling the appropriate `ICommandHandler` method on the engine. Since the CLI is intentionally a thin client — most commands are one-liners delegating to the engine — the additional abstraction of per-command classes was unnecessary. The important architectural boundary (engine vs. UI) is enforced by the `ICommandHandler` port interface. The Command Pattern remains a viable option if command handling grows more complex (e.g. undo/redo, macro recording, or command composition).
+
 === Factory Pattern: Platform Controllers
 
 **Problem**: Need different `IProcessController` per platform.
@@ -569,26 +574,22 @@ test_01_primitives.commands   # PDR commands to run
 test_01_primitives.expected   # Expected output
 ```
 
-**Test Script**: `run_tests.sh`
+**Test Script**: `run_launch_tests.sh`
 
 ```bash
 #!/bin/bash
 
-# Compile test program
-fpc test_01_primitives.pas
+# Compile test program with embedded OPDF
+ppcx64 @fpc.cfg -gO test_01_primitives.pas
 
-# Generate OPDF
-./tools/target/opdf_generator test_01_primitives
-
-# Run PDR with commands
+# Run PDR with commands, filter output, compare with expected
 ./pdr-cli/target/pdr test_01_primitives < test_01_primitives.commands \
-  > actual_output.txt
+  | grep -E '<filter pattern>' > actual_output.txt
 
-# Compare with expected
 diff actual_output.txt test_01_primitives.expected
 ```
 
-**CI Integration**: `pasbuild test` runs all unit + integration tests.
+NOTE: The test runner uses the built `ppcx64` compiler directly (not the `fpc` driver) with a specific `fpc.cfg` to ensure the correct unit paths and the locally built compiler are used.
 
 == Build Commands Reference
 
@@ -633,8 +634,6 @@ pdr-core (depends on: opdf-lib)
 pdr-adapters (depends on: pdr-core, opdf-lib)
   ↓
 pdr-cli (depends on: pdr-adapters, pdr-core, opdf-lib)
-
-tools (depends on: opdf-lib)
 ----
 
 PasBuild automatically resolves transitive dependencies.
@@ -680,21 +679,24 @@ PasBuild automatically resolves transitive dependencies.
 . **Strategy Pattern**: Extensible type evaluation system
 . **Command Pattern**: Modular CLI command system
 . **32-bit/64-bit Support**: Architecture adapters handle pointer size differences
-. **External-First Approach**: Simpler MVP, embedded support added later
+. **Embedded Debug Info**: OPDF records emitted directly by the FPC compiler into the binary
 . **Mock Testing**: Unit tests without requiring real processes
 . **Clear Module Boundaries**: Core, adapters, UI separated
 
-== Next Steps
+== Implementation Status
 
-. **Week 1-2**: Setup repository with PasBuild structure
-. **Week 3**: Implement `ogopdf.pas` with architecture metadata
-. **Week 4**: Create mock adapters and unit test framework
-. **Week 5+**: Begin Phase 1 (Integer MVP) following vertical slice workflow
+The project has progressed well beyond the original plan:
+
+* PasBuild multi-module structure is in place and working
+* FPC compiler integration is complete (`-gO` flag on the `feature/opdf-support` branch)
+* All type categories are implemented: primitives, floats, enums, sets, strings, pointers, arrays, records, classes, interfaces
+* 18 integration tests passing
+* Phase 3 features implemented: inspect, set variable, callstack, method-backed properties
 
 == References
 
 * PasBuild Multi-Module Tutorial: `/data/devel/opensource/pasbuild/docs/multi-module-tutorial.adoc`
 * Hexagonal Architecture: Alistair Cockburn (2005)
-* OPDF Specification: `docs/opdf-specification.adoc`
-* Implementation Plan: `docs/implementation-plan.adoc`
-* Strategic Analysis: `docs/analysis.adoc`
+* xref:opdf-specification.adoc[OPDF Specification]: `/docs/opdf-specification.adoc`
+* xref:implementation-plan.adoc[Implementation Plan]: `/docs/implementation-plan.adoc`
+* xref:analysis.adoc[Strategic Analysis]: `/docs/analysis.adoc`

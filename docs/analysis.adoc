@@ -142,7 +142,7 @@ Priority: **Medium** - Implement DWARF 4 string support as baseline, but do not 
 
 === Option 2: Invest in fpdebug Project
 
-The fpdebug project (https://github.com/graemeg/fpdebug) is a debugger written in Object Pascal specifically for debugging Pascal code.
+The fpdebug project (https://gitlab.com/freepascal.org/lazarus/lazarus/-/tree/main/components/fpdebug?ref_type=heads) or (https://github.com/graemeg/fpdebug [_obsolete_]) is a debugger written in Object Pascal specifically for debugging Pascal code.
 
 ==== Advantages
 
@@ -158,7 +158,7 @@ The fpdebug project (https://github.com/graemeg/fpdebug) is a debugger written i
 * **Maintenance burden**: Requires maintaining entire debugger stack
 * **Platform porting**: Must be ported to all FPC target platforms
 * **Development investment**: Significant effort for comprehensive implementation
-* **Tool adoption**: Users must switch from familiar GDB workflow
+* **Tool adoption**: Users must switch from familiar GDB workflow (though I believe fpDebug might now be the default in Lazarus IDE)
 * **Maturity**: Less mature than GDB; requires extensive testing
 * **Resource requirements**: Large volunteer effort needed
 
@@ -540,7 +540,7 @@ The investment is substantial but justified: debugging is fundamental to develop
 == References
 
 . Free Pascal Compiler: https://www.freepascal.org
-. fpdebug project: https://github.com/graemeg/fpdebug
+. fpdebug project: https://gitlab.com/freepascal.org/lazarus/lazarus/-/tree/main/components/fpdebug?ref_type=heads and https://github.com/graemeg/fpdebug
 . DWARF Debugging Standard: http://dwarfstd.org
 . Linux Debuginfo Formats: CppCon 2022 - Greg Law
 . FPC DWARF Implementation: `/compiler/dbgdwarf.pas`

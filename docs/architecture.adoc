@@ -144,7 +144,7 @@ This section traces the complete execution path of the `locals` command through 
 
 `pdr_main.pas` — `TCLIDebugger.ProcessCommand`
 
-The REPL reads user input, splits it into tokens, and matches the command. For `locals` (or its alias `lo`), it calls `FEngine.GetLocalVariables` and prints each returned variable's name and value.
+The REPL (Read-Eval-Print Loop) reads user input, splits it into tokens, and matches the command. For `locals` (or its alias `lo`), it calls `FEngine.GetLocalVariables` and prints each returned variable's name and value.
 
 === Step 2: Core — Engine Orchestration
 

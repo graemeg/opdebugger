@@ -205,6 +205,15 @@ Full specification: `docs/phase3-plan.adoc`
 * [ ] Add `TVariantRecordEvaluator` to `pdr_typesys.pas`
 * [ ] Integration test: `test_22_variant_record.pas`
 
+==== Feature 10b: Variant Type Support
+
+* [ ] Define `recVariant` record type in `opdf_types.pas`
+* [ ] Emit `recVariant` in `dbgopdf.pas` for `tvariantdef`
+* [ ] Add `TOPDFReader.ReadVariant` in `opdf_io.pas`
+* [ ] Parse and cache variant types in `pdr_opdf_adapter.pas`
+* [ ] Add `TVariantEvaluator` to `pdr_typesys.pas` (decode VarType discriminant + value)
+* [ ] Integration test: `test_variant_types.pas`
+
 ==== Feature 11: Generics (Basic Containers)
 
 * [ ] Hardcode `TList<T>`, `TObjectList<T>`, `TDictionary<K,V>` layout knowledge
@@ -251,7 +260,7 @@ opdf-lib/      → core OPDF format, I/O, ELF reader, demangling
 pdr-core/      → engine, type system, evaluators, port interfaces
 pdr-adapters/  → Linux ptrace, OPDF reader adapter, arch helpers
 pdr-cli/       → command-line interface (REPL)
-tools/         → opdf_generator (DWARF→OPDF, used during development)
+tools/         → opdf_dump.py (OPDF section diagnostic dump tool)
 ----
 
 === FPC Integration
@@ -316,12 +325,7 @@ make -C compiler cycle
   @/data/devel/fpc-3.3.1/x86_64-linux/lib/fpc/3.3.1/fpc.cfg \
   -gO test.pas
 
-# Compile integration tests with DWARF (for opdf_generator pipeline)
-cd tests/integration
-fpc -g test_01_primitives.pas
-../../tools/target/opdf_generator test_01_primitives
-
-# Run debugger
+# Run debugger on a test binary
 ../../pdr-cli/target/pdr test_01_primitives
 
 # Run full automated test suite
