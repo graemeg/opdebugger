@@ -100,7 +100,52 @@ project, covering both the standalone debugger toolchain and the FPC compiler in
 
 ---
 
-== Phase 3: Next Work Items
+== Priority: OPDF Scalability Redesign (v0.3.0)
+
+Multi-unit testing with a 93-unit project (maximus) revealed critical scalability issues
+in the v0.2.0 format: 3.4x type duplication (25,652 records for 7,540 unique types),
+no directory structure, and O(n) linear scans. At Lazarus scale (3000+ units), this
+projected to ~147 MB section size and ~266 MB reader memory.
+
+Analysis of STABS, DWARF, TD32, and PDB formats confirmed that a global type pool
+(as used by TD32 and PDB) and directory-based indexed access are the correct approach.
+See `docs/opdf-specification.adoc` Appendix A for the full comparison.
+
+=== Step 1: FPC Compiler — Single Header + Global Type Pool
+
+* [x] opdf_dump diagnostic tool (Pascal, raw stream parsing, multi-header detection)
+* [x] OPDF spec updated to v0.3.0 with multi-unit design and format comparison
+* [x] Progress tracker updated with scalability work items
+* [ ] Emit single `TOPDFHeader` at start of first `inserttypeinfo` call only
+* [ ] Track emitted TypeIDs in `TOPDFDebugWriter`; skip duplicates on subsequent units
+* [ ] `TotalRecords` reflects the global count across all units
+
+=== Step 2: FPC Compiler — Unit Directory + Per-Unit Grouping
+
+* [ ] Define `TDefUnitDirectory` and `TUnitEntry` packed records in `dbgopdf.pas`
+* [ ] Emit `recUnitDirectory` as the first record after the header
+* [ ] Populate unit names and byte offsets as each unit's records are emitted
+* [ ] Records from each unit emitted contiguously (already the case per-call)
+
+=== Step 3: Reader — Handle New Format
+
+* [ ] Update `TOPDFReader` (`opdf_io.pas`) to read single header + directory
+* [ ] Parse `recUnitDirectory` for unit index
+* [ ] Skip duplicate TypeIDs during reading (defensive, should not occur with v0.3.0 emitter)
+* [ ] Store line info and function scopes in sorted arrays for binary search
+* [ ] Intern repeated filename strings to reduce memory allocation
+
+=== Step 4: Verification
+
+* [ ] Rebuild FPC compiler with changes
+* [ ] Recompile maximus with new compiler
+* [ ] Verify with opdf_dump: single header, no duplicate types, directory present
+* [ ] Run all 18 integration tests — must pass
+* [ ] Test pdr debugger against maximus: breakpoints, locals, inspect all working
+
+---
+
+== Phase 3: Feature Work Items
 
 Full specification: `docs/phase3-plan.adoc`
 
@@ -260,7 +305,7 @@ opdf-lib/      → core OPDF format, I/O, ELF reader, demangling
 pdr-core/      → engine, type system, evaluators, port interfaces
 pdr-adapters/  → Linux ptrace, OPDF reader adapter, arch helpers
 pdr-cli/       → command-line interface (REPL)
-tools/         → opdf_dump.py (OPDF section diagnostic dump tool)
+tools/         → opdf_dump (Pascal diagnostic tool for .opdf section analysis)
 ----
 
 === FPC Integration

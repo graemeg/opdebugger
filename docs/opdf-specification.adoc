@@ -2,8 +2,8 @@
 :toc: left
 :toclevels: 4
 :sectnums:
-:version: 0.2.0
-:date: 2026-02-19
+:version: 0.3.0
+:date: 2026-02-20
 
 == Introduction
 
@@ -56,6 +56,23 @@ OPDF debug information is embedded directly in the compiled binary. The FPC comp
 |===
 
 NOTE: An earlier approach generated external `.opdf` files by translating DWARF debug information as a post-compilation step. This was abandoned because FPC's debug information generator emits line information during code generation using assembler labels, which the linker resolves to final addresses. An external tool operating on the compiled binary cannot access these labels, making accurate line-to-address mapping unreliable. Direct compiler integration solves this by emitting OPDF records alongside the existing debug generators, using the same label resolution mechanism.
+
+=== Multi-Unit Architecture
+
+FPC compiles each unit independently, calling the debug writer's `inserttypeinfo` once per compilation unit. In version 0.2.0, each unit emitted its own OPDF header followed by its records, resulting in multiple independent OPDF streams concatenated in the `.opdf` section. This caused several scalability problems identified during testing with large projects (93 compilation units, 81,751 records):
+
+* **Type duplication** — The same types (e.g. `LongInt`, `Boolean`, `String`) were emitted by every unit that used them. In a 93-unit project, 25,652 type records were emitted but only 7,540 unique TypeIDs existed (3.4x duplication ratio). At Lazarus scale (3000+ units), this projected to ~147 MB section size and ~266 MB reader memory.
+* **Reader complexity** — The reader had to scan for multiple magic bytes to discover unit boundaries, with no directory or index structure.
+* **Linear search** — All lookups (type by ID, line by address, scope by address) required O(n) scans.
+
+Version 0.3.0 addresses these problems with four structural changes:
+
+. **Single header** — One `TOPDFHeader` at offset 0, with `TotalRecords` covering all records in the section.
+. **Global type pool** — Each type is emitted exactly once. The compiler tracks which TypeIDs have already been written and skips duplicates. This eliminates the 3.4x duplication.
+. **Per-unit record grouping** — Records from each compilation unit are emitted contiguously, with a `recUnitDirectory` record at the start of the section listing all units and their byte offsets.
+. **Unit directory table** — A new `recUnitDirectory` record (type 19) at the beginning of the record stream provides an index for random access to any unit's records.
+
+These changes follow the design principles of Borland's TD32 and Microsoft's PDB formats, which both use global type pools and directory structures to achieve zero type duplication and efficient lazy loading. See <<appendix-b-format-comparison>> for a detailed comparison.
 
 == Binary Format
 
@@ -145,7 +162,8 @@ TOPDFRecordType = (
   recFunctionScope = 15,  // Function scope (address range + name)
   recInterface     = 16,  // COM or CORBA interface type
   recEnum          = 17,  // Enumeration type with named members
-  recSet           = 18   // Set type (bitfield over ordinal or enum base)
+  recSet           = 18,  // Set type (bitfield over ordinal or enum base)
+  recUnitDirectory = 19   // Unit directory table (index of all compilation units)
 );
 ----
 
@@ -495,6 +513,31 @@ end;
 // Fixed part: 7 bytes per method
 ----
 
+=== Unit Directory (recUnitDirectory = 19)
+
+An index of all compilation units in the `.opdf` section. This record is always the first record after the header. It enables readers to locate any unit's records by byte offset without scanning the entire section.
+
+[source,pascal]
+----
+TDefUnitDirectory = packed record
+  UnitCount: Cardinal;  // 4 bytes — number of compilation units
+  // Followed by: UnitCount × TUnitEntry
+end;
+// Fixed part: 4 bytes
+
+TUnitEntry = packed record
+  RecordOffset: Cardinal;  // 4 bytes — byte offset from start of section to unit's first record
+  RecordCount: Cardinal;   // 4 bytes — number of records belonging to this unit
+  NameLen: TNameLen;       // 2 bytes
+  // Followed by: UnitName (NameLen bytes)
+end;
+// Fixed part: 10 bytes per entry
+----
+
+The `RecordOffset` is relative to the start of the `.opdf` section (byte 0 = start of header). Records for each unit are emitted contiguously, so the reader can seek to `RecordOffset` and read `RecordCount` records to load a specific unit.
+
+The unit directory record itself is not counted in any unit's `RecordCount`. The header's `TotalRecords` includes all records across all units plus the directory record itself.
+
 == Symbol Definition Records
 
 === Global Variable (recGlobalVar = 2)
@@ -673,11 +716,101 @@ Section within segment: `__debug`
 recInterface (16), recEnum (17), recSet (18). Correct field widths throughout
 (TTypeID = Cardinal, TNameLen = Word). Add set bit-encoding rules. Add
 location expression table. Document dynamic array layout (x86_64).
+
+|0.3.0
+|2026-02-20
+|Multi-unit scalability redesign: single header, global type pool (no
+duplicate types), per-unit record grouping, recUnitDirectory (19) for
+indexed access. Add debug format comparison appendix (STABS, DWARF, TD32,
+PDB). Motivated by 3.4x type duplication observed in 93-unit project.
 |===
 
 == Appendices
 
-=== Appendix A: Comparison with DWARF
+[[appendix-b-format-comparison]]
+=== Appendix A: Debug Format Comparison
+
+The OPDF v0.3.0 multi-unit architecture was informed by analysis of four established debug formats. This appendix documents the key findings that motivated the design.
+
+==== STABS (Symbol Table Strings)
+
+The oldest format, used by early Unix debuggers. STABS stores debug information as flat `.stab` / `.stabstr` sections with no structure beyond sequential entries.
+
+* **Type handling**: Types are described inline as string expressions. No deduplication — every source file re-emits all types it uses.
+* **Scalability**: Does not scale. Large projects suffer from massive section bloat because there is no mechanism to share type definitions across compilation units.
+* **Directory/index**: None. All lookups require linear scans.
+* **Lesson for OPDF**: STABS demonstrates the failure mode of a flat, unindexed format with per-unit type duplication — precisely the problems OPDF v0.2.0 exhibited.
+
+==== DWARF
+
+The standard debug format for ELF-based systems. DWARF organizes debug information into Compilation Units (CUs), each with a header specifying its byte length.
+
+* **Type handling**: Each CU independently emits all types it references. This results in 50-80% of `.debug_info` section size being duplicate type definitions. DWARF 5 introduced `.debug_names` and type units (`DW_TAG_type_unit`) to address this, but adoption is limited.
+* **Scalability**: The `.debug_info` section in large C++ projects routinely exceeds the application code by 5-10x. For a Lazarus-scale Pascal project, DWARF's type duplication would be comparable to OPDF v0.2.0.
+* **Directory/index**: `.debug_aranges` provides address-to-CU mapping. Each CU header contains a length field enabling skip-over without parsing. No global type index in standard DWARF.
+* **Lesson for OPDF**: DWARF's CU-length-prefix pattern (enabling skip-over) is useful, but its per-CU type duplication is a known weakness that OPDF should avoid.
+
+==== TD32 (Turbo Debugger 32-bit)
+
+Borland's proprietary format, used by Delphi and C++ Builder. Appended to the PE executable as a structured debug section.
+
+* **Type handling**: Global type pool — all types are stored once in a shared type section. Each type has a unique index. Zero duplication regardless of unit count.
+* **Scalability**: Scales well to large Delphi projects. The global type pool keeps section size proportional to unique types, not compilation units × types.
+* **Directory/index**: Subsection directory at the start of the debug data. Each subsection (types, symbols, source lines, modules) is indexed by offset and size, enabling random access and lazy loading.
+* **Lesson for OPDF**: TD32's global type pool and directory structure are the correct approach for a Pascal debug format. OPDF v0.3.0 adopts both: a global type pool (each TypeID emitted once) and a unit directory table (`recUnitDirectory`).
+
+==== PDB (Program Database) / CodeView
+
+Microsoft's debug format, used by Visual Studio. Stored in a separate `.pdb` file using the MSF (Multi-Stream File) container.
+
+* **Type handling**: Type Pool Index (TPI) stream — all types stored once with unique indices. The linker merges types from all `.obj` files, deduplicating by structural comparison.
+* **Scalability**: Designed for million-line C++ codebases. The MSF container supports streams up to 4 GB. Type deduplication and indexed access keep memory usage proportional to unique types.
+* **Directory/index**: Section Contribution stream maps address ranges to compilation units. DBI (Debug Information) stream provides module-level indexes. All access is indexed — no linear scans required.
+* **Lesson for OPDF**: PDB confirms that global type pools and directory-based access are essential for scalability. PDB's MSF container complexity is unnecessary for OPDF (which is embedded in the ELF section), but the type deduplication and indexed access principles apply directly.
+
+==== Summary: Design Influence on OPDF v0.3.0
+
+[cols="1,1,1,1,1,1"]
+|===
+|Feature |STABS |DWARF |TD32 |PDB |OPDF 0.3.0
+
+|Type duplication
+|Per-file
+|Per-CU
+|None (global pool)
+|None (TPI stream)
+|None (global pool)
+
+|Unit directory
+|None
+|CU headers with length
+|Subsection directory
+|DBI + Section Contributions
+|recUnitDirectory
+
+|Address-to-unit mapping
+|None
+|.debug_aranges
+|Sorted segment map
+|Section Contributions
+|Sorted line info arrays
+
+|Random access
+|No
+|Skip-by-length
+|Yes (directory offsets)
+|Yes (stream offsets)
+|Yes (directory offsets)
+
+|Scalability
+|Poor
+|Moderate
+|Good
+|Excellent
+|Good (target)
+|===
+
+==== Appendix B: Object Pascal Feature Comparison
 
 [cols="1,2,2"]
 |===
