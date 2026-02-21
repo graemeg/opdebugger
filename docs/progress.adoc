@@ -102,6 +102,37 @@ project, covering both the standalone debugger toolchain and the FPC compiler in
   binary; fixed by the PointerSize prerequisite below
 * `elf_reader.pas` only supports ELF64; ELF32 (Linux i386) requires a format extension
 
+=== Stack Frame Resolution
+
+The current callstack walker and variable access rely on frame pointer chains (RBP on
+x86_64, EBP on i386). This works for FPC-compiled code because FPC generates frame
+pointers by default, but breaks in several scenarios:
+
+* **Prebuilt RTL without frame pointers**: The FPC RTL is typically distributed compiled
+  with `-O2`, which may omit frame pointers. When an exception is raised inside an RTL
+  function that has no stack frame, the RBP chain skips the calling user function entirely.
+  The debugger sees the caller's caller instead. This is a known issue with frame-pointer-based
+  stack walking in Lazarus/fpdebug as well.
+
+* **Function prologue/epilogue**: At the first instruction of a function (before
+  `push rbp; mov rbp, rsp`) or after the epilogue restores RBP, the frame is not
+  established. Reading RBP at that point gives the wrong frame.
+
+* **Non-x86 architectures**: ARM32 does not guarantee frame pointers. PowerPC uses the
+  stack pointer as frame pointer with a different walking mechanism.
+
+* **Mixed-language callstacks**: C library code or system calls compiled without frame
+  pointers break the chain.
+
+DWARF addresses this with `.debug_frame` / `.eh_frame` unwind tables that describe frame
+resolution rules at every instruction boundary. OPDF does not have an equivalent yet.
+A future `recUnwindInfo` record type could map address ranges to frame resolution rules.
+Alternatively, the debugger could fall back to reading `.eh_frame` sections (present even
+in release builds) when no OPDF data is available for a given frame.
+
+Priority: Low — FPC debug builds preserve frame pointers on x86/x86_64. This becomes
+important when tackling optimized code, non-x86 architectures, or mixed-language stacks.
+
 ---
 
 == Priority: OPDF Scalability (Completed)
@@ -221,7 +252,7 @@ Full specification: `docs/phase3-plan.adoc`
 * [ ] Add `HandleWatch` / `HandleUnwatch` to `pdr_engine.pas`
 * [ ] Register `watch`, `rwatch`, `awatch`, `unwatch` commands
 * [ ] Enforce 4-slot hardware limit
-* [ ] Integration test: `test_19_watch.pas`
+* [ ] Integration test: `test_20_watch.pas`
 
 === Tier 2: High Value, Higher Complexity
 
@@ -234,7 +265,7 @@ Full specification: `docs/phase3-plan.adoc`
 * [ ] Add wall-clock timeout for hung calls
 * [ ] Evaluate method-backed properties in `pdr_typesys.pas` via `InjectCall`
 * [ ] Register `call MyObj.Method(args)` command
-* [ ] Integration test: `test_20_getter_props.pas`
+* [ ] Integration test: `test_21_getter_props.pas`
 
 ==== Feature 9: Expression Evaluator
 
@@ -244,7 +275,7 @@ Full specification: `docs/phase3-plan.adoc`
 * [ ] Workaround for missing `div`/`shl`/`shr` in fpexprpars (rewrite in pre-processor)
 * [ ] Open upstream FPC issue and submit patch for `div`/`shl`/`shr` in fpexprpars
 * [ ] Enable `print <expr>` for compound expressions
-* [ ] Integration test: `test_21_expression.pas`
+* [ ] Integration test: `test_22_expression.pas`
 
 ==== Feature 5 (form 2): Conditional Breakpoints — expression form
 
@@ -258,7 +289,7 @@ Full specification: `docs/phase3-plan.adoc`
 * [ ] Extend `REC_RECORD` in `opdf_types.pas` with variant group descriptors
 * [ ] Update `dbgopdf.pas` `appenddef_record` to emit variant fields
 * [ ] Add `TVariantRecordEvaluator` to `pdr_typesys.pas`
-* [ ] Integration test: `test_22_variant_record.pas`
+* [ ] Integration test: `test_23_variant_record.pas`
 
 ==== Feature 10b: Variant Type Support
 
@@ -273,14 +304,14 @@ Full specification: `docs/phase3-plan.adoc`
 
 * [ ] Hardcode `TList<T>`, `TObjectList<T>`, `TDictionary<K,V>` layout knowledge
 * [ ] Recognise container type names by prefix in `pdr_typesys.pas`
-* [ ] Integration test: `test_23_generics.pas`
+* [ ] Integration test: `test_24_generics.pas`
 
 ==== Feature 12: Exception Metadata
 
 * [ ] Intercept `SIGSEGV` / `SIGFPE` / `SIGABRT` in `pdr_linux_ptrace.pas`
 * [ ] Locate `ExceptObject` via OPDF global table or ELF symbol table
 * [ ] Read class name from VMT; read `FMessage` at known offset
-* [ ] Integration test: `test_24_exception.pas`
+* [ ] Integration test: `test_25_exception.pas`
 
 ==== Feature 13: Optimized Code — Register-Allocated Variables
 
@@ -330,7 +361,7 @@ x86_64/cputarg.pas   → dbgopdf registration
 i386/cputarg.pas     → dbgopdf registration
 ----
 
-=== Integration Tests (18 automated)
+=== Integration Tests (19 automated)
 
 ----
 test_01_primitives       → Integer and Boolean variables
@@ -352,6 +383,7 @@ test_15_inspect          → inspect command: record field layout
 test_16_array_slice      → print MyArray[N..M] slice display with clamping
 test_17_set_variable     → set command: modify Counter and MyFlag in-process
 test_18_inspect_class_intf → inspect command: class + interface with methods
+test_19_nested_scope       → nested procedure scoping: DeclIndex-based visibility
 ----
 
 ---
