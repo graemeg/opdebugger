@@ -162,6 +162,11 @@ type
     { Skip current record (for unsupported types) }
     procedure SkipRecord(const RecHeader: TOPDFRecordHeader);
 
+    { Try to read an OPDF header at the current stream position.
+      Returns True if a valid header was found and consumed (32 bytes).
+      Returns False if not at a header boundary — stream position unchanged. }
+    function TryReadNextHeader: Boolean;
+
     { Check if at end of stream }
     function AtEnd: Boolean;
 
@@ -1234,6 +1239,60 @@ end;
 procedure TOPDFReader.SkipRecord(const RecHeader: TOPDFRecordHeader);
 begin
   FStream.Position := FStream.Position + RecHeader.RecSize;
+end;
+
+function TOPDFReader.TryReadNextHeader: Boolean;
+var
+  SavedPos: Int64;
+  ScanPos: Int64;
+  TempHeader: TOPDFHeader;
+  B: Byte;
+begin
+  Result := False;
+  SavedPos := FStream.Position;
+
+  { Try reading header at current position first }
+  if FStream.Position + SizeOf(TOPDFHeader) <= FStream.Size then
+  begin
+    FStream.Read(TempHeader, SizeOf(TempHeader));
+    if IsValidOPDFHeader(TempHeader) then
+    begin
+      FHeader := TempHeader;
+      Result := True;
+      Exit;
+    end;
+    FStream.Position := SavedPos;
+  end;
+
+  { Scan forward past padding bytes (zeros) inserted by linker alignment.
+    Look for 'O' (first byte of OPDF magic) within a reasonable range. }
+  ScanPos := SavedPos;
+  while ScanPos + SizeOf(TOPDFHeader) <= FStream.Size do
+  begin
+    FStream.Position := ScanPos;
+    FStream.Read(B, 1);
+    if B = Ord('O') then
+    begin
+      { Potential header — try reading full header }
+      FStream.Position := ScanPos;
+      FStream.Read(TempHeader, SizeOf(TempHeader));
+      if IsValidOPDFHeader(TempHeader) then
+      begin
+        FHeader := TempHeader;
+        Result := True;
+        Exit;
+      end;
+    end
+    else if B <> 0 then
+    begin
+      { Non-zero, non-'O' byte — this is real record data, not padding }
+      Break;
+    end;
+    Inc(ScanPos);
+  end;
+
+  { No header found — restore position }
+  FStream.Position := SavedPos;
 end;
 
 function TOPDFReader.AtEnd: Boolean;

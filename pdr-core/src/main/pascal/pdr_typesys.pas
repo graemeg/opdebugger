@@ -135,6 +135,7 @@ type
     FEvaluators: TInterfaceList;
     FProcessController: IProcessController;
     FDebugInfoReader: IDebugInfoReader;
+    FEvalDepth: Integer;
 
     { Resolve dot-notation field access (e.g. MyShape.FName) }
     function ResolveFieldAccess(const BaseName, FieldPath: String): TVariableValue;
@@ -1046,6 +1047,7 @@ begin
   FProcessController := AProcessController;
   FDebugInfoReader := ADebugInfoReader;
   FEvaluators := TInterfaceList.Create;
+  FEvalDepth := 0;
 end;
 
 destructor TTypeSystem.Destroy;
@@ -1328,6 +1330,17 @@ begin
   Result.Name := VarInfo.Name;
   Result.IsValid := False;
 
+  { Guard against deep/infinite recursion (class fields referencing other classes) }
+  Inc(FEvalDepth);
+  if FEvalDepth > 3 then
+  begin
+    Dec(FEvalDepth);
+    Result.Value := '...';
+    Result.TypeName := '';
+    Exit;
+  end;
+  try
+
   // Find type information
   if not FDebugInfoReader.FindType(VarInfo.TypeID, TypeInfo) then
   begin
@@ -1392,6 +1405,10 @@ begin
 
   // No evaluator found
   Result.Value := '<error: no evaluator for type>';
+
+  finally
+    Dec(FEvalDepth);
+  end;
 end;
 
 end.

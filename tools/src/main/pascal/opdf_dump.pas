@@ -24,7 +24,7 @@ uses
   Classes, SysUtils, Math, opdf_types, elf_reader;
 
 const
-  MAX_REC_TYPE = 18;
+  MAX_REC_TYPE = 19;
 
 type
   TRecordCounts = array[0..MAX_REC_TYPE] of Cardinal;
@@ -87,6 +87,7 @@ begin
   if LName = 'interface' then Exit(16);
   if LName = 'enum' then Exit(17);
   if LName = 'set' then Exit(18);
+  if LName = 'unitdirectory' then Exit(19);
   Result := -1;
 end;
 
@@ -333,6 +334,25 @@ begin
     [Def.TypeID, Def.BaseTypeID, Def.SizeInBytes, Def.LowerBound, Name]));
 end;
 
+procedure DumpUnitDirectory(Stream: TStream);
+var
+  UnitCnt: Word;
+  DataSize: Cardinal;
+  NameLen: Word;
+  Name: String;
+  I: Integer;
+begin
+  Stream.Read(UnitCnt, 2);
+  WriteLn(Format('    UnitCount=%d', [UnitCnt]));
+  for I := 0 to UnitCnt - 1 do
+  begin
+    Stream.Read(DataSize, 4);
+    Stream.Read(NameLen, 2);
+    Name := ReadString(Stream, NameLen);
+    WriteLn(Format('      [%d] DataSize=%d Name="%s"', [I, DataSize, Name]));
+  end;
+end;
+
 
 { ---- Main processing ---- }
 
@@ -503,6 +523,7 @@ begin
           recInterface:     DumpInterface(Stream);
           recEnum:          DumpEnum(Stream);
           recSet:           DumpSet(Stream);
+          recUnitDirectory: DumpUnitDirectory(Stream);
         else
           { Unknown record type — skip }
         end;
@@ -585,7 +606,7 @@ begin
   WriteLn('Record types: Primitive, GlobalVar, ShortString, AnsiString,');
   WriteLn('  UnicodeString, Pointer, Array, Record, Class, Property,');
   WriteLn('  Method, LocalVar, Parameter, LineInfo, FunctionScope,');
-  WriteLn('  Interface, Enum, Set');
+  WriteLn('  Interface, Enum, Set, UnitDirectory');
 end;
 
 procedure ParseArgs;

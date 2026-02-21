@@ -23,6 +23,9 @@ const
   { Current format version }
   OPDF_VERSION = 1;
 
+  { Header flags }
+  OPDF_FLAG_HAS_DIRECTORY = 1;
+
 type
   { Architecture identifiers }
   TTargetArch = (
@@ -66,7 +69,8 @@ type
     recFunctionScope = 15, // Function scope (for local variable resolution)
     recInterface     = 16, // Interface definition (COM/CORBA)
     recEnum          = 17, // Enumeration type with member names
-    recSet           = 18  // Set type (bitfield over ordinal/enum base)
+    recSet           = 18, // Set type (bitfield over ordinal/enum base)
+    recUnitDirectory = 19  // Unit directory (index of per-unit data offsets)
   );
 
   { Generic Record Header - 5 bytes }
@@ -298,6 +302,19 @@ type
     // Followed by Name (NameLen bytes)
   end;
 
+  { Unit Directory Entry }
+  TUnitEntry = packed record
+    DataSize: Cardinal;     // byte size of this unit's records
+    NameLen: Word;          // length of unit name
+    // Followed by Name (NameLen bytes)
+  end;
+
+  { Unit Directory Definition }
+  TDefUnitDirectory = packed record
+    UnitCount: Word;        // number of units in directory
+    // Followed by UnitCount x TUnitEntry (each with trailing name)
+  end;
+
   TEnumMemberArray = array of TEnumMember;
   TInterfaceMethodDescriptorArray = array of TInterfaceMethodDescriptor;
 
@@ -347,8 +364,9 @@ begin
     recFunctionScope: Result := 'FunctionScope';
     recInterface:  Result := 'Interface';
     recEnum:       Result := 'Enum';
-    recSet:        Result := 'Set';
-    else           Result := 'Unknown';
+    recSet:           Result := 'Set';
+    recUnitDirectory: Result := 'UnitDirectory';
+    else              Result := 'Unknown';
   end;
 end;
 

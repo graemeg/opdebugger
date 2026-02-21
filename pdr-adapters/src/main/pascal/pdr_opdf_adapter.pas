@@ -318,9 +318,19 @@ begin
     WriteLn('[INFO] Total records: ', FHeader.TotalRecords);
   end;
 
-  // Read all records and cache them
+  // Read all records and cache them.
+  // The .opdf section contains one OPDF header per compilation unit (linker-concatenated).
+  // When we encounter a header, skip it and continue reading records.
   while not FReader.AtEnd do
   begin
+    { Check if we're at another OPDF header (next compilation unit) }
+    if FReader.TryReadNextHeader then
+    begin
+      if gVerbose then
+        WriteLn('[DEBUG] Skipped OPDF header at offset 0x', IntToHex(FStream.Position - SizeOf(TOPDFHeader), 1));
+      Continue;
+    end;
+
     if not FReader.ReadRecordHeader(RecHeader) then
       Break;
 
@@ -334,23 +344,27 @@ begin
         begin
           if FReader.ReadPrimitive(DefPrimitive, TypeName) then
           begin
-            New(PType);
-            FillChar(PType^, SizeOf(TTypeInfo), 0);
-            PType^.TypeID := DefPrimitive.TypeID;
-            PType^.Name := TypeName;
-            PType^.Size := DefPrimitive.SizeInBytes;
-            PType^.IsSigned := DefPrimitive.IsSigned <> 0;
-            PType^.MaxLength := 0;
+            { Deduplicate: skip if TypeID already loaded from an earlier unit }
+            if FTypes.Find(IntToStr(DefPrimitive.TypeID)) = nil then
+            begin
+              New(PType);
+              FillChar(PType^, SizeOf(TTypeInfo), 0);
+              PType^.TypeID := DefPrimitive.TypeID;
+              PType^.Name := TypeName;
+              PType^.Size := DefPrimitive.SizeInBytes;
+              PType^.IsSigned := DefPrimitive.IsSigned <> 0;
+              PType^.MaxLength := 0;
 
-            { Detect float types by name — FPC emits them as primitives }
-            if (TypeName = 'Single') or (TypeName = 'Double') or
-               (TypeName = 'Extended') or (TypeName = 'Currency') or
-               (TypeName = 'Comp') or (TypeName = 'Real') then
-              PType^.Category := tcFloat
-            else
-              PType^.Category := tcPrimitive;
+              { Detect float types by name — FPC emits them as primitives }
+              if (TypeName = 'Single') or (TypeName = 'Double') or
+                 (TypeName = 'Extended') or (TypeName = 'Currency') or
+                 (TypeName = 'Comp') or (TypeName = 'Real') then
+                PType^.Category := tcFloat
+              else
+                PType^.Category := tcPrimitive;
 
-            FTypes.Add(IntToStr(DefPrimitive.TypeID), PType);
+              FTypes.Add(IntToStr(DefPrimitive.TypeID), PType);
+            end;
           end;
         end;
 
@@ -358,16 +372,19 @@ begin
         begin
           if FReader.ReadShortString(DefShortString, TypeName) then
           begin
-            New(PType);
-            FillChar(PType^, SizeOf(TTypeInfo), 0);
-            PType^.TypeID := DefShortString.TypeID;
-            PType^.Name := TypeName;
-            PType^.Size := DefShortString.MaxLength + 1; // Length byte + data
-            PType^.IsSigned := False;
-            PType^.Category := tcShortString;
-            PType^.MaxLength := DefShortString.MaxLength;
+            if FTypes.Find(IntToStr(DefShortString.TypeID)) = nil then
+            begin
+              New(PType);
+              FillChar(PType^, SizeOf(TTypeInfo), 0);
+              PType^.TypeID := DefShortString.TypeID;
+              PType^.Name := TypeName;
+              PType^.Size := DefShortString.MaxLength + 1; // Length byte + data
+              PType^.IsSigned := False;
+              PType^.Category := tcShortString;
+              PType^.MaxLength := DefShortString.MaxLength;
 
-            FTypes.Add(IntToStr(DefShortString.TypeID), PType);
+              FTypes.Add(IntToStr(DefShortString.TypeID), PType);
+            end;
           end;
         end;
 
@@ -375,16 +392,19 @@ begin
         begin
           if FReader.ReadAnsiString(DefAnsiString, TypeName) then
           begin
-            New(PType);
-            FillChar(PType^, SizeOf(TTypeInfo), 0);
-            PType^.TypeID := DefAnsiString.TypeID;
-            PType^.Name := TypeName;
-            PType^.Size := 8; // Pointer size (64-bit)
-            PType^.IsSigned := False;
-            PType^.Category := tcAnsiString;
-            PType^.MaxLength := 0;
+            if FTypes.Find(IntToStr(DefAnsiString.TypeID)) = nil then
+            begin
+              New(PType);
+              FillChar(PType^, SizeOf(TTypeInfo), 0);
+              PType^.TypeID := DefAnsiString.TypeID;
+              PType^.Name := TypeName;
+              PType^.Size := 8; // Pointer size (64-bit)
+              PType^.IsSigned := False;
+              PType^.Category := tcAnsiString;
+              PType^.MaxLength := 0;
 
-            FTypes.Add(IntToStr(DefAnsiString.TypeID), PType);
+              FTypes.Add(IntToStr(DefAnsiString.TypeID), PType);
+            end;
           end;
         end;
 
@@ -392,20 +412,23 @@ begin
         begin
           if FReader.ReadUnicodeString(DefUnicodeString, TypeName) then
           begin
-            New(PType);
-            FillChar(PType^, SizeOf(TTypeInfo), 0);
-            PType^.TypeID := DefUnicodeString.TypeID;
-            PType^.Name := TypeName;
-            PType^.Size := 8; // Pointer size (64-bit)
-            PType^.IsSigned := False;
-            // Distinguish UnicodeString vs WideString by name
-            if Pos('Wide', TypeName) > 0 then
-              PType^.Category := tcWideString
-            else
-              PType^.Category := tcUnicodeString;
-            PType^.MaxLength := 0;
+            if FTypes.Find(IntToStr(DefUnicodeString.TypeID)) = nil then
+            begin
+              New(PType);
+              FillChar(PType^, SizeOf(TTypeInfo), 0);
+              PType^.TypeID := DefUnicodeString.TypeID;
+              PType^.Name := TypeName;
+              PType^.Size := 8; // Pointer size (64-bit)
+              PType^.IsSigned := False;
+              // Distinguish UnicodeString vs WideString by name
+              if Pos('Wide', TypeName) > 0 then
+                PType^.Category := tcWideString
+              else
+                PType^.Category := tcUnicodeString;
+              PType^.MaxLength := 0;
 
-            FTypes.Add(IntToStr(DefUnicodeString.TypeID), PType);
+              FTypes.Add(IntToStr(DefUnicodeString.TypeID), PType);
+            end;
           end;
         end;
 
@@ -443,31 +466,34 @@ begin
         begin
           if FReader.ReadClass(DefClass, TypeName, ClassFields, ClassFieldNames) then
           begin
-            New(PType);
-            FillChar(PType^, SizeOf(TTypeInfo), 0);
-            PType^.TypeID := DefClass.TypeID;
-            PType^.Name := TypeName;
-            PType^.Size := 8;  // Classes are pointers
-            PType^.IsSigned := False;
-            PType^.Category := tcClass;
-            PType^.MaxLength := 0;
-
-            // Allocate and populate ClassInfo
-            New(PType^.ClassInfo);
-            PType^.ClassInfo^.ParentTypeID := DefClass.ParentTypeID;
-            PType^.ClassInfo^.VMTAddress := DefClass.VMTAddress;
-            PType^.ClassInfo^.InstanceSize := DefClass.InstanceSize;
-
-            // Copy field information
-            SetLength(PType^.ClassInfo^.Fields, DefClass.FieldCount);
-            for I := 0 to DefClass.FieldCount - 1 do
+            if FTypes.Find(IntToStr(DefClass.TypeID)) = nil then
             begin
-              PType^.ClassInfo^.Fields[I].Name := ClassFieldNames[I];
-              PType^.ClassInfo^.Fields[I].TypeID := ClassFields[I].FieldTypeID;
-              PType^.ClassInfo^.Fields[I].Offset := ClassFields[I].Offset;
-            end;
+              New(PType);
+              FillChar(PType^, SizeOf(TTypeInfo), 0);
+              PType^.TypeID := DefClass.TypeID;
+              PType^.Name := TypeName;
+              PType^.Size := 8;  // Classes are pointers
+              PType^.IsSigned := False;
+              PType^.Category := tcClass;
+              PType^.MaxLength := 0;
 
-            FTypes.Add(IntToStr(DefClass.TypeID), PType);
+              // Allocate and populate ClassInfo
+              New(PType^.ClassInfo);
+              PType^.ClassInfo^.ParentTypeID := DefClass.ParentTypeID;
+              PType^.ClassInfo^.VMTAddress := DefClass.VMTAddress;
+              PType^.ClassInfo^.InstanceSize := DefClass.InstanceSize;
+
+              // Copy field information
+              SetLength(PType^.ClassInfo^.Fields, DefClass.FieldCount);
+              for I := 0 to DefClass.FieldCount - 1 do
+              begin
+                PType^.ClassInfo^.Fields[I].Name := ClassFieldNames[I];
+                PType^.ClassInfo^.Fields[I].TypeID := ClassFields[I].FieldTypeID;
+                PType^.ClassInfo^.Fields[I].Offset := ClassFields[I].Offset;
+              end;
+
+              FTypes.Add(IntToStr(DefClass.TypeID), PType);
+            end;
           end;
         end;
 
@@ -514,29 +540,32 @@ begin
         begin
           if FReader.ReadArray(DefArray, TypeName) then
           begin
-            New(PType);
-            FillChar(PType^, SizeOf(TTypeInfo), 0);
-            PType^.TypeID := DefArray.TypeID;
-            PType^.Name := TypeName;
-            PType^.Size := 0;  // Arrays have variable size
-            PType^.IsSigned := False;
-            PType^.Category := tcArray;
-            PType^.MaxLength := 0;
-            PType^.ElementTypeID := DefArray.ElementTypeID;
-            PType^.IsDynamic := DefArray.IsDynamic <> 0;
-            PType^.Dimensions := DefArray.Dimensions;
-
-            { Read bounds for static arrays }
-            if (DefArray.IsDynamic = 0) and (DefArray.Dimensions > 0) then
+            if FTypes.Find(IntToStr(DefArray.TypeID)) = nil then
             begin
-              SetLength(PType^.Bounds, DefArray.Dimensions);
-              for I := 0 to DefArray.Dimensions - 1 do
-                FStream.Read(PType^.Bounds[I], SizeOf(TArrayBound));
-            end
-            else
-              SetLength(PType^.Bounds, 0);
+              New(PType);
+              FillChar(PType^, SizeOf(TTypeInfo), 0);
+              PType^.TypeID := DefArray.TypeID;
+              PType^.Name := TypeName;
+              PType^.Size := 0;  // Arrays have variable size
+              PType^.IsSigned := False;
+              PType^.Category := tcArray;
+              PType^.MaxLength := 0;
+              PType^.ElementTypeID := DefArray.ElementTypeID;
+              PType^.IsDynamic := DefArray.IsDynamic <> 0;
+              PType^.Dimensions := DefArray.Dimensions;
 
-            FTypes.Add(IntToStr(DefArray.TypeID), PType);
+              { Read bounds for static arrays }
+              if (DefArray.IsDynamic = 0) and (DefArray.Dimensions > 0) then
+              begin
+                SetLength(PType^.Bounds, DefArray.Dimensions);
+                for I := 0 to DefArray.Dimensions - 1 do
+                  FStream.Read(PType^.Bounds[I], SizeOf(TArrayBound));
+              end
+              else
+                SetLength(PType^.Bounds, 0);
+
+              FTypes.Add(IntToStr(DefArray.TypeID), PType);
+            end;
           end;
         end;
 
@@ -544,17 +573,20 @@ begin
         begin
           if FReader.ReadPointer(DefPointer, TypeName) then
           begin
-            New(PType);
-            FillChar(PType^, SizeOf(TTypeInfo), 0);
-            PType^.TypeID := DefPointer.TypeID;
-            PType^.Name := TypeName;
-            PType^.Size := 8;  // Pointer size (64-bit)
-            PType^.IsSigned := False;
-            PType^.Category := tcPointer;
-            PType^.MaxLength := 0;
-            PType^.PointerTo := DefPointer.TargetTypeID;
+            if FTypes.Find(IntToStr(DefPointer.TypeID)) = nil then
+            begin
+              New(PType);
+              FillChar(PType^, SizeOf(TTypeInfo), 0);
+              PType^.TypeID := DefPointer.TypeID;
+              PType^.Name := TypeName;
+              PType^.Size := 8;  // Pointer size (64-bit)
+              PType^.IsSigned := False;
+              PType^.Category := tcPointer;
+              PType^.MaxLength := 0;
+              PType^.PointerTo := DefPointer.TargetTypeID;
 
-            FTypes.Add(IntToStr(DefPointer.TypeID), PType);
+              FTypes.Add(IntToStr(DefPointer.TypeID), PType);
+            end;
           end;
         end;
 
@@ -562,27 +594,30 @@ begin
         begin
           if FReader.ReadRecord(DefRecord, TypeName, RecordFields, RecordFieldNames) then
           begin
-            New(PType);
-            FillChar(PType^, SizeOf(TTypeInfo), 0);
-            PType^.TypeID := DefRecord.TypeID;
-            PType^.Name := TypeName;
-            PType^.Size := DefRecord.TotalSize;
-            PType^.IsSigned := False;
-            PType^.Category := tcRecord;
-            PType^.MaxLength := 0;
-
-            { Allocate and populate RecordInfo }
-            New(PType^.RecordInfo);
-            PType^.RecordInfo^.TotalSize := DefRecord.TotalSize;
-            SetLength(PType^.RecordInfo^.Fields, DefRecord.FieldCount);
-            for I := 0 to DefRecord.FieldCount - 1 do
+            if FTypes.Find(IntToStr(DefRecord.TypeID)) = nil then
             begin
-              PType^.RecordInfo^.Fields[I].Name := RecordFieldNames[I];
-              PType^.RecordInfo^.Fields[I].TypeID := RecordFields[I].FieldTypeID;
-              PType^.RecordInfo^.Fields[I].Offset := RecordFields[I].Offset;
-            end;
+              New(PType);
+              FillChar(PType^, SizeOf(TTypeInfo), 0);
+              PType^.TypeID := DefRecord.TypeID;
+              PType^.Name := TypeName;
+              PType^.Size := DefRecord.TotalSize;
+              PType^.IsSigned := False;
+              PType^.Category := tcRecord;
+              PType^.MaxLength := 0;
 
-            FTypes.Add(IntToStr(DefRecord.TypeID), PType);
+              { Allocate and populate RecordInfo }
+              New(PType^.RecordInfo);
+              PType^.RecordInfo^.TotalSize := DefRecord.TotalSize;
+              SetLength(PType^.RecordInfo^.Fields, DefRecord.FieldCount);
+              for I := 0 to DefRecord.FieldCount - 1 do
+              begin
+                PType^.RecordInfo^.Fields[I].Name := RecordFieldNames[I];
+                PType^.RecordInfo^.Fields[I].TypeID := RecordFields[I].FieldTypeID;
+                PType^.RecordInfo^.Fields[I].Offset := RecordFields[I].Offset;
+              end;
+
+              FTypes.Add(IntToStr(DefRecord.TypeID), PType);
+            end;
           end;
         end;
 
@@ -590,24 +625,27 @@ begin
         begin
           if FReader.ReadEnum(DefEnum, TypeName, EnumMembers, EnumMemberNames) then
           begin
-            New(PType);
-            FillChar(PType^, SizeOf(TTypeInfo), 0);
-            PType^.TypeID := DefEnum.TypeID;
-            PType^.Name := TypeName;
-            PType^.Size := DefEnum.SizeInBytes;
-            PType^.IsSigned := False;
-            PType^.Category := tcEnum;
-            PType^.MaxLength := 0;
-
-            { Store enum members for display }
-            SetLength(PType^.EnumMembers, DefEnum.MemberCount);
-            for I := 0 to DefEnum.MemberCount - 1 do
+            if FTypes.Find(IntToStr(DefEnum.TypeID)) = nil then
             begin
-              PType^.EnumMembers[I].Name := EnumMemberNames[I];
-              PType^.EnumMembers[I].Value := EnumMembers[I].Value;
-            end;
+              New(PType);
+              FillChar(PType^, SizeOf(TTypeInfo), 0);
+              PType^.TypeID := DefEnum.TypeID;
+              PType^.Name := TypeName;
+              PType^.Size := DefEnum.SizeInBytes;
+              PType^.IsSigned := False;
+              PType^.Category := tcEnum;
+              PType^.MaxLength := 0;
 
-            FTypes.Add(IntToStr(DefEnum.TypeID), PType);
+              { Store enum members for display }
+              SetLength(PType^.EnumMembers, DefEnum.MemberCount);
+              for I := 0 to DefEnum.MemberCount - 1 do
+              begin
+                PType^.EnumMembers[I].Name := EnumMemberNames[I];
+                PType^.EnumMembers[I].Value := EnumMembers[I].Value;
+              end;
+
+              FTypes.Add(IntToStr(DefEnum.TypeID), PType);
+            end;
           end;
         end;
 
@@ -615,17 +653,20 @@ begin
         begin
           if FReader.ReadSet(DefSet, TypeName) then
           begin
-            New(PType);
-            FillChar(PType^, SizeOf(TTypeInfo), 0);
-            PType^.TypeID := DefSet.TypeID;
-            PType^.Name := TypeName;
-            PType^.Size := DefSet.SizeInBytes;
-            PType^.IsSigned := False;
-            PType^.Category := tcSet;
-            PType^.ElementTypeID := DefSet.BaseTypeID;
-            PType^.SetLowerBound := DefSet.LowerBound;
+            if FTypes.Find(IntToStr(DefSet.TypeID)) = nil then
+            begin
+              New(PType);
+              FillChar(PType^, SizeOf(TTypeInfo), 0);
+              PType^.TypeID := DefSet.TypeID;
+              PType^.Name := TypeName;
+              PType^.Size := DefSet.SizeInBytes;
+              PType^.IsSigned := False;
+              PType^.Category := tcSet;
+              PType^.ElementTypeID := DefSet.BaseTypeID;
+              PType^.SetLowerBound := DefSet.LowerBound;
 
-            FTypes.Add(IntToStr(DefSet.TypeID), PType);
+              FTypes.Add(IntToStr(DefSet.TypeID), PType);
+            end;
           end;
         end;
 
@@ -671,24 +712,34 @@ begin
         begin
           if FReader.ReadInterface(DefInterface, TypeName, IntfMethods, IntfMethodNames) then
           begin
-            New(PType);
-            FillChar(PType^, SizeOf(TTypeInfo), 0);
-            PType^.TypeID := DefInterface.TypeID;
-            PType^.Name := TypeName;
-            PType^.Size := 8;  // Interface is a pointer
-            PType^.IsSigned := False;
-            PType^.Category := tcInterface;
-            PType^.MaxLength := 0;
+            if FTypes.Find(IntToStr(DefInterface.TypeID)) = nil then
+            begin
+              New(PType);
+              FillChar(PType^, SizeOf(TTypeInfo), 0);
+              PType^.TypeID := DefInterface.TypeID;
+              PType^.Name := TypeName;
+              PType^.Size := 8;  // Interface is a pointer
+              PType^.IsSigned := False;
+              PType^.Category := tcInterface;
+              PType^.MaxLength := 0;
 
-            New(PType^.InterfaceInfo);
-            PType^.InterfaceInfo^.ParentTypeID := DefInterface.ParentTypeID;
-            PType^.InterfaceInfo^.IntfType := DefInterface.IntfType;
-            SetLength(PType^.InterfaceInfo^.Methods, Length(IntfMethodNames));
-            for I := 0 to High(IntfMethodNames) do
-              PType^.InterfaceInfo^.Methods[I] := IntfMethodNames[I];
+              New(PType^.InterfaceInfo);
+              PType^.InterfaceInfo^.ParentTypeID := DefInterface.ParentTypeID;
+              PType^.InterfaceInfo^.IntfType := DefInterface.IntfType;
+              SetLength(PType^.InterfaceInfo^.Methods, Length(IntfMethodNames));
+              for I := 0 to High(IntfMethodNames) do
+                PType^.InterfaceInfo^.Methods[I] := IntfMethodNames[I];
 
-            FTypes.Add(IntToStr(DefInterface.TypeID), PType);
+              FTypes.Add(IntToStr(DefInterface.TypeID), PType);
+            end;
           end;
+        end;
+
+      recUnitDirectory:
+        begin
+          { unit directory is informational - skip via seek below }
+          if gVerbose then
+            WriteLn('[DEBUG] Skipping UnitDirectory record');
         end;
 
       else

@@ -685,7 +685,19 @@ begin
   Locals := FDebugInfoReader.GetScopeLocals(RIP);
   SetLength(Result, Length(Locals));
   for I := 0 to High(Locals) do
-    Result[I] := FTypeSystem.EvaluateVariableInfo(Locals[I]);
+  begin
+    try
+      Result[I] := FTypeSystem.EvaluateVariableInfo(Locals[I]);
+    except
+      on E: Exception do
+      begin
+        Result[I].Name := Locals[I].Name;
+        Result[I].Value := '<error: ' + E.Message + '>';
+        Result[I].TypeName := '';
+        Result[I].IsValid := False;
+      end;
+    end;
+  end;
 end;
 
 function TDebuggerEngine.GetInspectLines(const Expr: String): TStringArray;

@@ -1,8 +1,7 @@
 run
 break test_05_properties.pas:85
+break test_05_properties.pas:92
 continue
 print instance
 print baseinstance
-break test_05_properties.pas:92
-continue
 quit
