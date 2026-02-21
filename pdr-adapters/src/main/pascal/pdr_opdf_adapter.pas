@@ -398,7 +398,7 @@ begin
               FillChar(PType^, SizeOf(TTypeInfo), 0);
               PType^.TypeID := DefAnsiString.TypeID;
               PType^.Name := TypeName;
-              PType^.Size := 8; // Pointer size (64-bit)
+              PType^.Size := FHeader.PointerSize;
               PType^.IsSigned := False;
               PType^.Category := tcAnsiString;
               PType^.MaxLength := 0;
@@ -418,7 +418,7 @@ begin
               FillChar(PType^, SizeOf(TTypeInfo), 0);
               PType^.TypeID := DefUnicodeString.TypeID;
               PType^.Name := TypeName;
-              PType^.Size := 8; // Pointer size (64-bit)
+              PType^.Size := FHeader.PointerSize;
               PType^.IsSigned := False;
               // Distinguish UnicodeString vs WideString by name
               if Pos('Wide', TypeName) > 0 then
@@ -472,7 +472,7 @@ begin
               FillChar(PType^, SizeOf(TTypeInfo), 0);
               PType^.TypeID := DefClass.TypeID;
               PType^.Name := TypeName;
-              PType^.Size := 8;  // Classes are pointers
+              PType^.Size := FHeader.PointerSize;  // Classes are pointers
               PType^.IsSigned := False;
               PType^.Category := tcClass;
               PType^.MaxLength := 0;
@@ -579,7 +579,7 @@ begin
               FillChar(PType^, SizeOf(TTypeInfo), 0);
               PType^.TypeID := DefPointer.TypeID;
               PType^.Name := TypeName;
-              PType^.Size := 8;  // Pointer size (64-bit)
+              PType^.Size := FHeader.PointerSize;
               PType^.IsSigned := False;
               PType^.Category := tcPointer;
               PType^.MaxLength := 0;
@@ -718,7 +718,7 @@ begin
               FillChar(PType^, SizeOf(TTypeInfo), 0);
               PType^.TypeID := DefInterface.TypeID;
               PType^.Name := TypeName;
-              PType^.Size := 8;  // Interface is a pointer
+              PType^.Size := FHeader.PointerSize;  // Interface is a pointer
               PType^.IsSigned := False;
               PType^.Category := tcInterface;
               PType^.MaxLength := 0;

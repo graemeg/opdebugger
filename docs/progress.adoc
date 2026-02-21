@@ -159,13 +159,13 @@ Results: 104 units, 1.1x dedup ratio (down from 3.4x), 6.4 MB section size.
 
 Full specification: `docs/phase3-plan.adoc`
 
-=== Prerequisite: OPDF Format Fix
+=== Prerequisite: OPDF Format Fix — DONE
 
 * [x] Add `PointerSize: Byte` to `TOPDFHeader` in `opdf_types.pas`
 * [x] Emit `SizeOf(Pointer)` into that field in `dbgopdf.pas`
-* [ ] Update `opdf_io.pas` reader to use header pointer size for address fields
-* [ ] Update `pdr_opdf_adapter.pas` to derive pointer size from the loaded header
-* [ ] Rebuild all integration test binaries after format change
+* [x] `opdf_io.pas` reader — N/A, binary format uses QWord for all address fields
+* [x] Update `pdr_opdf_adapter.pas` to derive pointer size from the loaded header
+* [x] All integration tests passing (no binary format change — field was already emitted)
 
 === Tier 1: High Value, Lower Complexity
 
