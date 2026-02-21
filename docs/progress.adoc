@@ -1,7 +1,7 @@
 = OPDF Project Progress Tracker
 :toc: left
 :toclevels: 3
-:date: 2026-02-19
+:date: 2026-02-20
 
 == Overview
 
@@ -23,6 +23,7 @@ project, covering both the standalone debugger toolchain and the FPC compiler in
 * [x] Feature 3: `print <arr>[N..M]` — array slice display with out-of-bounds clamping
 * [x] Feature 4: `set <var> = <value>` — in-process variable assignment (primitives and enums)
 * [x] Integration tests 14–18 covering all four features; 18/18 automated tests passing
+* [x] Sentinel breakpoint pattern applied to all tests (prevents program output mixing with debugger output on detach)
 
 === Standalone Debugger (Phases 0–2)
 
@@ -62,7 +63,10 @@ project, covering both the standalone debugger toolchain and the FPC compiler in
 * [x] All symbol handlers: global var, local var, parameter, property, function scope
 * [x] Line information: per-procedure labels, accumulated in FLineInfoList, merged at inserttypeinfo
 * [x] Embedded `.opdf` ELF section — linker resolves all symbol references
-* [x] Verified: 481 types, 16 variables, 4 function scopes, 61 line mappings in test binary
+* [x] Cross-module type dedup via global state (`G_TypeMapper`, `G_EmittedTypeIDs`)
+* [x] Unit directory record (type 19) — indexes per-unit data sizes
+* [x] Method scopes emitted independently of parent class dedup state
+* [x] Verified: 104-unit project loads 24K types, 1K scopes, 70K line mappings
 
 === Design Decisions (Resolved)
 
@@ -100,48 +104,54 @@ project, covering both the standalone debugger toolchain and the FPC compiler in
 
 ---
 
-== Priority: OPDF Scalability Redesign (v0.3.0)
+== Priority: OPDF Scalability (Completed)
 
-Multi-unit testing with a 93-unit project (maximus) revealed critical scalability issues
-in the v0.2.0 format: 3.4x type duplication (25,652 records for 7,540 unique types),
-no directory structure, and O(n) linear scans. At Lazarus scale (3000+ units), this
-projected to ~147 MB section size and ~266 MB reader memory.
+Multi-unit testing with a 104-unit project (maximus) revealed scalability concerns:
+3.4x type duplication (25,652 records for 7,540 unique types) and O(n) linear scans.
 
-Analysis of STABS, DWARF, TD32, and PDB formats confirmed that a global type pool
-(as used by TD32 and PDB) and directory-based indexed access are the correct approach.
-See `docs/opdf-specification.adoc` Appendix A for the full comparison.
+**Solution: compiler-side cross-module type dedup + reader-side multi-header support.**
+FPC creates a new `TOPDFDebugWriter` instance per compilation unit, so dedup state
+(`G_TypeMapper`, `G_EmittedTypeIDs`) is stored in global variables that persist across
+modules. Each unit still gets its own OPDF header (required by linker section
+concatenation), but types are only emitted once across all units. A `UnitDirectory`
+record (type 19) is emitted at the end of the main program module to index all units.
 
-=== Step 1: FPC Compiler — Single Header + Global Type Pool
+Results: 104 units, 1.1x dedup ratio (down from 3.4x), 6.4 MB section size.
+
+=== Diagnostics
 
 * [x] opdf_dump diagnostic tool (Pascal, raw stream parsing, multi-header detection)
 * [x] OPDF spec updated to v0.3.0 with multi-unit design and format comparison
 * [x] Progress tracker updated with scalability work items
-* [ ] Emit single `TOPDFHeader` at start of first `inserttypeinfo` call only
-* [ ] Track emitted TypeIDs in `TOPDFDebugWriter`; skip duplicates on subsequent units
-* [ ] `TotalRecords` reflects the global count across all units
 
-=== Step 2: FPC Compiler — Unit Directory + Per-Unit Grouping
+=== Compiler: Cross-Module Type Dedup (Completed)
 
-* [ ] Define `TDefUnitDirectory` and `TUnitEntry` packed records in `dbgopdf.pas`
-* [ ] Emit `recUnitDirectory` as the first record after the header
-* [ ] Populate unit names and byte offsets as each unit's records are emitted
-* [ ] Records from each unit emitted contiguously (already the case per-call)
+* [x] Global `G_TypeMapper` — consistent TypeIDs across compilation units
+* [x] Global `G_EmittedTypeIDs` — skip duplicate type emission across modules
+* [x] `TypeAlreadyEmitted` guard in all 14 `appenddef_*` methods
+* [x] Per-unit byte counting via `G_ByteCounter` for unit directory
+* [x] `recUnitDirectory` (type 19) emitted at end of main program module
+* [x] `OPDF_FLAG_HAS_DIRECTORY` header flag
+* [x] Method scopes emitted independently of parent class dedup state
 
-=== Step 3: Reader — Handle New Format
+=== Reader: Multi-Header + Deduplication (Completed)
 
-* [ ] Update `TOPDFReader` (`opdf_io.pas`) to read single header + directory
-* [ ] Parse `recUnitDirectory` for unit index
-* [ ] Skip duplicate TypeIDs during reading (defensive, should not occur with v0.3.0 emitter)
-* [ ] Store line info and function scopes in sorted arrays for binary search
-* [ ] Intern repeated filename strings to reduce memory allocation
+* [x] `TryReadNextHeader` in `TOPDFReader` — scans past linker alignment padding bytes
+* [x] Multi-header loop in `TOPDFReaderAdapter.Load` — processes all linker-concatenated units
+* [x] Type deduplication — all type record handlers check `FTypes.Find(TypeID)` before allocation
+* [x] `recUnitDirectory` handling in adapter (skip) and opdf_dump (decode)
+* [x] Recursion depth limit in `EvaluateVariableInfo` — prevents segfault on deep class hierarchies
+* [x] Stack variable address computation in `ResolveFieldAccess` — fixes inspect for locals
+* [ ] Sorted arrays for line info and function scopes — O(log n) binary search
+* [ ] Filename string interning — avoid duplicate allocations for repeated source paths
 
-=== Step 4: Verification
+=== Verification (Completed)
 
-* [ ] Rebuild FPC compiler with changes
-* [ ] Recompile maximus with new compiler
-* [ ] Verify with opdf_dump: single header, no duplicate types, directory present
-* [ ] Run all 18 integration tests — must pass
-* [ ] Test pdr debugger against maximus: breakpoints, locals, inspect all working
+* [x] FPC compiler rebuilt with cross-module dedup changes
+* [x] Recompile maximus with new compiler — 104 units, 24K types, 1K scopes, 70K lines
+* [x] Verify with opdf_dump: 104 headers parsed, 1.1x dedup ratio, UnitDirectory present
+* [x] Run all 18 integration tests — all passing
+* [x] Test pdr debugger against maximus: breakpoints, locals, inspect all working
 
 ---
 
@@ -151,8 +161,8 @@ Full specification: `docs/phase3-plan.adoc`
 
 === Prerequisite: OPDF Format Fix
 
-* [ ] Add `PointerSize: Byte` to `TOPDFHeader` in `opdf_types.pas`
-* [ ] Emit `SizeOf(Pointer)` into that field in `dbgopdf.pas`
+* [x] Add `PointerSize: Byte` to `TOPDFHeader` in `opdf_types.pas`
+* [x] Emit `SizeOf(Pointer)` into that field in `dbgopdf.pas`
 * [ ] Update `opdf_io.pas` reader to use header pointer size for address fields
 * [ ] Update `pdr_opdf_adapter.pas` to derive pointer size from the loaded header
 * [ ] Rebuild all integration test binaries after format change
