@@ -1185,21 +1185,27 @@ begin
       FuncScope := PFunctionScope(FFunctionScopes[I]);
       if FuncScope^.ScopeID = ScopeID then
         Continue;
-      Locals := FindLocalVariablesInScope(FuncScope^.ScopeID);
-      if Length(Locals) > 0 then
+
+      { Heuristic: an ancestor's DeclIndex is larger than a child's.
+        This filters out descendants and unrelated scopes. }
+      if FuncScope^.DeclIndex > CurScope^.DeclIndex then
       begin
-        for J := 0 to High(Locals) do
+        Locals := FindLocalVariablesInScope(FuncScope^.ScopeID);
+        if Length(Locals) > 0 then
         begin
-          { Only include variables declared before this nested procedure }
-          if Locals[J].DeclIndex < CurDeclIndex then
+          for J := 0 to High(Locals) do
           begin
-            Count := Length(Result);
-            SetLength(Result, Count + 1);
-            Result[Count].Name := Locals[J].Name;
-            Result[Count].TypeID := Locals[J].TypeID;
-            Result[Count].Address := 0;
-            Result[Count].LocationExpr := 2; { Parent frame RBP-relative }
-            Result[Count].LocationData := Locals[J].LocationData;
+            { Only include variables declared before this nested procedure }
+            if Locals[J].DeclIndex < CurDeclIndex then
+            begin
+              Count := Length(Result);
+              SetLength(Result, Count + 1);
+              Result[Count].Name := Locals[J].Name;
+              Result[Count].TypeID := Locals[J].TypeID;
+              Result[Count].Address := 0;
+              Result[Count].LocationExpr := 2; { Parent frame RBP-relative }
+              Result[Count].LocationData := Locals[J].LocationData;
+            end;
           end;
         end;
       end;
