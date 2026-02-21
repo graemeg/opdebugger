@@ -1136,7 +1136,9 @@ begin
   Result.IsValid := False;
 
   { Find the base variable }
-  RIP := FProcessController.GetCurrentAddress;
+  RIP := FProcessController.GetLastBreakpointAddress;
+  if RIP = 0 then
+    RIP := FProcessController.GetCurrentAddress;
   if RIP <> 0 then
   begin
     if not FDebugInfoReader.FindVariableWithScope(BaseName, RIP, VarInfo) then
@@ -1150,6 +1152,34 @@ begin
   begin
     Result.Value := '<error: variable not found>';
     Exit;
+  end;
+
+  { Compute actual address for stack-based variables (same as EvaluateVariableInfo) }
+  if VarInfo.LocationExpr = 1 then
+  begin
+    RIP := FProcessController.GetLastBreakpointAddress;
+    if RIP = 0 then
+      RIP := FProcessController.GetCurrentAddress;
+    InstancePtr := FProcessController.GetLastBreakpointRBP;
+    if InstancePtr = 0 then
+      InstancePtr := FProcessController.GetFrameBasePointer;
+    if InstancePtr <> 0 then
+      VarInfo.Address := InstancePtr + VarInfo.LocationData;
+  end
+  else if VarInfo.LocationExpr = 2 then
+  begin
+    InstancePtr := FProcessController.GetLastBreakpointRBP;
+    if InstancePtr = 0 then
+      InstancePtr := FProcessController.GetFrameBasePointer;
+    if InstancePtr <> 0 then
+    begin
+      FillChar(PointerBuf, SizeOf(PointerBuf), 0);
+      if FProcessController.ReadMemory(InstancePtr, 8, PointerBuf) then
+      begin
+        InstancePtr := PQWord(@PointerBuf)^;
+        VarInfo.Address := InstancePtr + VarInfo.LocationData;
+      end;
+    end;
   end;
 
   { Get type info for the base variable }
