@@ -215,6 +215,7 @@ type
     TypeID: TTypeID;          // 4 bytes
     ScopeID: Cardinal;        // 4 bytes (function/block scope)
     LocationExpr: Byte;       // 1 byte (location expression type)
+    DeclIndex: Word;          // 2 bytes (declaration order in parent scope)
     NameLen: TNameLen;        // 2 bytes
     // Followed by location data (register, stack offset, etc.)
     // Followed by Name (NameLen bytes)
@@ -244,6 +245,7 @@ type
     ScopeID: Cardinal;        // 4 bytes (function's low_pc)
     LowPC: QWord;             // 8 bytes (function start address)
     HighPC: QWord;            // 8 bytes (function end address)
+    DeclIndex: Word;          // 2 bytes (declaration order in parent scope)
     NameLen: TNameLen;        // 2 bytes (length of function name)
     // Followed by Name (NameLen bytes)
   end;

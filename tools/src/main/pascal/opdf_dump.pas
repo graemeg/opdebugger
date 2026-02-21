@@ -244,8 +244,8 @@ begin
   Stream.Read(Def, SizeOf(Def));
   Stream.Read(LocData, 1);
   Name := ReadString(Stream, Def.NameLen);
-  WriteLn(Format('    TypeID=%d ScopeID=0x%x LocExpr=%d LocData=%d Name="%s"',
-    [Def.TypeID, Def.ScopeID, Def.LocationExpr, LocData, Name]));
+  WriteLn(Format('    TypeID=%d ScopeID=0x%x LocExpr=%d DeclIdx=%d LocData=%d Name="%s"',
+    [Def.TypeID, Def.ScopeID, Def.LocationExpr, Def.DeclIndex, LocData, Name]));
 end;
 
 procedure DumpParameter(Stream: TStream);
@@ -278,8 +278,8 @@ var
 begin
   Stream.Read(Def, SizeOf(Def));
   Name := ReadString(Stream, Def.NameLen);
-  WriteLn(Format('    ScopeID=0x%x LowPC=0x%x HighPC=0x%x Name="%s"',
-    [Def.ScopeID, Def.LowPC, Def.HighPC, Name]));
+  WriteLn(Format('    ScopeID=0x%x LowPC=0x%x HighPC=0x%x DeclIdx=%d Name="%s"',
+    [Def.ScopeID, Def.LowPC, Def.HighPC, Def.DeclIndex, Name]));
 end;
 
 procedure DumpInterface(Stream: TStream);

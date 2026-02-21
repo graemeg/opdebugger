@@ -411,6 +411,7 @@ begin
   Payload.TypeID := TypeID;
   Payload.ScopeID := ScopeID;
   Payload.LocationExpr := LocationExpr;
+  Payload.DeclIndex := 0;
   Payload.NameLen := Length(VarName);
 
   RecHeader.RecType := Ord(recLocalVar);
@@ -541,6 +542,7 @@ begin
   Payload.ScopeID := ScopeID;
   Payload.LowPC := LowPC;
   Payload.HighPC := HighPC;
+  Payload.DeclIndex := 0;
   Payload.NameLen := Length(FunctionName);
 
   RecHeader.RecType := Ord(recFunctionScope);

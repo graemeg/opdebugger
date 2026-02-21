@@ -28,6 +28,7 @@ type
     LowPC: QWord;           // Start address of function
     HighPC: QWord;          // End address of function
     Name: String;           // Function name
+    DeclIndex: Word;        // Declaration order in parent scope
   end;
   PFunctionScope = ^TFunctionScope;
 
@@ -38,6 +39,7 @@ type
     ScopeID: Cardinal;      // Function scope ID
     LocationExpr: Byte;     // Location expression type (1=RBP-relative)
     LocationData: ShortInt; // RBP offset (signed)
+    DeclIndex: Word;        // Declaration order in parent scope
   end;
   PLocalVariableInfo = ^TLocalVariableInfo;
   TLocalVariableArray = array of TLocalVariableInfo;
@@ -516,6 +518,7 @@ begin
             PLocal^.ScopeID := DefLocalVar.ScopeID;
             PLocal^.LocationExpr := DefLocalVar.LocationExpr;
             PLocal^.LocationData := LocationData;
+            PLocal^.DeclIndex := DefLocalVar.DeclIndex;
 
             LocalList.Add(PLocal);
           end;
@@ -531,6 +534,7 @@ begin
             PScope^.LowPC := DefFunctionScope.LowPC;
             PScope^.HighPC := DefFunctionScope.HighPC;
             PScope^.Name := FunctionName;
+            PScope^.DeclIndex := DefFunctionScope.DeclIndex;
 
             FFunctionScopes.Add(PScope);
           end;
@@ -817,6 +821,7 @@ var
   SearchName: String;
   DemangledName: String;
   FuncScope: PFunctionScope;
+  CurDeclIndex: Word;
 begin
   Result := False;
 
@@ -856,32 +861,46 @@ begin
     { Not found in current scope — search enclosing scopes (for nested procedures).
       When a nested procedure accesses a variable from an outer procedure, the variable
       is located in the outer frame. We use LocationExpr=2 to signal that the address
-      must be computed via the saved RBP chain: parent_RBP = *(current_RBP). }
+      must be computed via the saved RBP chain: parent_RBP = *(current_RBP).
+      Only include variables declared before this nested procedure (DeclIndex filter). }
+    CurDeclIndex := 0;
     for I := 0 to FFunctionScopes.Count - 1 do
     begin
       FuncScope := PFunctionScope(FFunctionScopes[I]);
       if FuncScope^.ScopeID = ScopeID then
-        Continue; { Skip current scope — already searched }
-
-      Locals := FindLocalVariablesInScope(FuncScope^.ScopeID);
-      for J := 0 to High(Locals) do
       begin
-        LocalVar := Locals[J];
-        if LowerCase(LocalVar.Name) = SearchName then
-        begin
-          VarInfo.Name := LocalVar.Name;
-          VarInfo.TypeID := LocalVar.TypeID;
-          VarInfo.Address := 0;
-          VarInfo.LocationExpr := 2; { Parent frame RBP-relative }
-          VarInfo.LocationData := LocalVar.LocationData;
-          Result := True;
-          if gVerbose then
-            WriteLn('[DEBUG] Found enclosing scope var: ', LocalVar.Name,
-                    ' in ', FuncScope^.Name, ' LocationData=', LocalVar.LocationData);
-          Exit;
-        end;
+        CurDeclIndex := FuncScope^.DeclIndex;
+        Break;
       end;
     end;
+
+    if CurDeclIndex > 0 then
+      for I := 0 to FFunctionScopes.Count - 1 do
+      begin
+        FuncScope := PFunctionScope(FFunctionScopes[I]);
+        if FuncScope^.ScopeID = ScopeID then
+          Continue; { Skip current scope — already searched }
+
+        Locals := FindLocalVariablesInScope(FuncScope^.ScopeID);
+        for J := 0 to High(Locals) do
+        begin
+          LocalVar := Locals[J];
+          if (LowerCase(LocalVar.Name) = SearchName) and
+             (LocalVar.DeclIndex < CurDeclIndex) then
+          begin
+            VarInfo.Name := LocalVar.Name;
+            VarInfo.TypeID := LocalVar.TypeID;
+            VarInfo.Address := 0;
+            VarInfo.LocationExpr := 2; { Parent frame RBP-relative }
+            VarInfo.LocationData := LocalVar.LocationData;
+            Result := True;
+            if gVerbose then
+              WriteLn('[DEBUG] Found enclosing scope var: ', LocalVar.Name,
+                      ' in ', FuncScope^.Name, ' LocationData=', LocalVar.LocationData);
+            Exit;
+          end;
+        end;
+      end;
   end;
 
   { Fall back to global variables }
@@ -1115,7 +1134,9 @@ function TOPDFReaderAdapter.GetScopeLocals(RIP: QWord): TVariableInfoArray;
 var
   ScopeID: Cardinal;
   Locals: TLocalVariableArray;
-  I: Integer;
+  FuncScope, CurScope: PFunctionScope;
+  I, J, Count: Integer;
+  CurDeclIndex: Word;
 begin
   SetLength(Result, 0);
 
@@ -1126,16 +1147,63 @@ begin
   if ScopeID = 0 then
     Exit;
 
+  { Find the current function scope's DeclIndex }
+  CurScope := nil;
+  for I := 0 to FFunctionScopes.Count - 1 do
+  begin
+    FuncScope := PFunctionScope(FFunctionScopes[I]);
+    if FuncScope^.ScopeID = ScopeID then
+    begin
+      CurScope := FuncScope;
+      Break;
+    end;
+  end;
+  if CurScope = nil then
+    Exit;
+  CurDeclIndex := CurScope^.DeclIndex;
+
+  { Add locals from current scope }
   Locals := FindLocalVariablesInScope(ScopeID);
   SetLength(Result, Length(Locals));
   for I := 0 to High(Locals) do
   begin
     Result[I].Name := Locals[I].Name;
     Result[I].TypeID := Locals[I].TypeID;
-    Result[I].Address := 0;                 { computed from RBP + LocationData }
+    Result[I].Address := 0;
     Result[I].LocationExpr := Locals[I].LocationExpr;
     Result[I].LocationData := Locals[I].LocationData;
   end;
+
+  { Search enclosing scopes for variables declared before this nested procedure.
+    Only include variables whose DeclIndex < the current function's DeclIndex,
+    since Pascal scoping rules mean only variables declared before the nested
+    procedure are visible to it. Variables declared after are not accessible.
+    Skip if DeclIndex=0 (top-level procedure, no meaningful parent scope). }
+  if CurDeclIndex > 0 then
+    for I := 0 to FFunctionScopes.Count - 1 do
+    begin
+      FuncScope := PFunctionScope(FFunctionScopes[I]);
+      if FuncScope^.ScopeID = ScopeID then
+        Continue;
+      Locals := FindLocalVariablesInScope(FuncScope^.ScopeID);
+      if Length(Locals) > 0 then
+      begin
+        for J := 0 to High(Locals) do
+        begin
+          { Only include variables declared before this nested procedure }
+          if Locals[J].DeclIndex < CurDeclIndex then
+          begin
+            Count := Length(Result);
+            SetLength(Result, Count + 1);
+            Result[Count].Name := Locals[J].Name;
+            Result[Count].TypeID := Locals[J].TypeID;
+            Result[Count].Address := 0;
+            Result[Count].LocationExpr := 2; { Parent frame RBP-relative }
+            Result[Count].LocationData := Locals[J].LocationData;
+          end;
+        end;
+      end;
+    end;
 end;
 
 { Find function by address }
