@@ -67,11 +67,15 @@ begin
   WriteLn('  next, n        - Step to next source line');
   WriteLn('  step, s        - Single instruction step');
   WriteLn('  break <loc>    - Set breakpoint at location');
+  WriteLn('  break <loc> if count=N - Set breakpoint that fires on Nth hit');
   WriteLn('    Location formats:');
   WriteLn('      file.pas:22        - Source file and line number');
   WriteLn('      0x401000           - Hex address');
   WriteLn('      MyGlobalInt        - Variable name');
+  WriteLn('  condition <num> count=N - Set/change hit-count condition');
+  WriteLn('  condition <num>  - Remove condition (make unconditional)');
   WriteLn('  delete <num>   - Remove breakpoint by number');
+  WriteLn('  info breakpoints - List all breakpoints with conditions');
   WriteLn('  locals         - List all local variables in current scope');
   WriteLn('  locals globals - Also include global variables');
   WriteLn('  inspect <var>  - Show structured type layout with all fields/properties');
@@ -232,13 +236,30 @@ begin
       begin
         if Length(Parts) < 2 then
         begin
-          WriteLn('[ERROR] Usage: break <location>');
+          WriteLn('[ERROR] Usage: break <location> [if count=N]');
           WriteLn('[INFO] Location can be: hex address (0xNNNN), decimal address, or variable name');
           Exit;
         end;
 
         BpHandle := FEngine.SetBreakpoint(Parts[1]);
-        // Engine already prints success/error messages
+
+        { Check for 'if count=N' condition }
+        if (BpHandle >= 0) and (Length(Parts) >= 4) and
+           (LowerCase(Parts[2]) = 'if') then
+        begin
+          if (Length(Parts[3]) > 6) and
+             (LowerCase(Copy(Parts[3], 1, 6)) = 'count=') then
+          begin
+            if TryStrToInt(Copy(Parts[3], 7, Length(Parts[3])), BpNum) and
+               (BpNum > 0) then
+              FEngine.SetBreakpointCondition(BpHandle, bctHitCount, BpNum)
+            else
+              WriteLn('[ERROR] Invalid hit count: ', Copy(Parts[3], 7, Length(Parts[3])));
+          end
+          else
+            WriteLn('[ERROR] Unsupported condition: ', Parts[3],
+                    '. Use: count=N');
+        end;
       end;
 
     'delete', 'd':
@@ -257,6 +278,64 @@ begin
 
         FEngine.RemoveBreakpoint(BpNum);
         // Engine already prints success/error messages
+      end;
+
+    'condition', 'cond':
+      begin
+        if Length(Parts) < 2 then
+        begin
+          WriteLn('[ERROR] Usage: condition <bp-num> [count=N]');
+          Exit;
+        end;
+
+        if not TryStrToInt(Parts[1], BpNum) then
+        begin
+          WriteLn('[ERROR] Invalid breakpoint number: ', Parts[1]);
+          Exit;
+        end;
+
+        if Length(Parts) >= 3 then
+        begin
+          { Set condition: condition N count=K }
+          if (Length(Parts[2]) > 6) and
+             (LowerCase(Copy(Parts[2], 1, 6)) = 'count=') then
+          begin
+            if TryStrToInt(Copy(Parts[2], 7, Length(Parts[2])), Limit) and
+               (Limit > 0) then
+              FEngine.SetBreakpointCondition(BpNum, bctHitCount, Limit)
+            else
+              WriteLn('[ERROR] Invalid hit count: ', Copy(Parts[2], 7, Length(Parts[2])));
+          end
+          else
+            WriteLn('[ERROR] Unsupported condition: ', Parts[2],
+                    '. Use: count=N');
+        end
+        else
+        begin
+          { Remove condition: condition N }
+          FEngine.SetBreakpointCondition(BpNum, bctNone, 0);
+        end;
+      end;
+
+    'info':
+      begin
+        if (Length(Parts) >= 2) and
+           ((LowerCase(Parts[1]) = 'breakpoints') or
+            (LowerCase(Parts[1]) = 'break') or
+            (LowerCase(Parts[1]) = 'b')) then
+        begin
+          CallStack := FEngine.GetBreakpointList;
+          if Length(CallStack) = 0 then
+            WriteLn('[INFO] No breakpoints set')
+          else
+          begin
+            WriteLn('[BREAKPOINTS]');
+            for I := 0 to High(CallStack) do
+              WriteLn(CallStack[I]);
+          end;
+        end
+        else
+          WriteLn('[ERROR] Usage: info breakpoints');
       end;
 
     'callstack', 'cs':

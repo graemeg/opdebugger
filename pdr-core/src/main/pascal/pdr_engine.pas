@@ -17,12 +17,18 @@ uses
   Classes, SysUtils, Math, pdr_ports, pdr_typesys, opdf_types;
 
 type
+  { Breakpoint condition type }
+  TBreakpointConditionType = (bctNone, bctHitCount);
+
   { Breakpoint tracking record }
   TBreakpointEntry = record
     Handle: TBreakpointHandle;
     Address: QWord;
     Location: String;  // Original location string (for display)
     Active: Boolean;
+    ConditionType: TBreakpointConditionType;
+    HitCount: Integer;         // Target hit count (fire on Nth hit)
+    CurrentHitCount: Integer;  // Running counter
   end;
 
   { Debugger Engine - implements ICommandHandler }
@@ -65,6 +71,11 @@ type
     { ICommandHandler - Breakpoints }
     function SetBreakpoint(const Location: String): TBreakpointHandle;
     function RemoveBreakpoint(Handle: TBreakpointHandle): Boolean;
+
+    { Conditional breakpoint support }
+    function SetBreakpointCondition(Handle: TBreakpointHandle;
+      CondType: TBreakpointConditionType; Count: Integer): Boolean;
+    function GetBreakpointList: TStringArray;
 
     { ICommandHandler - Inspection }
     function EvaluateExpression(const Expr: String): TVariableValue;
@@ -243,6 +254,10 @@ begin
 end;
 
 function TDebuggerEngine.Continue: Boolean;
+var
+  BpAddr: QWord;
+  Idx: Integer;
+  ConditionMet: Boolean;
 begin
   Result := False;
 
@@ -254,18 +269,48 @@ begin
 
   if gVerbose then WriteLn('[INFO] Continuing process...');
 
-  if not FProcessController.Continue then
-  begin
-    WriteLn('[ERROR] Failed to continue process');
-    Exit;
-  end;
+  repeat
+    if not FProcessController.Continue then
+    begin
+      WriteLn('[ERROR] Failed to continue process');
+      Exit;
+    end;
 
-  // Check if process exited (FAttachedPID would be -1 if exited)
-  // Note: We need a better way to detect this, but for now check the message
-  // The ptrace adapter sets FAttached=False and FPID=-1 on exit
+    { Check if process exited }
+    if FProcessController.GetCurrentAddress = 0 then
+    begin
+      if gVerbose then WriteLn('[INFO] Process stopped and ready for commands');
+      Result := True;
+      Exit;
+    end;
 
-  // For now, assume process is still paused (at breakpoint or after step)
-  // TODO: Add a method to query process state from adapter
+    { Check if we hit a conditional breakpoint }
+    ConditionMet := True;
+    BpAddr := FProcessController.GetLastBreakpointAddress;
+    if BpAddr <> 0 then
+    begin
+      Idx := FindBreakpointByAddress(BpAddr);
+      if (Idx >= 0) and (FBreakpoints[Idx].ConditionType = bctHitCount) then
+      begin
+        Inc(FBreakpoints[Idx].CurrentHitCount);
+        if FBreakpoints[Idx].CurrentHitCount <> FBreakpoints[Idx].HitCount then
+        begin
+          ConditionMet := False;
+          if gVerbose then
+            WriteLn('[DEBUG] Breakpoint #', FBreakpoints[Idx].Handle,
+                    ' hit count: ', FBreakpoints[Idx].CurrentHitCount,
+                    '/', FBreakpoints[Idx].HitCount, ' - continuing');
+        end
+        else
+        begin
+          if gVerbose then
+            WriteLn('[DEBUG] Breakpoint #', FBreakpoints[Idx].Handle,
+                    ' hit count reached: ', FBreakpoints[Idx].CurrentHitCount);
+        end;
+      end;
+    end;
+  until ConditionMet;
+
   if gVerbose then WriteLn('[INFO] Process stopped and ready for commands');
   Result := True;
 end;
@@ -591,6 +636,9 @@ begin
   Entry.Address := Address;
   Entry.Location := Location;
   Entry.Active := True;
+  Entry.ConditionType := bctNone;
+  Entry.HitCount := 0;
+  Entry.CurrentHitCount := 0;
 
   // Add to tracking array
   SetLength(FBreakpoints, Length(FBreakpoints) + 1);
@@ -644,6 +692,60 @@ begin
   if gVerbose then
     WriteLn('[INFO] Breakpoint #', Handle, ' removed from 0x',
             IntToHex(FBreakpoints[Idx].Address, 16));
+end;
+
+{ Conditional breakpoint support }
+
+function TDebuggerEngine.SetBreakpointCondition(Handle: TBreakpointHandle;
+  CondType: TBreakpointConditionType; Count: Integer): Boolean;
+var
+  Idx: Integer;
+begin
+  Result := False;
+
+  Idx := FindBreakpointByHandle(Handle);
+  if Idx < 0 then
+  begin
+    WriteLn('[ERROR] Breakpoint #', Handle, ' not found');
+    Exit;
+  end;
+
+  FBreakpoints[Idx].ConditionType := CondType;
+  FBreakpoints[Idx].HitCount := Count;
+  FBreakpoints[Idx].CurrentHitCount := 0;
+
+  if CondType = bctHitCount then
+    WriteLn('[INFO] Breakpoint #', Handle, ' condition set: count=', Count)
+  else
+    WriteLn('[INFO] Breakpoint #', Handle, ' condition removed');
+
+  Result := True;
+end;
+
+function TDebuggerEngine.GetBreakpointList: TStringArray;
+var
+  I: Integer;
+  S: String;
+begin
+  SetLength(Result, 0);
+  for I := 0 to High(FBreakpoints) do
+  begin
+    S := Format('#%-3d 0x%016X  %-30s %s', [
+      FBreakpoints[I].Handle,
+      FBreakpoints[I].Address,
+      FBreakpoints[I].Location,
+      BoolToStr(FBreakpoints[I].Active, 'active', 'inactive')
+    ]);
+
+    if FBreakpoints[I].ConditionType = bctHitCount then
+      S := S + Format('   count=%d (hits: %d)', [
+        FBreakpoints[I].HitCount,
+        FBreakpoints[I].CurrentHitCount
+      ]);
+
+    SetLength(Result, Length(Result) + 1);
+    Result[High(Result)] := S;
+  end;
 end;
 
 { Inspection }

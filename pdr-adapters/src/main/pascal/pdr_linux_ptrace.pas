@@ -766,7 +766,8 @@ begin
     Exit(True);  // Still return success
   end;
 
-  WriteLn('[INFO] Hit breakpoint at 0x', IntToHex(BreakpointAddr, 16));
+  if gVerbose then
+    WriteLn('[INFO] Hit breakpoint at 0x', IntToHex(BreakpointAddr, 16));
 
   // Step 1: Back up RIP to point to the original instruction
   {$IFDEF CPUX86_64}
