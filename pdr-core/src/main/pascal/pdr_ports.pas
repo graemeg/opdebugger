@@ -46,6 +46,9 @@ type
   { Breakpoint handle }
   TBreakpointHandle = type Integer;
 
+  { Watchpoint type }
+  TWatchpointType = (wtWrite, wtReadWrite);
+
   { Type category for specialized handling }
   TTypeCategory = (
     tcPrimitive,      // Integer, Boolean, Char
@@ -260,6 +263,12 @@ type
 
     { Set command-line arguments for program }
     function SetCommandLineArgs(const Args: array of String): Boolean;
+
+    { Hardware watchpoints }
+    function SetWatchpoint(Address: QWord; Size: Byte;
+      WatchType: TWatchpointType): Integer;   { returns slot 0-3, or -1 on error }
+    function ClearWatchpoint(Slot: Integer): Boolean;
+    function GetFiredWatchpoint: Integer;      { returns slot 0-3, or -1 if none }
   end;
 
   { Debug Info Reader Port - Format-specific debug info reading }

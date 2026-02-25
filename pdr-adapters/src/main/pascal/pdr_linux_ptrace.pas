@@ -24,6 +24,13 @@ type
     Active: Boolean;
   end;
 
+  { Watchpoint slot info }
+  TWatchSlotInfo = record
+    Address: QWord;
+    Size: Byte;
+    Active: Boolean;
+  end;
+
   { Linux ptrace implementation of IProcessController }
   TLinuxPtraceAdapter = class(TInterfacedObject, IProcessController)
   private
@@ -33,11 +40,17 @@ type
     FLastBreakpointAddr: QWord;  // Address of last breakpoint hit (before handling)
     FLastBreakpointRBP: QWord;   // Frame base pointer saved at last breakpoint hit
     FCommandLineArgs: array of String;  // Command-line arguments for the program
+    FWatchSlots: array[0..3] of TWatchSlotInfo;
+    FLastFiredWatchpoint: Integer;  // -1 = none, 0-3 = slot
 
     { Breakpoint management helpers }
     function FindBreakpoint(Address: QWord): Integer;
     function GetOriginalData(Address: QWord): cLong;
     function HandleBreakpointHit: Boolean;
+
+    { Debug register helpers }
+    function ReadDebugRegister(RegIndex: Integer): QWord;
+    function WriteDebugRegister(RegIndex: Integer; Value: QWord): Boolean;
   public
     constructor Create;
     destructor Destroy; override;
@@ -65,6 +78,12 @@ type
 
     { Set command-line arguments for program }
     function SetCommandLineArgs(const Args: array of String): Boolean;
+
+    { Hardware watchpoints }
+    function SetWatchpoint(Address: QWord; Size: Byte;
+      WatchType: TWatchpointType): Integer;
+    function ClearWatchpoint(Slot: Integer): Boolean;
+    function GetFiredWatchpoint: Integer;
 
     property PID: Integer read FPID;
     property IsAttached: Boolean read FAttached;
@@ -103,11 +122,16 @@ function ptrace(request: cInt; pid: TPid; addr: Pointer; data: Pointer): cLong; 
 { TLinuxPtraceAdapter }
 
 constructor TLinuxPtraceAdapter.Create;
+var
+  I: Integer;
 begin
   inherited Create;
   FPID := -1;
   FAttached := False;
   FLastBreakpointAddr := 0;
+  FLastFiredWatchpoint := -1;
+  for I := 0 to 3 do
+    FWatchSlots[I].Active := False;
 end;
 
 destructor TLinuxPtraceAdapter.Destroy;
@@ -282,8 +306,12 @@ function TLinuxPtraceAdapter.Continue: Boolean;
 var
   Status: cInt;
   WaitResult: TPid;
+  DR6: QWord;
+  Regs: TRegisters;
+  WatchSlot: Integer;
 begin
   Result := False;
+  FLastFiredWatchpoint := -1;
 
   if not FAttached then
   begin
@@ -310,11 +338,46 @@ begin
   begin
     if WSTOPSIG(Status) = SIGTRAP then
     begin
-      // Breakpoint hit - handle it properly
-      if not HandleBreakpointHit then
+      // Check DR6 to distinguish watchpoint from software breakpoint
+      DR6 := ReadDebugRegister(6);
+      // Clear DR6 status to prevent stale triggers
+      WriteDebugRegister(6, 0);
+
+      if (DR6 and $F) <> 0 then
       begin
-        WriteLn('[ERROR] Failed to handle breakpoint');
-        Exit;
+        // Hardware watchpoint triggered
+        WatchSlot := -1;
+        if (DR6 and 1) <> 0 then WatchSlot := 0
+        else if (DR6 and 2) <> 0 then WatchSlot := 1
+        else if (DR6 and 4) <> 0 then WatchSlot := 2
+        else if (DR6 and 8) <> 0 then WatchSlot := 3;
+
+        FLastFiredWatchpoint := WatchSlot;
+
+        // Save current RIP/RBP for scope-aware variable evaluation
+        if GetRegisters(Regs) then
+        begin
+          {$IFDEF CPUX86_64}
+          FLastBreakpointAddr := Regs.RIP;
+          FLastBreakpointRBP := Regs.RBP;
+          {$ENDIF}
+          {$IFDEF CPUI386}
+          FLastBreakpointAddr := Regs.EIP;
+          FLastBreakpointRBP := Regs.EBP;
+          {$ENDIF}
+        end;
+
+        if gVerbose then
+          WriteLn('[DEBUG] Hardware watchpoint hit: slot ', WatchSlot);
+      end
+      else
+      begin
+        // Software breakpoint (INT3)
+        if not HandleBreakpointHit then
+        begin
+          WriteLn('[ERROR] Failed to handle breakpoint');
+          Exit;
+        end;
       end;
     end
     else
@@ -805,6 +868,9 @@ begin
     Exit;
   end;
 
+  // Clear DR6 in case the single-stepped instruction triggered a watchpoint
+  WriteDebugRegister(6, 0);
+
   // Step 4: Re-insert the breakpoint (put INT3 back)
   // Create modified data with INT3
   if ptrace(PTRACE_PEEKDATA, FPID, Pointer(PtrUInt(BreakpointAddr)), nil) = -1 then
@@ -1036,6 +1102,158 @@ begin
     WriteLn('[INFO] Set command-line arguments: ', String.Join(' ', Args));
 
   Result := True;
+end;
+
+{ Debug register access helpers }
+
+const
+  { Offset of u_debugreg[0] in struct user (x86_64 Linux) }
+  DR_OFFSET_BASE = 848;
+
+function TLinuxPtraceAdapter.ReadDebugRegister(RegIndex: Integer): QWord;
+begin
+  Result := QWord(ptrace(PTRACE_PEEKUSER, FPID,
+    Pointer(PtrUInt(DR_OFFSET_BASE + RegIndex * 8)), nil));
+end;
+
+function TLinuxPtraceAdapter.WriteDebugRegister(RegIndex: Integer; Value: QWord): Boolean;
+begin
+  Result := ptrace(PTRACE_POKEUSER, FPID,
+    Pointer(PtrUInt(DR_OFFSET_BASE + RegIndex * 8)),
+    Pointer(PtrUInt(Value))) <> -1;
+end;
+
+{ Hardware watchpoints }
+
+function TLinuxPtraceAdapter.SetWatchpoint(Address: QWord; Size: Byte;
+  WatchType: TWatchpointType): Integer;
+var
+  Slot: Integer;
+  DR7, EnableBit, CondBits, LenBits: QWord;
+  LenCode, CondCode: QWord;
+begin
+  Result := -1;
+
+  if not FAttached then
+  begin
+    WriteLn('[ERROR] Not attached to any process');
+    Exit;
+  end;
+
+  { Find a free slot }
+  Slot := -1;
+  for Result := 0 to 3 do
+    if not FWatchSlots[Result].Active then
+    begin
+      Slot := Result;
+      Break;
+    end;
+
+  if Slot = -1 then
+  begin
+    WriteLn('[ERROR] All 4 hardware watchpoint slots are in use');
+    Result := -1;
+    Exit;
+  end;
+
+  { Encode length }
+  case Size of
+    1: LenCode := 0;  { 00 }
+    2: LenCode := 1;  { 01 }
+    4: LenCode := 3;  { 11 }
+    8: LenCode := 2;  { 10 }
+  else
+    WriteLn('[ERROR] Unsupported watchpoint size: ', Size, ' (must be 1, 2, 4, or 8)');
+    Result := -1;
+    Exit;
+  end;
+
+  { Encode condition }
+  case WatchType of
+    wtWrite:     CondCode := 1;  { 01 = write only }
+    wtReadWrite: CondCode := 3;  { 11 = read or write }
+  end;
+
+  { Write address to DRn }
+  if not WriteDebugRegister(Slot, Address) then
+  begin
+    WriteLn('[ERROR] Failed to write watchpoint address to DR', Slot);
+    Result := -1;
+    Exit;
+  end;
+
+  { Read current DR7, set bits for this slot }
+  DR7 := ReadDebugRegister(7);
+
+  EnableBit := QWord(1) shl (2 * Slot);
+  CondBits := CondCode shl (16 + 4 * Slot);
+  LenBits := LenCode shl (18 + 4 * Slot);
+
+  DR7 := DR7 or EnableBit or CondBits or LenBits;
+
+  if not WriteDebugRegister(7, DR7) then
+  begin
+    WriteLn('[ERROR] Failed to write DR7 control register');
+    Result := -1;
+    Exit;
+  end;
+
+  { Record slot info }
+  FWatchSlots[Slot].Address := Address;
+  FWatchSlots[Slot].Size := Size;
+  FWatchSlots[Slot].Active := True;
+
+  if gVerbose then
+    WriteLn('[DEBUG] Watchpoint set in slot ', Slot,
+            ' at 0x', IntToHex(Address, 16), ' size=', Size);
+
+  Result := Slot;
+end;
+
+function TLinuxPtraceAdapter.ClearWatchpoint(Slot: Integer): Boolean;
+var
+  DR7, Mask: QWord;
+begin
+  Result := False;
+
+  if (Slot < 0) or (Slot > 3) then
+  begin
+    WriteLn('[ERROR] Invalid watchpoint slot: ', Slot);
+    Exit;
+  end;
+
+  if not FWatchSlots[Slot].Active then
+  begin
+    if gVerbose then WriteLn('[INFO] Watchpoint slot ', Slot, ' already inactive');
+    Result := True;
+    Exit;
+  end;
+
+  { Clear DR7 bits for this slot: enable (2 bits) + condition/length (4 bits) }
+  DR7 := ReadDebugRegister(7);
+  Mask := not (QWord($3) shl (2 * Slot) or QWord($F) shl (16 + 4 * Slot));
+  DR7 := DR7 and Mask;
+
+  if not WriteDebugRegister(7, DR7) then
+  begin
+    WriteLn('[ERROR] Failed to clear DR7 for slot ', Slot);
+    Exit;
+  end;
+
+  { Clear address register }
+  WriteDebugRegister(Slot, 0);
+
+  FWatchSlots[Slot].Active := False;
+
+  if gVerbose then
+    WriteLn('[DEBUG] Watchpoint slot ', Slot, ' cleared');
+
+  Result := True;
+end;
+
+function TLinuxPtraceAdapter.GetFiredWatchpoint: Integer;
+begin
+  Result := FLastFiredWatchpoint;
 end;
 
 end.

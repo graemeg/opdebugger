@@ -85,6 +85,11 @@ begin
   WriteLn('  undisplay <expr> - Remove from auto-display list');
   WriteLn('  undisplay      - Remove all display entries');
   WriteLn('  info display   - List all registered display expressions');
+  WriteLn('  watch <var>    - Set write watchpoint (break when variable changes)');
+  WriteLn('  rwatch <var>   - Set read/write watchpoint');
+  WriteLn('  awatch <var>   - Set access (read/write) watchpoint');
+  WriteLn('  unwatch <var>  - Remove watchpoint');
+  WriteLn('  info watchpoints - List active watchpoints');
   WriteLn('  verbose [on|off] - Enable/disable diagnostic output (default: off)');
   WriteLn('  help, h        - Show this help');
   WriteLn('  quit, q        - Exit debugger');
@@ -371,8 +376,23 @@ begin
               WriteLn('  ', I + 1, ': ', CallStack[I]);
           end;
         end
+        else if (Length(Parts) >= 2) and
+                ((LowerCase(Parts[1]) = 'watchpoints') or
+                 (LowerCase(Parts[1]) = 'watch') or
+                 (LowerCase(Parts[1]) = 'w')) then
+        begin
+          CallStack := FEngine.GetWatchpointList;
+          if Length(CallStack) = 0 then
+            WriteLn('[INFO] No watchpoints set')
+          else
+          begin
+            WriteLn('[WATCHPOINTS]');
+            for I := 0 to High(CallStack) do
+              WriteLn('  ', CallStack[I]);
+          end;
+        end
         else
-          WriteLn('[ERROR] Usage: info breakpoints | info display');
+          WriteLn('[ERROR] Usage: info breakpoints | info display | info watchpoints');
       end;
 
     'callstack', 'cs':
@@ -500,6 +520,36 @@ begin
           FEngine.RemoveDisplay(Parts[1])
         else
           FEngine.ClearDisplay;
+      end;
+
+    'watch':
+      begin
+        if Length(Parts) < 2 then
+        begin
+          WriteLn('[ERROR] Usage: watch <variable>');
+          Exit;
+        end;
+        FEngine.SetWatch(Parts[1], wtWrite);
+      end;
+
+    'rwatch', 'awatch':
+      begin
+        if Length(Parts) < 2 then
+        begin
+          WriteLn('[ERROR] Usage: ', Cmd, ' <variable>');
+          Exit;
+        end;
+        FEngine.SetWatch(Parts[1], wtReadWrite);
+      end;
+
+    'unwatch':
+      begin
+        if Length(Parts) < 2 then
+        begin
+          WriteLn('[ERROR] Usage: unwatch <variable>');
+          Exit;
+        end;
+        FEngine.RemoveWatch(Parts[1]);
       end;
 
     'verbose', 'v':

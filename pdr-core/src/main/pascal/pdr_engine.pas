@@ -31,6 +31,16 @@ type
     CurrentHitCount: Integer;  // Running counter
   end;
 
+  { Watchpoint tracking record }
+  TWatchpointEntry = record
+    Slot: Integer;         // Hardware slot 0-3
+    VarName: String;
+    Address: QWord;
+    Size: Cardinal;
+    OldValue: String;      // Last known formatted value
+    Active: Boolean;
+  end;
+
   { Debugger Engine - implements ICommandHandler }
   TDebuggerEngine = class(TInterfacedObject, ICommandHandler)
   private
@@ -44,6 +54,7 @@ type
     FBreakpoints: array of TBreakpointEntry;
     FNextHandle: TBreakpointHandle;
     FDisplayList: array of String;   // Expressions for auto-display
+    FWatchpoints: array of TWatchpointEntry;
 
     { Helper methods for breakpoint management }
     function ParseLocation(const Location: String; out Address: QWord): Boolean;
@@ -84,6 +95,11 @@ type
     procedure ClearDisplay;
     function GetDisplayList: TStringArray;
     function EvaluateDisplayList: TVariableValueArray;
+
+    { Hardware watchpoints }
+    function SetWatch(const VarName: String; WatchType: TWatchpointType): Boolean;
+    function RemoveWatch(const VarName: String): Boolean;
+    function GetWatchpointList: TStringArray;
 
     { ICommandHandler - Inspection }
     function EvaluateExpression(const Expr: String): TVariableValue;
@@ -266,6 +282,8 @@ var
   BpAddr: QWord;
   Idx: Integer;
   ConditionMet: Boolean;
+  WatchSlot: Integer;
+  NewValue: TVariableValue;
 begin
   Result := False;
 
@@ -287,6 +305,32 @@ begin
     { Check if process exited }
     if FProcessController.GetCurrentAddress = 0 then
     begin
+      if gVerbose then WriteLn('[INFO] Process stopped and ready for commands');
+      Result := True;
+      Exit;
+    end;
+
+    { Check if a hardware watchpoint fired }
+    WatchSlot := FProcessController.GetFiredWatchpoint;
+    if WatchSlot >= 0 then
+    begin
+      { Find matching watchpoint entry }
+      for Idx := 0 to High(FWatchpoints) do
+        if FWatchpoints[Idx].Active and (FWatchpoints[Idx].Slot = WatchSlot) then
+        begin
+          NewValue := EvaluateExpression(FWatchpoints[Idx].VarName);
+          WriteLn('[INFO] Watchpoint hit: ', FWatchpoints[Idx].VarName);
+          WriteLn('  Old value: ', FWatchpoints[Idx].VarName, ' = ', FWatchpoints[Idx].OldValue);
+          if NewValue.IsValid then
+          begin
+            WriteLn('  New value: ', FWatchpoints[Idx].VarName, ' = ', NewValue.Value);
+            FWatchpoints[Idx].OldValue := NewValue.Value;
+          end
+          else
+            WriteLn('  New value: ', FWatchpoints[Idx].VarName, ' = <error>');
+          Break;
+        end;
+
       if gVerbose then WriteLn('[INFO] Process stopped and ready for commands');
       Result := True;
       Exit;
@@ -826,6 +870,139 @@ begin
     end;
     Result[I] := Val;
   end;
+end;
+
+{ Hardware watchpoints }
+
+function TDebuggerEngine.SetWatch(const VarName: String; WatchType: TWatchpointType): Boolean;
+var
+  RIP, Addr, RBP: QWord;
+  VarInfo: TVariableInfo;
+  TypeInfo: TTypeInfo;
+  Slot: Integer;
+  Entry: TWatchpointEntry;
+  WatchSize: Byte;
+  CurVal: TVariableValue;
+begin
+  Result := False;
+
+  if FState = dsIdle then
+  begin
+    WriteLn('[ERROR] Not attached to process');
+    Exit;
+  end;
+
+  RIP := FProcessController.GetLastBreakpointAddress;
+  if RIP = 0 then RIP := FProcessController.GetCurrentAddress;
+
+  if not FDebugInfoReader.FindVariableWithScope(VarName, RIP, VarInfo) then
+  begin
+    WriteLn('[ERROR] Variable not found: ', VarName);
+    Exit;
+  end;
+
+  if not FDebugInfoReader.FindType(VarInfo.TypeID, TypeInfo) then
+  begin
+    WriteLn('[ERROR] Type not found for: ', VarName);
+    Exit;
+  end;
+
+  { Compute actual address }
+  if VarInfo.LocationExpr = 1 then
+  begin
+    RBP := FProcessController.GetLastBreakpointRBP;
+    if RBP = 0 then RBP := FProcessController.GetFrameBasePointer;
+    Addr := RBP + QWord(Int64(VarInfo.LocationData));
+  end
+  else
+    Addr := VarInfo.Address;
+
+  if Addr = 0 then
+  begin
+    WriteLn('[ERROR] Cannot determine address for: ', VarName);
+    Exit;
+  end;
+
+  { Determine watch size — hardware supports 1, 2, 4, 8 }
+  if TypeInfo.Size <= 1 then
+    WatchSize := 1
+  else if TypeInfo.Size <= 2 then
+    WatchSize := 2
+  else if TypeInfo.Size <= 4 then
+    WatchSize := 4
+  else if TypeInfo.Size <= 8 then
+    WatchSize := 8
+  else
+  begin
+    WriteLn('[ERROR] Variable too large for hardware watchpoint (', TypeInfo.Size, ' bytes, max 8)');
+    Exit;
+  end;
+
+  { Read current value as OldValue }
+  CurVal := EvaluateExpression(VarName);
+
+  { Set hardware watchpoint }
+  Slot := FProcessController.SetWatchpoint(Addr, WatchSize, WatchType);
+  if Slot < 0 then
+  begin
+    WriteLn('[ERROR] Cannot set watchpoint (all 4 hardware slots in use)');
+    Exit;
+  end;
+
+  { Store entry }
+  Entry.Slot := Slot;
+  Entry.VarName := VarName;
+  Entry.Address := Addr;
+  Entry.Size := WatchSize;
+  if CurVal.IsValid then
+    Entry.OldValue := CurVal.Value
+  else
+    Entry.OldValue := '<unknown>';
+  Entry.Active := True;
+
+  SetLength(FWatchpoints, Length(FWatchpoints) + 1);
+  FWatchpoints[High(FWatchpoints)] := Entry;
+
+  WriteLn('[INFO] Watchpoint set on ', VarName, ' at $', HexStr(Addr, 16), ' (slot ', Slot, ')');
+  Result := True;
+end;
+
+function TDebuggerEngine.RemoveWatch(const VarName: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 0 to High(FWatchpoints) do
+    if FWatchpoints[I].Active and (FWatchpoints[I].VarName = VarName) then
+    begin
+      FProcessController.ClearWatchpoint(FWatchpoints[I].Slot);
+      FWatchpoints[I].Active := False;
+      WriteLn('[INFO] Watchpoint removed: ', VarName);
+      Result := True;
+      Exit;
+    end;
+  if not Result then
+    WriteLn('[ERROR] No watchpoint on variable: ', VarName);
+end;
+
+function TDebuggerEngine.GetWatchpointList: TStringArray;
+var
+  I, Count: Integer;
+begin
+  Count := 0;
+  for I := 0 to High(FWatchpoints) do
+    if FWatchpoints[I].Active then
+      Inc(Count);
+
+  SetLength(Result, Count);
+  Count := 0;
+  for I := 0 to High(FWatchpoints) do
+    if FWatchpoints[I].Active then
+    begin
+      Result[Count] := 'Slot ' + IntToStr(FWatchpoints[I].Slot) + ': ' +
+        FWatchpoints[I].VarName + ' at $' + HexStr(FWatchpoints[I].Address, 16);
+      Inc(Count);
+    end;
 end;
 
 { Inspection }

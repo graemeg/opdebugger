@@ -251,12 +251,14 @@ Full specification: `docs/phase3-plan.adoc`
 
 ==== Feature 7: Hardware Watchpoints
 
-* [ ] Add `SetWatchpoint`, `ClearWatchpoint`, `GetFiredWatchpoint` to `IProcessController`
-* [ ] Implement via `PTRACE_POKEUSER` on x86_64 DR0–DR3 / DR7 in `pdr_linux_ptrace.pas`
-* [ ] Add `HandleWatch` / `HandleUnwatch` to `pdr_engine.pas`
-* [ ] Register `watch`, `rwatch`, `awatch`, `unwatch` commands
-* [ ] Enforce 4-slot hardware limit
-* [ ] Integration test: `test_21_watch.pas`
+* [x] Add `TWatchpointType`, `SetWatchpoint`, `ClearWatchpoint`, `GetFiredWatchpoint` to `IProcessController` (`pdr_ports.pas`)
+* [x] Implement via `PTRACE_PEEKUSER`/`PTRACE_POKEUSER` on x86_64 DR0–DR3 / DR6 / DR7 in `pdr_linux_ptrace.pas`
+* [x] Disambiguate watchpoint vs breakpoint SIGTRAP via DR6 status register
+* [x] Add `SetWatch`, `RemoveWatch`, `GetWatchpointList` to `pdr_engine.pas`
+* [x] Display old/new values on watchpoint hit
+* [x] Register `watch`, `rwatch`, `awatch`, `unwatch`, `info watchpoints` commands
+* [x] Enforce 4-slot hardware limit with clear error message
+* [x] Integration test: `test_22_watchpoint.pas` — 22/22 tests passing
 
 === Tier 2: High Value, Higher Complexity
 

@@ -1,0 +1,9 @@
+run
+break test_22_watchpoint.pas:10
+continue
+watch Counter
+continue
+print Counter
+continue
+print Counter
+quit
