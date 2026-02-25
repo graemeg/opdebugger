@@ -31,6 +31,7 @@ type
     FCommandLineArgs: array of String;
 
     procedure PrintHelp;
+    procedure PrintDisplayList;
     procedure ProcessCommand(const CmdLine: String);
   public
     constructor Create;
@@ -80,10 +81,24 @@ begin
   WriteLn('  locals globals - Also include global variables');
   WriteLn('  inspect <var>  - Show structured type layout with all fields/properties');
   WriteLn('  set <var> = <value> - Assign a value to a variable');
+  WriteLn('  display <expr>  - Auto-print expression on every stop');
+  WriteLn('  undisplay <expr> - Remove from auto-display list');
+  WriteLn('  undisplay      - Remove all display entries');
+  WriteLn('  info display   - List all registered display expressions');
   WriteLn('  verbose [on|off] - Enable/disable diagnostic output (default: off)');
   WriteLn('  help, h        - Show this help');
   WriteLn('  quit, q        - Exit debugger');
   WriteLn;
+end;
+
+procedure TCLIDebugger.PrintDisplayList;
+var
+  DisplayVals: TVariableValueArray;
+  I: Integer;
+begin
+  DisplayVals := FEngine.EvaluateDisplayList;
+  for I := 0 to High(DisplayVals) do
+    WriteLn(DisplayVals[I].Name, ' = ', DisplayVals[I].Value);
 end;
 
 { Parse "VarName[N..M]" slice notation from a print expression.
@@ -193,13 +208,22 @@ begin
       FEngine.Detach;
 
     'continue', 'c':
-      FEngine.Continue;
+      begin
+        FEngine.Continue;
+        PrintDisplayList;
+      end;
 
     'next', 'n':
-      FEngine.StepLine;
+      begin
+        FEngine.StepLine;
+        PrintDisplayList;
+      end;
 
     'step', 's':
-      FEngine.Step;
+      begin
+        FEngine.Step;
+        PrintDisplayList;
+      end;
 
     'print', 'p':
       begin
@@ -334,8 +358,21 @@ begin
               WriteLn(CallStack[I]);
           end;
         end
+        else if (Length(Parts) >= 2) and
+                (LowerCase(Parts[1]) = 'display') then
+        begin
+          CallStack := FEngine.GetDisplayList;
+          if Length(CallStack) = 0 then
+            WriteLn('[INFO] No display expressions set')
+          else
+          begin
+            WriteLn('[DISPLAY]');
+            for I := 0 to High(CallStack) do
+              WriteLn('  ', I + 1, ': ', CallStack[I]);
+          end;
+        end
         else
-          WriteLn('[ERROR] Usage: info breakpoints');
+          WriteLn('[ERROR] Usage: info breakpoints | info display');
       end;
 
     'callstack', 'cs':
@@ -445,6 +482,24 @@ begin
         end;
 
         FEngine.SetVariable(Parts[1], VarValue.Value);
+      end;
+
+    'display':
+      begin
+        if Length(Parts) < 2 then
+        begin
+          WriteLn('[ERROR] Usage: display <expression>');
+          Exit;
+        end;
+        FEngine.AddDisplay(Parts[1]);
+      end;
+
+    'undisplay':
+      begin
+        if Length(Parts) >= 2 then
+          FEngine.RemoveDisplay(Parts[1])
+        else
+          FEngine.ClearDisplay;
       end;
 
     'verbose', 'v':

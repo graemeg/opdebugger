@@ -15,7 +15,7 @@ project, covering both the standalone debugger toolchain and the FPC compiler in
 
 == Completed Work
 
-=== Phase 3: Features 1–5 (Completed)
+=== Phase 3: Features 1–6 (Completed)
 
 * [x] Feature 1: `locals` command — lists all in-scope local variables with evaluated values
 * [x] Feature 1: `locals globals` subcommand — also enumerates global variables
@@ -23,7 +23,8 @@ project, covering both the standalone debugger toolchain and the FPC compiler in
 * [x] Feature 3: `print <arr>[N..M]` — array slice display with out-of-bounds clamping
 * [x] Feature 4: `set <var> = <value>` — in-process variable assignment (primitives and enums)
 * [x] Feature 5: `break ... if count=N` — hit-count conditional breakpoints with `condition` and `info breakpoints` commands
-* [x] Integration tests 14–20 covering all five features; 20/20 automated tests passing
+* [x] Feature 6: `display` / `undisplay` — auto-print variables on every breakpoint stop, with out-of-scope handling
+* [x] Integration tests 14–21 covering all six features; 21/21 automated tests passing
 * [x] Sentinel breakpoint pattern applied to all tests (prevents program output mixing with debugger output on detach)
 
 === Standalone Debugger (Phases 0–2)
@@ -240,12 +241,13 @@ Full specification: `docs/phase3-plan.adoc`
 * [x] `info breakpoints` command to list all breakpoints with conditions and hit counts
 * [x] Integration test: `test_20_conditional_break.pas`
 
-==== Feature 6: `display` Command
+==== Feature 6: `display` Command — DONE
 
-* [ ] Add `FDisplayList: TStringList` to `pdr_engine.pas`
-* [ ] Print all display entries after every breakpoint stop
-* [ ] Register `display <var>`, `undisplay <var>`, `undisplay`, `info display`
-* [ ] Handle out-of-scope variables gracefully
+* [x] Add `FDisplayList` to `pdr_engine.pas` with `AddDisplay`, `RemoveDisplay`, `ClearDisplay`, `EvaluateDisplayList`
+* [x] Print all display entries after every execution stop (continue, next, step)
+* [x] Register `display <var>`, `undisplay <var>`, `undisplay`, `info display`
+* [x] Handle out-of-scope variables gracefully — prints `(out of scope)`
+* [x] Integration test: `test_21_display.pas`
 
 ==== Feature 7: Hardware Watchpoints
 
@@ -363,7 +365,7 @@ x86_64/cputarg.pas   → dbgopdf registration
 i386/cputarg.pas     → dbgopdf registration
 ----
 
-=== Integration Tests (20 automated)
+=== Integration Tests (21 automated)
 
 ----
 test_01_primitives         → Integer and Boolean variables
@@ -387,6 +389,7 @@ test_17_set_variable       → set command: modify Counter and MyFlag in-process
 test_18_inspect_class_intf → inspect command: class + interface with methods
 test_19_nested_scope       → nested procedure scoping: DeclIndex-based visibility
 test_20_conditional_break  → conditional breakpoint: hit-count form (count=7 in loop)
+test_21_display            → display command: auto-print Iter and Sum across continues
 ----
 
 ---
@@ -437,6 +440,10 @@ break <loc> if count=N       Conditional breakpoint (fire on Nth hit)
 condition <num> count=N      Set/change hit-count condition
 condition <num>              Remove condition (make unconditional)
 info breakpoints             List all breakpoints with conditions
+display <expr>               Auto-print expression on every stop
+undisplay <expr>             Remove from auto-display list
+undisplay                    Remove all display entries
+info display                 List registered display expressions
 continue / c                 Resume execution
 next / n                     Step to next source line
 step / s                     Single instruction step
@@ -457,8 +464,6 @@ quit                         Exit debugger
 
 [source]
 ----
-display <var>                Auto-print variable on every break
-undisplay <var>              Remove from auto-display list
 watch <var>                  Break when variable is written
 unwatch <var>                Remove watchpoint
 call <method>(<args>)        Invoke a method in the debugged process

@@ -1,0 +1,8 @@
+run
+break test_21_display.pas:12
+display Iter
+display Sum
+continue
+continue
+continue
+quit

@@ -43,6 +43,7 @@ type
     FAttachedPID: Integer;
     FBreakpoints: array of TBreakpointEntry;
     FNextHandle: TBreakpointHandle;
+    FDisplayList: array of String;   // Expressions for auto-display
 
     { Helper methods for breakpoint management }
     function ParseLocation(const Location: String; out Address: QWord): Boolean;
@@ -76,6 +77,13 @@ type
     function SetBreakpointCondition(Handle: TBreakpointHandle;
       CondType: TBreakpointConditionType; Count: Integer): Boolean;
     function GetBreakpointList: TStringArray;
+
+    { Display list (auto-print on every stop) }
+    function AddDisplay(const Expr: String): Boolean;
+    procedure RemoveDisplay(const Expr: String);
+    procedure ClearDisplay;
+    function GetDisplayList: TStringArray;
+    function EvaluateDisplayList: TVariableValueArray;
 
     { ICommandHandler - Inspection }
     function EvaluateExpression(const Expr: String): TVariableValue;
@@ -745,6 +753,78 @@ begin
 
     SetLength(Result, Length(Result) + 1);
     Result[High(Result)] := S;
+  end;
+end;
+
+{ Display list (auto-print on every stop) }
+
+function TDebuggerEngine.AddDisplay(const Expr: String): Boolean;
+var
+  I: Integer;
+begin
+  { Check if already in list (case-insensitive) }
+  for I := 0 to High(FDisplayList) do
+    if LowerCase(FDisplayList[I]) = LowerCase(Expr) then
+    begin
+      WriteLn('[INFO] Already displaying: ', Expr);
+      Result := False;
+      Exit;
+    end;
+
+  SetLength(FDisplayList, Length(FDisplayList) + 1);
+  FDisplayList[High(FDisplayList)] := Expr;
+  WriteLn('[INFO] Display added: ', Expr);
+  Result := True;
+end;
+
+procedure TDebuggerEngine.RemoveDisplay(const Expr: String);
+var
+  I, J: Integer;
+begin
+  for I := 0 to High(FDisplayList) do
+    if LowerCase(FDisplayList[I]) = LowerCase(Expr) then
+    begin
+      for J := I to High(FDisplayList) - 1 do
+        FDisplayList[J] := FDisplayList[J + 1];
+      SetLength(FDisplayList, Length(FDisplayList) - 1);
+      WriteLn('[INFO] Display removed: ', Expr);
+      Exit;
+    end;
+
+  WriteLn('[ERROR] Not in display list: ', Expr);
+end;
+
+procedure TDebuggerEngine.ClearDisplay;
+begin
+  SetLength(FDisplayList, 0);
+  WriteLn('[INFO] All display entries removed');
+end;
+
+function TDebuggerEngine.GetDisplayList: TStringArray;
+var
+  I: Integer;
+begin
+  SetLength(Result, Length(FDisplayList));
+  for I := 0 to High(FDisplayList) do
+    Result[I] := FDisplayList[I];
+end;
+
+function TDebuggerEngine.EvaluateDisplayList: TVariableValueArray;
+var
+  I: Integer;
+  Val: TVariableValue;
+begin
+  SetLength(Result, Length(FDisplayList));
+  for I := 0 to High(FDisplayList) do
+  begin
+    Val := EvaluateExpression(FDisplayList[I]);
+    if not Val.IsValid then
+    begin
+      Val.Name := FDisplayList[I];
+      Val.Value := '(out of scope)';
+      Val.IsValid := True;
+    end;
+    Result[I] := Val;
   end;
 end;
 
