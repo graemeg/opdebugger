@@ -49,7 +49,7 @@ run_test() {
 
     # Compile test program
     echo "  [1/5] Compiling test program..."
-    if ! fpc -g "$test_name" -o"$test_base" > "$test_base.compile.log" 2>&1; then
+    if ! fpc -gO "$test_name" -o"$test_base" > "$test_base.compile.log" 2>&1; then
         echo -e "${RED}  FAILED: Compilation error${NC}"
         cat "$test_base.compile.log"
         ((FAILED++))

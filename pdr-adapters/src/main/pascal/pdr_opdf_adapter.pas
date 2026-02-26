@@ -85,6 +85,8 @@ type
     function GetFileLineEntries(const FileName: String): TLineInfoArray;
     function FindFunctionByAddress(Address: QWord; out FuncInfo: TFunctionInfo): Boolean;
     function GetScopeLocals(RIP: QWord): TVariableInfoArray;
+    function FindFunctionByName(const Name: String;
+      out FuncInfo: TFunctionInfo): Boolean;
   end;
 
 implementation
@@ -1242,6 +1244,41 @@ begin
       Exit;
     end;
   end;
+end;
+
+{ Find function by name (case-insensitive) }
+function TOPDFReaderAdapter.FindFunctionByName(const Name: String;
+  out FuncInfo: TFunctionInfo): Boolean;
+var
+  I: Integer;
+  FuncScope: PFunctionScope;
+begin
+  Result := False;
+  FuncInfo.Name := '';
+  FuncInfo.LowPC := 0;
+  FuncInfo.HighPC := 0;
+
+  if not FLoaded then
+    Exit;
+
+  for I := 0 to FFunctionScopes.Count - 1 do
+  begin
+    FuncScope := PFunctionScope(FFunctionScopes[I]);
+    if CompareText(FuncScope^.Name, Name) = 0 then
+    begin
+      FuncInfo.Name := FuncScope^.Name;
+      FuncInfo.LowPC := FuncScope^.LowPC;
+      FuncInfo.HighPC := FuncScope^.HighPC;
+      Result := True;
+      if gVerbose then
+        WriteLn('[DEBUG] FindFunctionByName: found ', Name, ' at $',
+                IntToHex(FuncInfo.LowPC, 16));
+      Exit;
+    end;
+  end;
+
+  if gVerbose then
+    WriteLn('[DEBUG] FindFunctionByName: not found: ', Name);
 end;
 
 end.

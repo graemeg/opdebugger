@@ -1406,13 +1406,20 @@ begin
               else
                 AddLine(TypeInfo.ClassInfo^.Properties[I].Name + ' = <error>' + BackingField);
             end
+            else if TypeInfo.ClassInfo^.Properties[I].ReadKind = pakMethod then
+            begin
+              { Show getter name without calling — use "print Obj.Prop" to evaluate }
+              if TypeInfo.ClassInfo^.Properties[I].ReadMethodName <> '' then
+                AddLine(TypeInfo.ClassInfo^.Properties[I].Name +
+                  ' = <getter: ' + TypeInfo.ClassInfo^.Properties[I].ReadMethodName +
+                  '>     [use ''print ' + Expr + '.' +
+                  TypeInfo.ClassInfo^.Properties[I].Name + ''' to evaluate]')
+              else
+                AddLine(TypeInfo.ClassInfo^.Properties[I].Name + ' = <getter>');
+            end
             else
             begin
-              if TypeInfo.ClassInfo^.Properties[I].ReadMethodName <> '' then
-                AddLine(TypeInfo.ClassInfo^.Properties[I].Name + ' = <method>     [read ' +
-                        TypeInfo.ClassInfo^.Properties[I].ReadMethodName + '() - use ''call'' to evaluate]')
-              else
-                AddLine(TypeInfo.ClassInfo^.Properties[I].Name + ' = <method>     [use ''call'' to evaluate]');
+              AddLine(TypeInfo.ClassInfo^.Properties[I].Name + ' = <write-only>');
             end;
           end;
         end;

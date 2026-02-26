@@ -1,0 +1,3 @@
+Obj.Name = 'Alice'
+Obj.Age = 30
+Obj = TMYCLASS(@$<addr>) { FNAME: 'Alice', FAGE: 30, NAME: <getter: GetName>, AGE: <getter: GetAge> }

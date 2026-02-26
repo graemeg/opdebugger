@@ -85,6 +85,10 @@ type
     function ClearWatchpoint(Slot: Integer): Boolean;
     function GetFiredWatchpoint: Integer;
 
+    { Method call injection }
+    function InjectCall(MethodAddr, SelfPtr: QWord;
+      ManagedReturn: Boolean; out RetValue: QWord): Boolean;
+
     property PID: Integer read FPID;
     property IsAttached: Boolean read FAttached;
   end;
@@ -1255,5 +1259,204 @@ function TLinuxPtraceAdapter.GetFiredWatchpoint: Integer;
 begin
   Result := FLastFiredWatchpoint;
 end;
+
+{ Method call injection }
+
+function TLinuxPtraceAdapter.InjectCall(MethodAddr, SelfPtr: QWord;
+  ManagedReturn: Boolean; out RetValue: QWord): Boolean;
+{$IFDEF CPUX86_64}
+const
+  MAX_ITERATIONS = 1000;  { Safety limit against infinite loops }
+var
+  SavedRegs, NewRegs, RetRegs: TRegisters;
+  SentinelAddr: QWord;
+  OrigByte: Byte;
+  OrigData: cLong;
+  NewRSP, ResultBufAddr: QWord;
+  ReturnAddr: QWord;
+  ZeroBuf: QWord;
+  Status: cInt;
+  Iterations: Integer;
+  StoppedAddr: QWord;
+  BpIdx: Integer;
+begin
+  Result := False;
+  RetValue := 0;
+
+  if not FAttached then
+  begin
+    WriteLn('[ERROR] InjectCall: not attached to any process');
+    Exit;
+  end;
+
+  { 1. Save all registers }
+  if not GetRegisters(SavedRegs) then
+  begin
+    WriteLn('[ERROR] InjectCall: failed to save registers');
+    Exit;
+  end;
+
+  SentinelAddr := SavedRegs.RIP;
+
+  { 2. Save original byte at sentinel address }
+  OrigData := ptrace(PTRACE_PEEKDATA, FPID, Pointer(PtrUInt(SentinelAddr)), nil);
+  if (OrigData = -1) and (fpgeterrno <> 0) then
+  begin
+    WriteLn('[ERROR] InjectCall: failed to read memory at sentinel');
+    Exit;
+  end;
+  OrigByte := Byte(OrigData and $FF);
+
+  { 3. Write INT3 at sentinel address }
+  if ptrace(PTRACE_POKEDATA, FPID, Pointer(PtrUInt(SentinelAddr)),
+            Pointer(OrigData and cLong($FFFFFFFFFFFFFF00) or $CC)) = -1 then
+  begin
+    WriteLn('[ERROR] InjectCall: failed to write INT3 sentinel');
+    Exit;
+  end;
+
+  { 4. Compute new RSP — skip red zone (128 bytes), align to 16 bytes }
+  NewRSP := (SavedRegs.RSP - 128 - 8) and QWord($FFFFFFFFFFFFFFF0);
+
+  { 5. If managed return, allocate result buffer below return address }
+  ResultBufAddr := 0;
+  if ManagedReturn then
+  begin
+    ResultBufAddr := NewRSP - 8;
+    NewRSP := (NewRSP - 16) and QWord($FFFFFFFFFFFFFFF0);
+    { Write zero to result buffer (prevents AnsiString ref-count issues) }
+    ZeroBuf := 0;
+    if not WriteMemory(ResultBufAddr, 8, ZeroBuf) then
+    begin
+      WriteLn('[ERROR] InjectCall: failed to zero result buffer');
+      { Restore sentinel }
+      ptrace(PTRACE_POKEDATA, FPID, Pointer(PtrUInt(SentinelAddr)), Pointer(OrigData));
+      Exit;
+    end;
+  end;
+
+  { 6. Write return address (sentinel) at [NewRSP] }
+  ReturnAddr := SentinelAddr;
+  if not WriteMemory(NewRSP, 8, ReturnAddr) then
+  begin
+    WriteLn('[ERROR] InjectCall: failed to write return address');
+    ptrace(PTRACE_POKEDATA, FPID, Pointer(PtrUInt(SentinelAddr)), Pointer(OrigData));
+    Exit;
+  end;
+
+  { 7. Set up registers for call }
+  NewRegs := SavedRegs;
+  NewRegs.RIP := MethodAddr;
+  NewRegs.RSP := NewRSP;
+  NewRegs.RDI := SelfPtr;
+  if ManagedReturn then
+    NewRegs.RSI := ResultBufAddr;
+
+  if not SetRegisters(NewRegs) then
+  begin
+    WriteLn('[ERROR] InjectCall: failed to set registers');
+    ptrace(PTRACE_POKEDATA, FPID, Pointer(PtrUInt(SentinelAddr)), Pointer(OrigData));
+    Exit;
+  end;
+
+  if gVerbose then
+    WriteLn('[DEBUG] InjectCall: calling $', IntToHex(MethodAddr, 16),
+            ' Self=$', IntToHex(SelfPtr, 16),
+            ' RSP=$', IntToHex(NewRSP, 16));
+
+  { 8. Continue execution — method runs and returns to INT3 sentinel }
+  Iterations := 0;
+  repeat
+    if ptrace(PTRACE_CONT, FPID, nil, nil) = -1 then
+    begin
+      WriteLn('[ERROR] InjectCall: failed to continue');
+      Break;
+    end;
+
+    if FpWaitPid(FPID, @Status, 0) = -1 then
+    begin
+      WriteLn('[ERROR] InjectCall: failed to wait');
+      Break;
+    end;
+
+    { Check if process exited }
+    if WIFEXITED(Status) or WIFSIGNALED(Status) then
+    begin
+      WriteLn('[ERROR] InjectCall: process terminated during injection');
+      FAttached := False;
+      FPID := -1;
+      Exit;
+    end;
+
+    if not WIFSTOPPED(Status) then
+      Break;
+
+    { Check if we hit our sentinel INT3 }
+    if not GetRegisters(RetRegs) then
+      Break;
+    StoppedAddr := RetRegs.RIP - 1;  { RIP points after INT3 }
+
+    if StoppedAddr = SentinelAddr then
+    begin
+      { We hit the sentinel — method returned successfully }
+      RetValue := RetRegs.RAX;
+      if ManagedReturn then
+        RetValue := ResultBufAddr;
+      Result := True;
+      Break;
+    end;
+
+    { Not our sentinel — we hit an existing user breakpoint during injection.
+      Handle it: restore original instruction, single-step, re-insert, continue. }
+    BpIdx := FindBreakpoint(StoppedAddr);
+    if BpIdx >= 0 then
+    begin
+      if gVerbose then
+        WriteLn('[DEBUG] InjectCall: hit user breakpoint at $',
+                IntToHex(StoppedAddr, 16), ' — stepping past');
+      { Back up RIP to breakpoint address }
+      RetRegs.RIP := StoppedAddr;
+      SetRegisters(RetRegs);
+      { Restore original instruction }
+      ptrace(PTRACE_POKEDATA, FPID, Pointer(PtrUInt(StoppedAddr)),
+             Pointer(FBreakpoints[BpIdx].OriginalData));
+      { Single-step past it }
+      ptrace(PTRACE_SINGLESTEP, FPID, nil, nil);
+      FpWaitPid(FPID, @Status, 0);
+      WriteDebugRegister(6, 0);
+      { Re-insert the breakpoint }
+      ptrace(PTRACE_POKEDATA, FPID, Pointer(PtrUInt(StoppedAddr)),
+             Pointer(FBreakpoints[BpIdx].OriginalData and cLong($FFFFFFFFFFFFFF00) or $CC));
+    end
+    else
+    begin
+      if gVerbose then
+        WriteLn('[DEBUG] InjectCall: unexpected stop at $',
+                IntToHex(StoppedAddr, 16), ' signal=', WSTOPSIG(Status));
+      { Unknown stop — try continuing (might be a signal) }
+    end;
+
+    Inc(Iterations);
+  until Iterations >= MAX_ITERATIONS;
+
+  if Iterations >= MAX_ITERATIONS then
+    WriteLn('[ERROR] InjectCall: timeout — iteration limit reached');
+
+  { 9. Restore original byte at sentinel }
+  ptrace(PTRACE_POKEDATA, FPID, Pointer(PtrUInt(SentinelAddr)), Pointer(OrigData));
+
+  { 10. Restore all saved registers }
+  SetRegisters(SavedRegs);
+
+  if gVerbose and Result then
+    WriteLn('[DEBUG] InjectCall: completed, RetValue=$', IntToHex(RetValue, 16));
+end;
+{$ELSE}
+begin
+  Result := False;
+  RetValue := 0;
+  WriteLn('[ERROR] InjectCall: only supported on x86_64');
+end;
+{$ENDIF}
 
 end.

@@ -97,8 +97,10 @@ project, covering both the standalone debugger toolchain and the FPC compiler in
 * Nested procedure static link not modelled in OPDF — the saved RBP chain approximation
   works for one level of nesting only
 * `set of` non-enum ordinal types (e.g. `set of 3..7`) show raw bit positions, not names
-* Method-backed properties cannot be evaluated — prints an informative message; requires
-  method call injection (Phase 3, Feature 8)
+* Method-backed properties with float return types (Single, Double) are not evaluated — requires
+  `PTRACE_GETFPREGS` for XMM0 reading (Feature 8 limitation)
+* Method-backed properties in imported units compiled without `-gO` cannot be evaluated — getter
+  function scope is not in OPDF; ELF symbol fallback is a future enhancement
 * `GetPointerSize` in `pdr_opdf_adapter.pas` is conditioned on the debugger's compile-time
   architecture, not the debuggee's — will be wrong when a 64-bit debugger debugs a 32-bit
   binary; fixed by the PointerSize prerequisite below
@@ -262,16 +264,28 @@ Full specification: `docs/phase3-plan.adoc`
 
 === Tier 2: High Value, Higher Complexity
 
-==== Feature 8: Method Call Injection
+==== Feature 8: Method Call Injection (Getter Property Evaluation)
 
-* [ ] Add `GetFPRegisters` / `SetRegisters` / `SetFPRegisters` to `IProcessController`
-* [ ] Implement in `pdr_linux_ptrace.pas` (x86_64 System V ABI; i386 register convention)
-* [ ] Add `InjectCall(MethodAddr, SelfPtr, Args)` to `pdr_engine.pas`
-* [ ] Add sentinel INT3 management (find or inject; restore after call)
-* [ ] Add wall-clock timeout for hung calls
-* [ ] Evaluate method-backed properties in `pdr_typesys.pas` via `InjectCall`
-* [ ] Register `call MyObj.Method(args)` command
-* [ ] Integration test: `test_21_getter_props.pas`
+* [x] Add `InjectCall(MethodAddr, SelfPtr, ManagedReturn, RetValue)` to `IProcessController`
+* [x] Add `FindFunctionByName(Name, FuncInfo)` to `IDebugInfoReader`
+* [x] Implement `FindFunctionByName` in `pdr_opdf_adapter.pas` — linear scan of FFunctionScopes
+* [x] Implement `InjectCall` in `pdr_linux_ptrace.pas` — full x86_64 call injection:
+  ** Save/restore all registers via `PTRACE_GETREGS`/`PTRACE_SETREGS`
+  ** INT3 sentinel at saved RIP for return detection
+  ** Red zone skip (128 bytes), 16-byte RSP alignment
+  ** Hidden result buffer in RSI for managed return types (AnsiString)
+  ** User breakpoint passthrough during injection (single-step past, re-insert)
+  ** Iteration limit (1000) for timeout protection
+* [x] Evaluate method-backed properties via `InjectCall` in `ResolveClassProperty` (`pdr_typesys.pas`)
+  — explicit `print Obj.PropName` triggers call injection
+* [x] `FormatInjectedReturnValue` helper — formats ordinal (RAX) and AnsiString (hidden ptr) returns
+* [x] Safe default: `print Obj` and `inspect` show `<getter: MethodName>` without calling
+  — avoids side effects; matches GDB/LLDB behaviour
+* [x] `inspect` shows `[use 'print Obj.Prop' to evaluate]` hint for method properties
+* [x] Updated `test_05_properties` expected output for getter annotations
+* [x] New integration test: `test_24_method_properties.pas` — AnsiString + Integer getters
+* [x] Updated output filter in `run_launch_tests.sh` to support dot-notation variable names
+* [x] 24/24 integration tests passing
 
 ==== Feature 9: Expression Evaluator
 

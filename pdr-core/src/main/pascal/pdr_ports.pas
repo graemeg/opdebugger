@@ -269,6 +269,16 @@ type
       WatchType: TWatchpointType): Integer;   { returns slot 0-3, or -1 on error }
     function ClearWatchpoint(Slot: Integer): Boolean;
     function GetFiredWatchpoint: Integer;      { returns slot 0-3, or -1 if none }
+
+    { Method call injection — executes a method in the stopped process.
+      Saves/restores all registers. Uses INT3 sentinel for return detection.
+      MethodAddr: entry point of the method to call
+      SelfPtr: object instance pointer (passed in RDI)
+      ManagedReturn: if True, allocates hidden result buffer in RSI
+      RetValue: return value from RAX (ordinals) or result buffer address (managed)
+      Returns True on success, False on timeout or error }
+    function InjectCall(MethodAddr, SelfPtr: QWord;
+      ManagedReturn: Boolean; out RetValue: QWord): Boolean;
   end;
 
   { Debug Info Reader Port - Format-specific debug info reading }
@@ -312,6 +322,10 @@ type
 
     { Get all local variables in scope at the given RIP }
     function GetScopeLocals(RIP: QWord): TVariableInfoArray;
+
+    { Find function entry address by name (case-insensitive) }
+    function FindFunctionByName(const Name: String;
+      out FuncInfo: TFunctionInfo): Boolean;
   end;
 
   { Architecture Adapter Port - Architecture-specific operations }

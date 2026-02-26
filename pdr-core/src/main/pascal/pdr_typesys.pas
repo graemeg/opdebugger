@@ -457,6 +457,97 @@ begin
   Result.IsValid := True;
 end;
 
+{ Helper: Format the return value from an injected method call }
+function FormatInjectedReturnValue(RetVal: QWord; TypeID: TTypeID;
+  IsManaged: Boolean; ProcessController: IProcessController;
+  TypeSystem: TTypeSystem): String;
+var
+  PropTypeInfo: TTypeInfo;
+  StringPtr: QWord;
+  HeaderBuf: array[0..7] of Byte;
+  Len: LongInt;
+  DataBuf: array of Byte;
+  I: Integer;
+  IntVal: Int64;
+begin
+  Result := '<error>';
+
+  if not TypeSystem.FDebugInfoReader.FindType(TypeID, PropTypeInfo) then
+    Exit;
+
+  if IsManaged and (PropTypeInfo.Category = tcAnsiString) then
+  begin
+    { RetVal is the address of the result buffer, read the AnsiString pointer from it }
+    if not ProcessController.ReadMemory(RetVal, 8, StringPtr) then
+      Exit;
+    if StringPtr = 0 then
+    begin
+      Result := '''''';
+      Exit;
+    end;
+    { Read AnsiString length at StringPtr - 8 }
+    FillChar(HeaderBuf, SizeOf(HeaderBuf), 0);
+    if not ProcessController.ReadMemory(StringPtr - 8, 8, HeaderBuf) then
+      Exit;
+    Len := PLongInt(@HeaderBuf)^;
+    if (Len < 0) or (Len > 65536) then
+      Exit;
+    SetLength(DataBuf, Len);
+    if Len > 0 then
+      if not ProcessController.ReadMemory(StringPtr, Len, DataBuf[0]) then
+        Exit;
+    SetLength(Result, Len);
+    for I := 0 to Len - 1 do
+      Result[I + 1] := Chr(DataBuf[I]);
+    Result := '''' + Result + '''';
+  end
+  else
+  begin
+    { Ordinal return in RAX — format based on type }
+    if (PropTypeInfo.Category = tcPrimitive) then
+    begin
+      if (PropTypeInfo.Size = 1) and (Pos('BOOL', UpperCase(PropTypeInfo.Name)) > 0) then
+      begin
+        if (RetVal and $FF) <> 0 then Result := 'True'
+        else Result := 'False';
+      end
+      else if PropTypeInfo.IsSigned then
+      begin
+        case PropTypeInfo.Size of
+          1: IntVal := ShortInt(RetVal and $FF);
+          2: IntVal := SmallInt(RetVal and $FFFF);
+          4: IntVal := LongInt(RetVal and $FFFFFFFF);
+        else
+          IntVal := Int64(RetVal);
+        end;
+        Result := IntToStr(IntVal);
+      end
+      else
+      begin
+        case PropTypeInfo.Size of
+          1: Result := IntToStr(RetVal and $FF);
+          2: Result := IntToStr(RetVal and $FFFF);
+          4: Result := IntToStr(RetVal and $FFFFFFFF);
+        else
+          Result := IntToStr(RetVal);
+        end;
+      end;
+    end
+    else if PropTypeInfo.Category = tcEnum then
+    begin
+      for I := 0 to High(PropTypeInfo.EnumMembers) do
+        if PropTypeInfo.EnumMembers[I].Value = Int64(RetVal) then
+        begin
+          Result := PropTypeInfo.EnumMembers[I].Name + ' (' + IntToStr(RetVal) + ')';
+          Exit;
+        end;
+      Result := IntToStr(RetVal);
+    end
+    else
+      Result := IntToStr(RetVal);
+  end;
+end;
+
 { TClassEvaluator }
 
 function TClassEvaluator.CanHandle(const TypeInfo: TTypeInfo): Boolean;
@@ -544,6 +635,21 @@ begin
       if FieldOutput <> '' then FieldOutput := FieldOutput + ', ';
       FieldValue := TypeSystem.EvaluateVariableInfo(FieldInfo);
       FieldOutput := FieldOutput + Prop.Name + ': ' + FieldValue.Value;
+    end;
+  end;
+
+  // List method-backed properties without calling (to avoid side effects).
+  // Use "print Obj.PropName" to explicitly evaluate via call injection.
+  for I := 0 to High(TypeInfo.ClassInfo^.Properties) do
+  begin
+    Prop := TypeInfo.ClassInfo^.Properties[I];
+    if Prop.ReadKind = pakMethod then
+    begin
+      if FieldOutput <> '' then FieldOutput := FieldOutput + ', ';
+      if Prop.ReadMethodName <> '' then
+        FieldOutput := FieldOutput + Prop.Name + ': <getter: ' + Prop.ReadMethodName + '>'
+      else
+        FieldOutput := FieldOutput + Prop.Name + ': <getter>';
     end;
   end;
 
@@ -1066,9 +1172,13 @@ function TTypeSystem.ResolveClassProperty(const ClassTypeInfo: TTypeInfo;
 var
   CurrentTypeInfo: TTypeInfo;
   ParentTypeInfo: TTypeInfo;
+  PropTypeInfo: TTypeInfo;
   I: Integer;
   Prop: TDebuggerProperty;
   PropVarInfo: TVariableInfo;
+  FuncInfo: TFunctionInfo;
+  IsManaged: Boolean;
+  RetVal: QWord;
 begin
   Result.IsValid := False;
   Result.Value := '';
@@ -1097,8 +1207,30 @@ begin
             end;
           pakMethod:
             begin
-              Result.IsValid := True;
-              Result.Value := '<method getter — cannot evaluate without calling>';
+              { Try call injection }
+              if (Prop.ReadMethodName <> '') and
+                 FDebugInfoReader.FindFunctionByName(Prop.ReadMethodName, FuncInfo) then
+              begin
+                IsManaged := False;
+                if FDebugInfoReader.FindType(Prop.TypeID, PropTypeInfo) then
+                  IsManaged := PropTypeInfo.Category in [tcAnsiString, tcUnicodeString, tcArray];
+                if FProcessController.InjectCall(FuncInfo.LowPC, InstancePtr, IsManaged, RetVal) then
+                begin
+                  Result.IsValid := True;
+                  Result.Value := FormatInjectedReturnValue(RetVal, Prop.TypeID,
+                    IsManaged, FProcessController, Self);
+                end
+                else
+                begin
+                  Result.IsValid := True;
+                  Result.Value := '<method getter — call injection failed>';
+                end;
+              end
+              else
+              begin
+                Result.IsValid := True;
+                Result.Value := '<method getter — cannot evaluate without calling>';
+              end;
             end;
           pakNone:
             begin

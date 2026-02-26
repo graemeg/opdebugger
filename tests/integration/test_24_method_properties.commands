@@ -1,0 +1,7 @@
+run
+break test_24_method_properties.pas:36
+continue
+print Obj.Name
+print Obj.Age
+print Obj
+quit
