@@ -123,14 +123,22 @@ begin
     Exit;
 
   IndexStr := Copy(Expr, BracketOpen + 1, BracketClose - BracketOpen - 1);
-  DotDotPos := Pos('..', IndexStr);
-  if DotDotPos = 0 then Exit;
 
   VarName := Copy(Expr, 1, BracketOpen - 1);
   if VarName = '' then Exit;
 
-  if not TryStrToInt64(Trim(Copy(IndexStr, 1, DotDotPos - 1)), LowIdx) then Exit;
-  if not TryStrToInt64(Trim(Copy(IndexStr, DotDotPos + 2, Length(IndexStr))), HighIdx) then Exit;
+  DotDotPos := Pos('..', IndexStr);
+  if DotDotPos = 0 then
+  begin
+    { Single index: VarName[N] → treat as VarName[N..N] }
+    if not TryStrToInt64(Trim(IndexStr), LowIdx) then Exit;
+    HighIdx := LowIdx;
+  end
+  else
+  begin
+    if not TryStrToInt64(Trim(Copy(IndexStr, 1, DotDotPos - 1)), LowIdx) then Exit;
+    if not TryStrToInt64(Trim(Copy(IndexStr, DotDotPos + 2, Length(IndexStr))), HighIdx) then Exit;
+  end;
 
   Result := True;
 end;
