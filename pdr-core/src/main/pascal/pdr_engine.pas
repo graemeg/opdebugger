@@ -14,7 +14,7 @@ unit pdr_engine;
 interface
 
 uses
-  Classes, SysUtils, Math, pdr_ports, pdr_typesys, opdf_types;
+  Classes, SysUtils, Math, pdr_ports, pdr_typesys, opdf_types, elf_reader;
 
 type
   { Breakpoint condition type }
@@ -55,11 +55,14 @@ type
     FNextHandle: TBreakpointHandle;
     FDisplayList: array of String;   // Expressions for auto-display
     FWatchpoints: array of TWatchpointEntry;
+    FRaiseBreakpointAddr: QWord;     // Address of fpc_raiseexception (0 = not set)
+    FCatchExceptions: Boolean;        // Break on raise (default: True)
 
     { Helper methods for breakpoint management }
     function ParseLocation(const Location: String; out Address: QWord): Boolean;
     function FindBreakpointByHandle(Handle: TBreakpointHandle): Integer;
     function FindBreakpointByAddress(Address: QWord): Integer;
+    procedure HandleExceptionBreakpoint;
   public
     constructor Create(AProcessController: IProcessController;
                       ADebugInfoReader: IDebugInfoReader;
@@ -117,6 +120,7 @@ type
     property State: TDebuggerState read FState;
     property BinaryPath: String read FBinaryPath;
     property AttachedPID: Integer read FAttachedPID;
+    property CatchExceptions: Boolean read FCatchExceptions write FCatchExceptions;
   end;
 
 implementation
@@ -135,6 +139,8 @@ begin
   FAttachedPID := -1;
   FNextHandle := 1;  // Start handle numbering at 1
   SetLength(FBreakpoints, 0);
+  FRaiseBreakpointAddr := 0;
+  FCatchExceptions := True;
 
   // Create type system and register evaluators
   FTypeSystem := TTypeSystem.Create(FProcessController, FDebugInfoReader);
@@ -272,6 +278,25 @@ begin
   end;
 
   FState := dsPaused;
+
+  { Set internal breakpoint on fpc_raiseexception for exception catching }
+  FRaiseBreakpointAddr := TELFSectionReader.FindSymbolAddress(FBinaryPath, 'FPC_RAISEEXCEPTION');
+  if FRaiseBreakpointAddr <> 0 then
+  begin
+    if FProcessController.SetBreakpoint(FRaiseBreakpointAddr) then
+    begin
+      if gVerbose then
+        WriteLn('[DEBUG] Exception breakpoint set at $', HexStr(FRaiseBreakpointAddr, 16));
+    end
+    else
+      FRaiseBreakpointAddr := 0;
+  end
+  else
+  begin
+    if gVerbose then
+      WriteLn('[DEBUG] fpc_raiseexception not found in symbol table — exception catching disabled');
+  end;
+
   WriteLn('[INFO] Program started and paused at entry point');
   WriteLn('[INFO] You can now set breakpoints and use "continue" to start execution');
   Result := True;
@@ -336,10 +361,28 @@ begin
       Exit;
     end;
 
-    { Check if we hit a conditional breakpoint }
+    { Check if we hit the internal exception breakpoint }
     ConditionMet := True;
     BpAddr := FProcessController.GetLastBreakpointAddress;
-    if BpAddr <> 0 then
+    if (FRaiseBreakpointAddr <> 0) and (BpAddr = FRaiseBreakpointAddr) then
+    begin
+      if FCatchExceptions then
+      begin
+        HandleExceptionBreakpoint;
+        Result := True;
+        Exit;
+      end
+      else
+      begin
+        { Exception catching disabled — silently resume }
+        if gVerbose then
+          WriteLn('[DEBUG] Exception raised but catching disabled — continuing');
+        ConditionMet := False;
+      end;
+    end;
+
+    { Check if we hit a conditional breakpoint }
+    if ConditionMet and (BpAddr <> 0) then
     begin
       Idx := FindBreakpointByAddress(BpAddr);
       if (Idx >= 0) and (FBreakpoints[Idx].ConditionType = bctHitCount) then
@@ -631,6 +674,165 @@ begin
       Exit;
     end;
   end;
+end;
+
+{ Exception handling }
+
+procedure TDebuggerEngine.HandleExceptionBreakpoint;
+const
+  VMT_CLASSNAME_OFFSET = 24;  // vmtClassName on x86_64
+  FMESSAGE_OFFSET_MONITOR = 16;  // FMessage offset with _MonitorData
+  FMESSAGE_OFFSET_NO_MONITOR = 8;  // FMessage offset without _MonitorData
+var
+  Regs: TRegisters;
+  ObjPtr, RaiseAddr: QWord;
+  VMTPtr, ClassNamePtr, FMsgPtr: QWord;
+  Buf: array[0..7] of Byte;
+  NameLen: Byte;
+  NameBuf: array[0..255] of Byte;
+  ExcClassName, ExcMessage: String;
+  FMsgOffset: Integer;
+  HeaderBuf: array[0..7] of Byte;
+  MsgLen: LongInt;
+  MsgBuf: array of Byte;
+  I: Integer;
+  LineInfo: TLineInfo;
+  InstSize: QWord;
+begin
+  { Read registers to get exception object (RDI) and raise address (RSI) }
+  if not FProcessController.GetRegisters(Regs) then
+  begin
+    WriteLn('[INFO] Exception raised (could not read registers)');
+    Exit;
+  end;
+
+  {$IFDEF CPUX86_64}
+  ObjPtr := Regs.RDI;
+  RaiseAddr := Regs.RSI;
+  {$ELSE}
+  { On i386, parameters are on the stack — not implemented yet }
+  WriteLn('[INFO] Exception raised (i386 parameter reading not implemented)');
+  Exit;
+  {$ENDIF}
+
+  if ObjPtr = 0 then
+  begin
+    WriteLn('[INFO] Exception raised (nil object)');
+    Exit;
+  end;
+
+  { Read VMT pointer from object }
+  ExcClassName := '<unknown>';
+  FillChar(Buf, SizeOf(Buf), 0);
+  if FProcessController.ReadMemory(ObjPtr, 8, Buf) then
+  begin
+    VMTPtr := PQWord(@Buf)^;
+    if VMTPtr <> 0 then
+    begin
+      { Read class name pointer from VMT + 24 }
+      FillChar(Buf, SizeOf(Buf), 0);
+      if FProcessController.ReadMemory(VMTPtr + VMT_CLASSNAME_OFFSET, 8, Buf) then
+      begin
+        ClassNamePtr := PQWord(@Buf)^;
+        if ClassNamePtr <> 0 then
+        begin
+          { Read ShortString: length byte + characters }
+          NameLen := 0;
+          if FProcessController.ReadMemory(ClassNamePtr, 1, NameLen) and (NameLen > 0) then
+          begin
+            FillChar(NameBuf, SizeOf(NameBuf), 0);
+            if FProcessController.ReadMemory(ClassNamePtr + 1, NameLen, NameBuf) then
+            begin
+              SetLength(ExcClassName, NameLen);
+              for I := 0 to NameLen - 1 do
+                ExcClassName[I + 1] := Chr(NameBuf[I]);
+            end;
+          end;
+        end;
+      end;
+
+      { Determine FMessage offset by checking instance size }
+      FMsgOffset := FMESSAGE_OFFSET_MONITOR;  // Default: with _MonitorData
+      FillChar(Buf, SizeOf(Buf), 0);
+      if FProcessController.ReadMemory(VMTPtr, 8, Buf) then
+      begin
+        InstSize := PQWord(@Buf)^;
+        { If this class's instance size < 32, assume no monitor data }
+        if InstSize < 32 then
+          FMsgOffset := FMESSAGE_OFFSET_NO_MONITOR;
+      end;
+    end;
+  end;
+
+  { Read FMessage (AnsiString) }
+  ExcMessage := '';
+  FillChar(Buf, SizeOf(Buf), 0);
+  if FProcessController.ReadMemory(ObjPtr + QWord(FMsgOffset), 8, Buf) then
+  begin
+    FMsgPtr := PQWord(@Buf)^;
+    if FMsgPtr <> 0 then
+    begin
+      { Read AnsiString length at Ptr - 8 }
+      FillChar(HeaderBuf, SizeOf(HeaderBuf), 0);
+      if FProcessController.ReadMemory(FMsgPtr - 8, 8, HeaderBuf) then
+      begin
+        MsgLen := PLongInt(@HeaderBuf)^;
+        if (MsgLen > 0) and (MsgLen <= 65536) then
+        begin
+          SetLength(MsgBuf, MsgLen);
+          if FProcessController.ReadMemory(FMsgPtr, MsgLen, MsgBuf[0]) then
+          begin
+            SetLength(ExcMessage, MsgLen);
+            for I := 0 to MsgLen - 1 do
+              ExcMessage[I + 1] := Chr(MsgBuf[I]);
+          end;
+        end
+        else if (MsgLen < 0) or (MsgLen > 65536) then
+        begin
+          { Sanity check failed — try alternate offset }
+          if FMsgOffset = FMESSAGE_OFFSET_MONITOR then
+            FMsgOffset := FMESSAGE_OFFSET_NO_MONITOR
+          else
+            FMsgOffset := FMESSAGE_OFFSET_MONITOR;
+          FillChar(Buf, SizeOf(Buf), 0);
+          if FProcessController.ReadMemory(ObjPtr + QWord(FMsgOffset), 8, Buf) then
+          begin
+            FMsgPtr := PQWord(@Buf)^;
+            if FMsgPtr <> 0 then
+            begin
+              FillChar(HeaderBuf, SizeOf(HeaderBuf), 0);
+              if FProcessController.ReadMemory(FMsgPtr - 8, 8, HeaderBuf) then
+              begin
+                MsgLen := PLongInt(@HeaderBuf)^;
+                if (MsgLen > 0) and (MsgLen <= 65536) then
+                begin
+                  SetLength(MsgBuf, MsgLen);
+                  if FProcessController.ReadMemory(FMsgPtr, MsgLen, MsgBuf[0]) then
+                  begin
+                    SetLength(ExcMessage, MsgLen);
+                    for I := 0 to MsgLen - 1 do
+                      ExcMessage[I + 1] := Chr(MsgBuf[I]);
+                  end;
+                end;
+              end;
+            end;
+          end;
+        end;
+      end;
+    end;
+  end;
+
+  { Display exception info }
+  if ExcMessage <> '' then
+    WriteLn('Exception: ', ExcClassName, ' — ''', ExcMessage, '''')
+  else
+    WriteLn('Exception: ', ExcClassName, ' — (no message)');
+
+  { Show raise location if available }
+  if (RaiseAddr <> 0) and FDebugInfoReader.FindLineByAddress(RaiseAddr, LineInfo) then
+    WriteLn('  raised at ', LineInfo.FileName, ':', LineInfo.LineNumber)
+  else if RaiseAddr <> 0 then
+    WriteLn('  raised at $', HexStr(RaiseAddr, 16));
 end;
 
 { Breakpoints }

@@ -30,6 +30,12 @@ type
       Caller owns the returned stream. }
     class function ExtractSection(const BinaryPath: String;
       const SectionName: String): TMemoryStream;
+
+    { Find a symbol's virtual address by name in the ELF .symtab section.
+      Returns the symbol's st_value (virtual address), or 0 if not found.
+      Comparison is case-insensitive (FPC emits uppercase aliases). }
+    class function FindSymbolAddress(const BinaryPath: String;
+      const SymbolName: String): QWord;
   end;
 
 implementation
@@ -40,6 +46,9 @@ const
 
   { ELF class }
   ELFCLASS64 = 2;
+
+  { ELF section types }
+  SHT_SYMTAB = 2;
 
 type
   { ELF64 header (relevant fields only) }
@@ -58,6 +67,16 @@ type
     e_shentsize: Word;               { Section header table entry size }
     e_shnum: Word;                   { Section header table entry count }
     e_shstrndx: Word;                { Section header string table index }
+  end;
+
+  { ELF64 symbol table entry }
+  TElf64Sym = packed record
+    st_name  : Cardinal;               { Symbol name (string table index) }
+    st_info  : Byte;                   { Symbol type and binding }
+    st_other : Byte;                   { Symbol visibility }
+    st_shndx : Word;                   { Section index }
+    st_value : QWord;                  { Symbol value (virtual address) }
+    st_size  : QWord;                  { Symbol size }
   end;
 
   { ELF64 section header }
@@ -194,6 +213,106 @@ begin
     end;
   except
     FreeAndNil(Result);
+  end;
+end;
+
+class function TELFSectionReader.FindSymbolAddress(const BinaryPath: String;
+  const SymbolName: String): QWord;
+var
+  F: TFileStream;
+  Header: TElf64Header;
+  SecHeader, StrSecHeader: TElf64SectionHeader;
+  SymEntry: TElf64Sym;
+  StrTable: array of Byte;
+  I, J: Integer;
+  NumSymbols: Integer;
+  NameIdx: Cardinal;
+  Name: String;
+  UpperSymName: String;
+begin
+  Result := 0;
+
+  if not FileExists(BinaryPath) then
+    Exit;
+
+  UpperSymName := UpperCase(SymbolName);
+
+  try
+    F := TFileStream.Create(BinaryPath, fmOpenRead or fmShareDenyNone);
+    try
+      { Read ELF header }
+      if F.Size < SizeOf(TElf64Header) then
+        Exit;
+      F.ReadBuffer(Header, SizeOf(Header));
+
+      { Validate ELF magic and class }
+      if (Header.e_ident[0] <> ELF_MAGIC[0]) or
+         (Header.e_ident[1] <> ELF_MAGIC[1]) or
+         (Header.e_ident[2] <> ELF_MAGIC[2]) or
+         (Header.e_ident[3] <> ELF_MAGIC[3]) then
+        Exit;
+
+      if Header.e_ident[4] <> ELFCLASS64 then
+        Exit;
+
+      if (Header.e_shoff = 0) or (Header.e_shnum = 0) then
+        Exit;
+
+      { Scan section headers for SHT_SYMTAB }
+      for I := 0 to Header.e_shnum - 1 do
+      begin
+        F.Position := Header.e_shoff + (I * Header.e_shentsize);
+        F.ReadBuffer(SecHeader, SizeOf(SecHeader));
+
+        if SecHeader.sh_type <> SHT_SYMTAB then
+          Continue;
+
+        { Found .symtab — read associated string table (sh_link) }
+        if SecHeader.sh_link >= Header.e_shnum then
+          Exit;
+
+        F.Position := Header.e_shoff + (SecHeader.sh_link * Header.e_shentsize);
+        F.ReadBuffer(StrSecHeader, SizeOf(StrSecHeader));
+
+        SetLength(StrTable, StrSecHeader.sh_size);
+        F.Position := StrSecHeader.sh_offset;
+        F.ReadBuffer(StrTable[0], StrSecHeader.sh_size);
+
+        { Iterate symbol entries }
+        NumSymbols := SecHeader.sh_size div SizeOf(TElf64Sym);
+        for J := 0 to NumSymbols - 1 do
+        begin
+          F.Position := SecHeader.sh_offset + (J * SizeOf(TElf64Sym));
+          F.ReadBuffer(SymEntry, SizeOf(SymEntry));
+
+          NameIdx := SymEntry.st_name;
+          if NameIdx >= Cardinal(Length(StrTable)) then
+            Continue;
+
+          { Extract null-terminated symbol name }
+          Name := '';
+          while (NameIdx < Cardinal(Length(StrTable))) and (StrTable[NameIdx] <> 0) do
+          begin
+            Name := Name + Chr(StrTable[NameIdx]);
+            Inc(NameIdx);
+          end;
+
+          { Case-insensitive comparison }
+          if UpperCase(Name) = UpperSymName then
+          begin
+            Result := SymEntry.st_value;
+            Exit;
+          end;
+        end;
+
+        { Only process first .symtab section }
+        Break;
+      end;
+    finally
+      F.Free;
+    end;
+  except
+    Result := 0;
   end;
 end;
 

@@ -90,6 +90,8 @@ begin
   WriteLn('  awatch <var>   - Set access (read/write) watchpoint');
   WriteLn('  unwatch <var>  - Remove watchpoint');
   WriteLn('  info watchpoints - List active watchpoints');
+  WriteLn('  catch          - Enable break on exception raise (default: on)');
+  WriteLn('  nocatch        - Disable break on exception raise');
   WriteLn('  verbose [on|off] - Enable/disable diagnostic output (default: off)');
   WriteLn('  help, h        - Show this help');
   WriteLn('  quit, q        - Exit debugger');
@@ -550,6 +552,18 @@ begin
           Exit;
         end;
         FEngine.RemoveWatch(Parts[1]);
+      end;
+
+    'catch':
+      begin
+        FEngine.CatchExceptions := True;
+        WriteLn('[INFO] Break on exception enabled');
+      end;
+
+    'nocatch':
+      begin
+        FEngine.CatchExceptions := False;
+        WriteLn('[INFO] Break on exception disabled');
       end;
 
     'verbose', 'v':

@@ -314,10 +314,14 @@ Full specification: `docs/phase3-plan.adoc`
 
 ==== Feature 12: Exception Metadata
 
-* [ ] Intercept `SIGSEGV` / `SIGFPE` / `SIGABRT` in `pdr_linux_ptrace.pas`
-* [ ] Locate `ExceptObject` via OPDF global table or ELF symbol table
-* [ ] Read class name from VMT; read `FMessage` at known offset
-* [ ] Integration test: `test_25_exception.pas`
+* [x] Add ELF `.symtab` symbol lookup (`FindSymbolAddress` in `elf_reader.pas`)
+* [x] Set internal breakpoint on `fpc_raiseexception` at program launch
+* [x] Read exception class name from VMT (`vmtClassName` at offset +24)
+* [x] Read `FMessage` AnsiString (offset +16 with `_MonitorData`, fallback +8)
+* [x] Display: `Exception: ClassName — 'message'` with source location
+* [x] Add `catch` / `nocatch` CLI commands to enable/disable break on raise
+* [x] Disambiguate internal breakpoint from user breakpoints in Continue
+* [x] Integration test: `test_23_exception.pas` — 23/23 tests passing
 
 ==== Feature 13: Optimized Code — Register-Allocated Variables
 
