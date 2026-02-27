@@ -1,0 +1,10 @@
+run
+break test_25_constants.pas:21
+continue
+print MaxItems
+print Enabled
+print InitialChar
+print PiApprox
+print AppTitle
+print rocketUTF8
+quit

@@ -178,6 +178,13 @@ type
     IsValid: Boolean;
   end;
 
+  { Constant information (compile-time value, no runtime address) }
+  TConstantInfo = record
+    Name: String;
+    TypeID: TTypeID;
+    FormattedValue: String;
+  end;
+
   { Source line information }
   TLineInfo = record
     Address: QWord;
@@ -326,6 +333,9 @@ type
     { Find function entry address by name (case-insensitive) }
     function FindFunctionByName(const Name: String;
       out FuncInfo: TFunctionInfo): Boolean;
+
+    { Find a compile-time constant by name }
+    function FindConstant(const Name: String; out ConstInfo: TConstantInfo): Boolean;
   end;
 
   { Architecture Adapter Port - Architecture-specific operations }

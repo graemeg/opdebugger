@@ -70,7 +70,17 @@ type
     recInterface     = 16, // Interface definition (COM/CORBA)
     recEnum          = 17, // Enumeration type with member names
     recSet           = 18, // Set type (bitfield over ordinal/enum base)
-    recUnitDirectory = 19  // Unit directory (index of per-unit data offsets)
+    recUnitDirectory = 19, // Unit directory (index of per-unit data offsets)
+    recConstant      = 20  // Compile-time constant (value embedded in record)
+  );
+
+  { Constant value kind }
+  TConstantKind = (
+    ckOrd     = 0,  // Integer, Boolean, Char, Enum (Int64 value, 8 bytes)
+    ckString  = 1,  // String literal (raw bytes, UTF-8 or ASCII)
+    ckReal    = 2,  // Floating-point (Double, 8 bytes)
+    ckNil     = 3,  // Nil pointer (no value bytes)
+    ckWideStr = 4   // Wide/Unicode string (UTF-16LE bytes)
   );
 
   { Generic Record Header - 5 bytes }
@@ -317,6 +327,16 @@ type
     // Followed by UnitCount x TUnitEntry (each with trailing name)
   end;
 
+  { Compile-time Constant Definition }
+  TDefConstant = packed record
+    TypeID: TTypeID;      // 4 bytes (type of the constant, 0 if untyped)
+    ConstKind: Byte;      // 1 byte (TConstantKind)
+    ValueLen: Word;       // 2 bytes (byte length of value data)
+    NameLen: TNameLen;    // 2 bytes (byte length of name)
+    // Followed by ValueLen bytes of value data
+    // Followed by NameLen bytes of name
+  end;
+
   TEnumMemberArray = array of TEnumMember;
   TInterfaceMethodDescriptorArray = array of TInterfaceMethodDescriptor;
 
@@ -368,6 +388,7 @@ begin
     recEnum:       Result := 'Enum';
     recSet:           Result := 'Set';
     recUnitDirectory: Result := 'UnitDirectory';
+    recConstant:      Result := 'Constant';
     else              Result := 'Unknown';
   end;
 end;

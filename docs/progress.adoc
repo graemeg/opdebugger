@@ -15,7 +15,7 @@ project, covering both the standalone debugger toolchain and the FPC compiler in
 
 == Completed Work
 
-=== Phase 3: Features 1–6 (Completed)
+=== Phase 3: Features 1–6, 14 (Completed)
 
 * [x] Feature 1: `locals` command — lists all in-scope local variables with evaluated values
 * [x] Feature 1: `locals globals` subcommand — also enumerates global variables
@@ -336,6 +336,20 @@ Full specification: `docs/phase3-plan.adoc`
 * [x] Add `catch` / `nocatch` CLI commands to enable/disable break on raise
 * [x] Disambiguate internal breakpoint from user breakpoints in Continue
 * [x] Integration test: `test_23_exception.pas` — 23/23 tests passing
+
+==== Feature 14: Compile-Time Constants
+
+* [x] Add `recConstant = 20` record type to OPDF format (`opdf_types.pas`)
+* [x] Add `TConstantKind` enum: `ckOrd`, `ckString`, `ckReal`, `ckNil`, `ckWideStr`
+* [x] Add `TDefConstant` packed record with embedded value bytes
+* [x] Add `WriteConstant` / `ReadConstant` to `opdf_io.pas`
+* [x] Implement `appendsym_const` in `dbgopdf.pas` — emits constants for `constord`, `conststring`, `constreal`, `constnil`, `constwstring`
+* [x] Add `TConstantInfo` record and `FindConstant` method to `IDebugInfoReader` (`pdr_ports.pas`)
+* [x] Add `FConstants` hash list with loading and lookup in `pdr_opdf_adapter.pas`
+* [x] Add constant fallback in `TTypeSystem.EvaluateVariable` with Boolean/Char display refinement
+* [x] Integration test: `test_25_constants.pas`
+* [ ] Extend `appendsym_const` for remaining constant kinds: `constset`, `constguid`, `constpointer`, `constresourcestring`, `constwresourcestring`
+* [ ] Add enum constant display (resolve member name from TypeID)
 
 ==== Feature 13: Optimized Code — Register-Allocated Variables
 

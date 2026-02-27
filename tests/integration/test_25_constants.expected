@@ -1,0 +1,6 @@
+MaxItems = 100
+Enabled = True
+InitialChar = A
+PiApprox = 3.14159
+AppTitle = 'Hello Debug'
+rocketUTF8 = #$F0#$9F#$9A#$80

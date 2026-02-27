@@ -20,6 +20,7 @@ type
   { Pointer types for caching }
   PTypeInfo = ^TTypeInfo;
   PVariableInfo = ^TVariableInfo;
+  PConstantInfo = ^TConstantInfo;
   PLineInfo = ^TLineInfo;
 
   { Function scope information }
@@ -59,6 +60,7 @@ type
     FLineInfo: TFPList;             // List of TLineInfo records
     FFunctionScopes: TFPList;       // List of TFunctionScope records
     FLocalVariables: TFPHashList;   // ScopeID -> TList of TLocalVariableInfo
+    FConstants: TFPHashList;         // Constant name -> TConstantInfo
     FLoaded: Boolean;
 
     { Helper methods }
@@ -87,6 +89,7 @@ type
     function GetScopeLocals(RIP: QWord): TVariableInfoArray;
     function FindFunctionByName(const Name: String;
       out FuncInfo: TFunctionInfo): Boolean;
+    function FindConstant(const Name: String; out ConstInfo: TConstantInfo): Boolean;
   end;
 
 implementation
@@ -101,6 +104,7 @@ begin
   FLineInfo := TFPList.Create;
   FFunctionScopes := TFPList.Create;
   FLocalVariables := TFPHashList.Create;
+  FConstants := TFPHashList.Create;
   FReader := nil;
   FStream := nil;
   FLoaded := False;
@@ -111,6 +115,7 @@ begin
   ClearCache;
   FTypes.Free;
   FVariables.Free;
+  FConstants.Free;
   FLineInfo.Free;
   FFunctionScopes.Free;
   FLocalVariables.Free;
@@ -148,6 +153,11 @@ begin
     Dispose(PVariableInfo(FVariables[I]));
   end;
   FVariables.Clear;
+
+  // Free cached constant info
+  for I := 0 to FConstants.Count - 1 do
+    Dispose(PConstantInfo(FConstants[I]));
+  FConstants.Clear;
 
   // Free cached line info
   for I := 0 to FLineInfo.Count - 1 do
@@ -208,6 +218,105 @@ begin
   Result := '';
 end;
 
+function FormatConstantValue(ConstKind: Byte; const ValueBytes: TBytes): String;
+var
+  IVal: Int64;
+  DVal: Double;
+  B: Byte;
+  I: Integer;
+  InStr: Boolean;
+begin
+  case ConstKind of
+    Ord(ckOrd):
+      begin
+        if Length(ValueBytes) >= 8 then
+          IVal := PInt64(@ValueBytes[0])^
+        else
+          IVal := 0;
+        Result := IntToStr(IVal);
+      end;
+
+    Ord(ckString):
+      begin
+        Result := '';
+        InStr := False;
+        for I := 0 to Length(ValueBytes) - 1 do
+        begin
+          B := ValueBytes[I];
+          if (B >= 32) and (B <= 126) and (B <> Ord('''')) then
+          begin
+            if not InStr then
+            begin
+              Result := Result + '''';
+              InStr := True;
+            end;
+            Result := Result + Chr(B);
+          end
+          else if B = Ord('''') then
+          begin
+            if not InStr then
+            begin
+              Result := Result + '''';
+              InStr := True;
+            end;
+            Result := Result + '''''';
+          end
+          else
+          begin
+            if InStr then
+            begin
+              Result := Result + '''';
+              InStr := False;
+            end;
+            Result := Result + '#$' + IntToHex(B, 2);
+          end;
+        end;
+        if InStr then
+          Result := Result + '''';
+        if Result = '' then
+          Result := '''''';
+      end;
+
+    Ord(ckReal):
+      begin
+        if Length(ValueBytes) >= 8 then
+          DVal := PDouble(@ValueBytes[0])^
+        else
+          DVal := 0;
+        Result := FloatToStr(DVal);
+      end;
+
+    Ord(ckNil):
+      Result := 'nil';
+
+    Ord(ckWideStr):
+      begin
+        { Display as UTF-16LE hex pairs }
+        Result := '';
+        InStr := False;
+        I := 0;
+        while I + 1 < Length(ValueBytes) do
+        begin
+          B := ValueBytes[I] or (ValueBytes[I + 1] shl 8);
+          if InStr then
+          begin
+            Result := Result + '''';
+            InStr := False;
+          end;
+          Result := Result + '#$' + IntToHex(ValueBytes[I], 2);
+          Result := Result + '#$' + IntToHex(ValueBytes[I + 1], 2);
+          Inc(I, 2);
+        end;
+        if InStr then
+          Result := Result + '''';
+        if Result = '' then
+          Result := '''''';
+      end;
+  else
+    Result := '<unknown const kind>';
+  end;
+end;
+
 function TOPDFReaderAdapter.Load(const BinaryPath: String): Boolean;
 var
   RecType: TOPDFRecordType;
@@ -229,6 +338,10 @@ var
   DefParameter: TDefParameter;
   DefInterface: TDefInterface;
   DefProperty: TDefProperty;
+  DefConstant: TDefConstant;
+  ConstBytes: TBytes;
+  ConstName: String;
+  PConst: PConstantInfo;
   ClassFields: TFieldDescriptorArray;
   ClassFieldNames: array of String;
   RecordFields: TFieldDescriptorArray;
@@ -748,6 +861,18 @@ begin
             WriteLn('[DEBUG] Skipping UnitDirectory record');
         end;
 
+      recConstant:
+        begin
+          if FReader.ReadConstant(DefConstant, ConstBytes, ConstName) then
+          begin
+            New(PConst);
+            PConst^.Name := ConstName;
+            PConst^.TypeID := DefConstant.TypeID;
+            PConst^.FormattedValue := FormatConstantValue(DefConstant.ConstKind, ConstBytes);
+            FConstants.Add(LowerCase(ConstName), PConst);
+          end;
+        end;
+
       else
         ; { Unknown record types handled by seek below }
     end;
@@ -759,7 +884,8 @@ begin
   end;
 
   WriteLn('[INFO] Loaded ', FTypes.Count, ' type(s), ', FVariables.Count,
-          ' variable(s), ', FFunctionScopes.Count, ' function scope(s), and ',
+          ' variable(s), ', FConstants.Count, ' constant(s), ',
+          FFunctionScopes.Count, ' function scope(s), and ',
           FLineInfo.Count, ' line mapping(s)');
 
   FLoaded := True;
@@ -1279,6 +1405,30 @@ begin
 
   if gVerbose then
     WriteLn('[DEBUG] FindFunctionByName: not found: ', Name);
+end;
+
+function TOPDFReaderAdapter.FindConstant(const Name: String;
+  out ConstInfo: TConstantInfo): Boolean;
+var
+  PConst: PConstantInfo;
+  SearchName: String;
+begin
+  Result := False;
+
+  if not FLoaded then
+    Exit;
+
+  SearchName := LowerCase(Name);
+  PConst := PConstantInfo(FConstants.Find(SearchName));
+  if Assigned(PConst) then
+  begin
+    ConstInfo := PConst^;
+    Result := True;
+    Exit;
+  end;
+
+  if gVerbose then
+    WriteLn('[DEBUG] Constant not found: ', Name);
 end;
 
 end.

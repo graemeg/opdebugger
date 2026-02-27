@@ -50,7 +50,7 @@ filter_output() {
     # Excludes: single-char names (A, B), program WriteLn output (multi-word lines)
     sed 's/^(pdr) //' | \
     sed -E 's/ \(0x[0-9A-Fa-f ]+\)//' | \
-    grep -E "^(([A-Z][A-Za-z0-9_.]+(\[[0-9]+\])? = )|(\[INFO\] )?[Ss]tepped to line:|\\[CALLSTACK\\]|#[0-9]+ |Exception: [A-Za-z]+ —)" | \
+    grep -E "^(([A-Za-z][A-Za-z0-9_.]+(\[[0-9]+\])? = )|(\[INFO\] )?[Ss]tepped to line:|\\[CALLSTACK\\]|#[0-9]+ |Exception: [A-Za-z]+ —)" | \
     sed 's/^\[INFO\] //' || true
 }
 

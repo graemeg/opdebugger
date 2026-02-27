@@ -875,6 +875,60 @@ In `appendsym_localvar`, check `sym.localloc.loc`. For `LOC_REGISTER`/`LOC_CREGI
 * A register-allocated variable reports its value from the live register state
 * Variables genuinely optimized out display `<optimized out>` with a clear message
 
+=== Feature 14: Compile-Time Constants
+
+==== Description
+
+Pascal constants (`const MaxItems = 100`, `const AppTitle = 'Hello'`) are compile-time values with no runtime address. The debugger cannot display them because `appendsym_const` in the FPC compiler was a stub — constants were never emitted into the OPDF section.
+
+==== OPDF Format Extension
+
+New record type `recConstant = 20` with `TDefConstant` packed record:
+
+* `TypeID: TTypeID` (4 bytes) — type of the constant (0 if untyped)
+* `ConstKind: Byte` (1 byte) — `TConstantKind` (ckOrd=0, ckString=1, ckReal=2, ckNil=3, ckWideStr=4)
+* `ValueLen: Word` (2 bytes) — length of embedded value data
+* `NameLen: TNameLen` (2 bytes)
+* Followed by ValueLen bytes of value data, then NameLen bytes of name
+
+Value encoding by kind:
+
+* `ckOrd`: 8 bytes (Int64, little-endian)
+* `ckString`: raw string bytes (UTF-8 or ASCII)
+* `ckReal`: 8 bytes (IEEE 754 Double)
+* `ckNil`: 0 bytes
+* `ckWideStr`: UTF-16LE byte pairs
+
+==== FPC Compiler Extension
+
+Implement `appendsym_const` in `dbgopdf.pas` for `constord`, `conststring`, `constreal`, `constnil`, and `constwstring`. Uses `sym.RealName` (not mangled name — constants have no linker symbol).
+
+==== Debugger Extension
+
+* `TConstantInfo` record and `FindConstant` method on `IDebugInfoReader`
+* `FConstants: TFPHashList` in adapter, populated at load time with pre-formatted values
+* `EvaluateVariable` falls back to constant lookup after variable lookup fails
+* Boolean and Char ordinal constants refined at query time using TypeID
+
+==== Remaining Work
+
+The following constant kinds are not yet supported and should be implemented in a future session:
+
+* `constset` — set constants (bitfield, up to 32 bytes)
+* `constguid` — GUID constants (16-byte `TGUID`)
+* `constpointer` — typed pointer constants
+* `constresourcestring` / `constwresourcestring` — resource string constants
+* Enum constant display — resolve enum member name from TypeID lookup
+
+==== Acceptance Criteria
+
+* `print MaxItems` displays `100` for `const MaxItems = 100`
+* `print AppTitle` displays `'Hello Debug'` for string constants
+* `print rocketUTF8` displays `#$F0#$9F#$9A#$80` for non-printable byte sequences
+* Boolean constants display as `True`/`False`
+* Char constants display as the character (e.g. `A`)
+* Local/global variables take precedence over same-named constants
+
 ---
 
 == Test Strategy

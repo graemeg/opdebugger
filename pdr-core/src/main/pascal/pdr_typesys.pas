@@ -1435,9 +1435,12 @@ end;
 function TTypeSystem.EvaluateVariable(const VarName: String): TVariableValue;
 var
   VarInfo: TVariableInfo;
+  ConstInfo: TConstantInfo;
+  TypeInfo: TTypeInfo;
   RIP: QWord;
   DotPos: Integer;
   BaseName, FieldPath: String;
+  IVal: Int64;
 begin
   Result.Name := VarName;
   Result.IsValid := False;
@@ -1471,6 +1474,43 @@ begin
   { Fall back to simple global variable lookup }
   if not FDebugInfoReader.FindVariable(VarName, VarInfo) then
   begin
+    { Try compile-time constant lookup }
+    if FDebugInfoReader.FindConstant(VarName, ConstInfo) then
+    begin
+      Result.Name := VarName;
+      Result.Value := ConstInfo.FormattedValue;
+      Result.Address := 0;
+      Result.IsValid := True;
+      Result.TypeName := '<const>';
+
+      { Refine display for ordinal constants using type info }
+      if (ConstInfo.TypeID <> 0) and
+         FDebugInfoReader.FindType(ConstInfo.TypeID, TypeInfo) then
+      begin
+        Result.TypeName := TypeInfo.Name;
+        if (TypeInfo.Category = tcPrimitive) and (TypeInfo.Size = 1) and
+           (Pos('BOOL', UpperCase(TypeInfo.Name)) > 0) then
+        begin
+          IVal := StrToInt64Def(ConstInfo.FormattedValue, 0);
+          if IVal <> 0 then
+            Result.Value := 'True'
+          else
+            Result.Value := 'False';
+        end
+        else if (TypeInfo.Category = tcPrimitive) and (TypeInfo.Size = 1) and
+                ((UpperCase(TypeInfo.Name) = 'CHAR') or
+                 (UpperCase(TypeInfo.Name) = 'ANSICHAR')) then
+        begin
+          IVal := StrToInt64Def(ConstInfo.FormattedValue, 0);
+          if (IVal >= 32) and (IVal <= 126) then
+            Result.Value := Chr(IVal)
+          else
+            Result.Value := '#' + IntToStr(IVal);
+        end;
+      end;
+      Exit;
+    end;
+
     Result.Value := '<error: variable not found>';
     Result.TypeName := '<unknown>';
     Exit;

@@ -107,6 +107,11 @@ type
                             const GUID: TGUID; const Methods: array of TInterfaceMethodDescriptor;
                             const MethodNames: array of String);
 
+    { Write compile-time constant }
+    procedure WriteConstant(const ConstName: String; TypeID: TTypeID;
+                           ConstKind: TConstantKind;
+                           const ValueBytes: array of Byte);
+
     { Write parameter definition }
     procedure WriteParameter(const ParamName: String; TypeID: TTypeID;
                             IsVar, IsConst, IsOut: Boolean);
@@ -158,6 +163,8 @@ type
                           out Methods: TInterfaceMethodDescriptorArray;
                           out MethodNames: TStringArray): Boolean;
     function ReadParameter(out Def: TDefParameter; out Name: String): Boolean;
+    function ReadConstant(out Def: TDefConstant; out ValueBytes: TBytes;
+                         out Name: String): Boolean;
 
     { Skip current record (for unsupported types) }
     procedure SkipRecord(const RecHeader: TOPDFRecordHeader);
@@ -722,6 +729,33 @@ begin
   Inc(FRecordCount);
 end;
 
+procedure TOPDFWriter.WriteConstant(const ConstName: String; TypeID: TTypeID;
+                                    ConstKind: TConstantKind;
+                                    const ValueBytes: array of Byte);
+var
+  RecHeader: TOPDFRecordHeader;
+  Payload: TDefConstant;
+begin
+  if not FHeaderWritten then
+    WriteHeader;
+
+  Payload.TypeID    := TypeID;
+  Payload.ConstKind := Ord(ConstKind);
+  Payload.ValueLen  := Length(ValueBytes);
+  Payload.NameLen   := Length(ConstName);
+
+  RecHeader.RecType := Ord(recConstant);
+  RecHeader.RecSize := SizeOf(TDefConstant) + Payload.ValueLen + Payload.NameLen;
+
+  FStream.Write(RecHeader, SizeOf(RecHeader));
+  FStream.Write(Payload, SizeOf(Payload));
+  if Payload.ValueLen > 0 then
+    FStream.Write(ValueBytes[0], Payload.ValueLen);
+  WriteString(ConstName);
+
+  Inc(FRecordCount);
+end;
+
 procedure TOPDFWriter.Finalize;
 var
   Header: TOPDFHeader;
@@ -1230,6 +1264,30 @@ begin
 
   if FStream.Position + Def.NameLen > FStream.Size then
     Exit;
+
+  SetLength(Name, Def.NameLen);
+  if Def.NameLen > 0 then
+    FStream.Read(Name[1], Def.NameLen);
+
+  Result := True;
+end;
+
+function TOPDFReader.ReadConstant(out Def: TDefConstant; out ValueBytes: TBytes;
+                                  out Name: String): Boolean;
+begin
+  Result := False;
+
+  if FStream.Position + SizeOf(TDefConstant) > FStream.Size then
+    Exit;
+
+  FStream.Read(Def, SizeOf(Def));
+
+  if FStream.Position + Def.ValueLen + Def.NameLen > FStream.Size then
+    Exit;
+
+  SetLength(ValueBytes, Def.ValueLen);
+  if Def.ValueLen > 0 then
+    FStream.Read(ValueBytes[0], Def.ValueLen);
 
   SetLength(Name, Def.NameLen);
   if Def.NameLen > 0 then
