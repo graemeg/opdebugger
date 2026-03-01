@@ -327,8 +327,11 @@ type
     { Find function by address }
     function FindFunctionByAddress(Address: QWord; out FuncInfo: TFunctionInfo): Boolean;
 
-    { Get all local variables in scope at the given RIP }
+    { Get immediate local variables and parameters of the current function }
     function GetScopeLocals(RIP: QWord): TVariableInfoArray;
+
+    { Get locals including enclosing (parent) scope variables for nested procedures }
+    function GetScopeLocalsWithParents(RIP: QWord): TVariableInfoArray;
 
     { Find function entry address by name (case-insensitive) }
     function FindFunctionByName(const Name: String;
@@ -374,6 +377,7 @@ type
     function Continue: Boolean;
     function Step: Boolean;
     function StepLine: Boolean;
+    function StepInto: Boolean;
     function StepOver: Boolean;
     function Pause: Boolean;
 

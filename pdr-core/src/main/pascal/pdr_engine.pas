@@ -80,6 +80,7 @@ type
     function Continue: Boolean;
     function Step: Boolean;
     function StepLine: Boolean;
+    function StepInto: Boolean;
     function StepOver: Boolean;
     function Pause: Boolean;
 
@@ -107,6 +108,7 @@ type
     { ICommandHandler - Inspection }
     function EvaluateExpression(const Expr: String): TVariableValue;
     function GetLocalVariables: TVariableValueArray;
+    function GetLocalVariablesWithParents: TVariableValueArray;
     function GetInspectLines(const Expr: String): TStringArray;
     function EvaluateArraySlice(const VarName: String;
                                 LowIndex, HighIndex: Int64): TVariableValueArray;
@@ -441,6 +443,9 @@ var
   I: Integer;
   TempBreakpoints: array of TBreakpointHandle;
   BreakpointHit: Boolean;
+  CurrentScope: TFunctionInfo;
+  HasScope: Boolean;
+  InScope: Boolean;
 begin
   Result := False;
 
@@ -485,28 +490,62 @@ begin
     Exit;
   end;
 
-  // Find all addresses for lines AFTER the current line
-  // We need to find the actual next executable line
+  // Determine the current function scope to restrict step-over to the current function.
+  // This ensures that lines inside called functions are not mistakenly used as step targets.
+  HasScope := FDebugInfoReader.FindFunctionByAddress(CurrentAddr, CurrentScope);
+  if gVerbose then
+  begin
+    if HasScope then
+      WriteLn('[INFO] Step-over scope: ', CurrentScope.Name,
+              ' [0x', IntToHex(CurrentScope.LowPC, 1), '..0x', IntToHex(CurrentScope.HighPC, 1), ')')
+    else
+      WriteLn('[INFO] Step-over scope: unknown, falling back to line-range limit');
+  end;
+
+  // Find all addresses for lines AFTER the current line and within the current function scope.
+  // NOTE: We must NOT use bare 'Continue;' in this loop because FPC resolves it
+  // to TDebuggerEngine.Continue (the method) rather than the loop-control keyword.
+  if gVerbose then
+    WriteLn('[DEBUG] StepLine: scanning ', Length(LineEntries), ' entries, currentLine=', CurrentLine.LineNumber);
   SetLength(TempBreakpoints, 0);
   for I := 0 to High(LineEntries) do
   begin
-    // Only set breakpoints on lines strictly after current line
-    // and before or equal to the current line + some reasonable limit (e.g., 100 lines)
-    if (LineEntries[I].LineNumber > CurrentLine.LineNumber) and
-       (LineEntries[I].LineNumber <= CurrentLine.LineNumber + 100) then
+    if gVerbose then
+      WriteLn('[DEBUG] entry[', I, ']: line=', LineEntries[I].LineNumber, ' addr=0x', IntToHex(LineEntries[I].Address, 1));
+
+    // Only consider lines AFTER the current line
+    if LineEntries[I].LineNumber > CurrentLine.LineNumber then
     begin
-      // Set temporary breakpoint at this address
-      SetLength(TempBreakpoints, Length(TempBreakpoints) + 1);
-      TempBreakpoints[High(TempBreakpoints)] := SetBreakpoint('0x' + IntToHex(LineEntries[I].Address, 1));
-      if TempBreakpoints[High(TempBreakpoints)] = -1 then
+      // Determine if this entry is within scope
+      InScope := True;
+      if HasScope then
       begin
-        WriteLn('[WARN] Failed to set temporary breakpoint at 0x', IntToHex(LineEntries[I].Address, 16));
+        if (LineEntries[I].Address < CurrentScope.LowPC) or
+           (LineEntries[I].Address >= CurrentScope.HighPC) then
+          InScope := False;
       end
       else
       begin
-        if gVerbose then
-          WriteLn('[DEBUG] Set temp breakpoint at line ', LineEntries[I].LineNumber,
-                  ' (0x', IntToHex(LineEntries[I].Address, 16), ')');
+        // Fallback: limit to 100 source lines when no scope info is available
+        if LineEntries[I].LineNumber > CurrentLine.LineNumber + 100 then
+          InScope := False;
+      end;
+
+      if InScope then
+      begin
+        // Set temporary breakpoint at this address
+        SetLength(TempBreakpoints, Length(TempBreakpoints) + 1);
+        TempBreakpoints[High(TempBreakpoints)] := SetBreakpoint('0x' + IntToHex(LineEntries[I].Address, 1));
+        if TempBreakpoints[High(TempBreakpoints)] = -1 then
+        begin
+          WriteLn('[WARN] Failed to set temporary breakpoint at 0x', IntToHex(LineEntries[I].Address, 16));
+        end
+        else
+        begin
+          if gVerbose then
+            WriteLn('[DEBUG] Set temp breakpoint at line ', LineEntries[I].LineNumber,
+                    ' (0x', IntToHex(LineEntries[I].Address, 16), ')');
+        end;
       end;
     end;
   end;
@@ -562,11 +601,89 @@ begin
   Result := True;
 end;
 
-function TDebuggerEngine.StepOver: Boolean;
+function TDebuggerEngine.StepInto: Boolean;
+var
+  StartAddr: QWord;
+  StartLine: TLineInfo;
+  CurrentAddr: QWord;
+  CurrentLine: TLineInfo;
+  MaxSteps: Integer;
 begin
   Result := False;
-  WriteLn('[WARNING] StepOver not implemented yet');
-  // TODO: Implement step over (skip function calls)
+
+  if FState <> dsPaused then
+  begin
+    WriteLn('[ERROR] Process is not paused');
+    Exit;
+  end;
+
+  // Use last breakpoint address as the source anchor — RIP may have advanced
+  // during breakpoint handling (single-step to re-execute original instruction).
+  StartAddr := FProcessController.GetLastBreakpointAddress;
+  if StartAddr = 0 then
+    StartAddr := FProcessController.GetCurrentAddress;
+
+  if StartAddr = 0 then
+  begin
+    WriteLn('[ERROR] Failed to get current address');
+    Exit;
+  end;
+
+  // Resolve the starting source line
+  if not FDebugInfoReader.FindLineByAddress(StartAddr, StartLine) then
+  begin
+    // No line info at this address — fall back to a raw instruction step
+    if gVerbose then
+      WriteLn('[INFO] StepInto: no source line, falling back to instruction step');
+    Result := FProcessController.Step;
+    Exit;
+  end;
+
+  if gVerbose then
+    WriteLn('[INFO] StepInto from: ', StartLine.FileName, ':', StartLine.LineNumber);
+
+  // Single-step instructions until the source line changes.
+  // A change means we either entered a called function or advanced to the next line.
+  MaxSteps := 10000;
+  repeat
+    if not FProcessController.Step then
+    begin
+      WriteLn('[ERROR] Failed to single-step');
+      Exit;
+    end;
+
+    // Detect process exit during stepping
+    CurrentAddr := FProcessController.GetCurrentAddress;
+    if CurrentAddr = 0 then
+    begin
+      WriteLn('[INFO] Process terminated during step');
+      FState := dsTerminated;
+      Exit(True);
+    end;
+
+    // Check whether the source line has changed
+    if FDebugInfoReader.FindLineByAddress(CurrentAddr, CurrentLine) then
+    begin
+      if (CurrentLine.LineNumber <> StartLine.LineNumber) or
+         (CurrentLine.FileName <> StartLine.FileName) then
+      begin
+        WriteLn('[INFO] Stepped to line: ', CurrentLine.FileName, ':', CurrentLine.LineNumber);
+        Result := True;
+        Exit;
+      end;
+    end;
+
+    Dec(MaxSteps);
+  until MaxSteps <= 0;
+
+  WriteLn('[WARN] StepInto: reached instruction limit without a source-line change');
+  Result := True;
+end;
+
+function TDebuggerEngine.StepOver: Boolean;
+begin
+  { StepOver is an alias for StepLine (step to next source line, skipping over calls) }
+  Result := StepLine;
 end;
 
 function TDebuggerEngine.Pause: Boolean;
@@ -1244,6 +1361,41 @@ begin
     Exit;
 
   Locals := FDebugInfoReader.GetScopeLocals(RIP);
+  SetLength(Result, Length(Locals));
+  for I := 0 to High(Locals) do
+  begin
+    try
+      Result[I] := FTypeSystem.EvaluateVariableInfo(Locals[I]);
+    except
+      on E: Exception do
+      begin
+        Result[I].Name := Locals[I].Name;
+        Result[I].Value := '<error: ' + E.Message + '>';
+        Result[I].TypeName := '';
+        Result[I].IsValid := False;
+      end;
+    end;
+  end;
+end;
+
+function TDebuggerEngine.GetLocalVariablesWithParents: TVariableValueArray;
+var
+  RIP: QWord;
+  Locals: TVariableInfoArray;
+  I: Integer;
+begin
+  SetLength(Result, 0);
+
+  if FState = dsIdle then
+    Exit;
+
+  RIP := FProcessController.GetLastBreakpointAddress;
+  if RIP = 0 then
+    RIP := FProcessController.GetCurrentAddress;
+  if RIP = 0 then
+    Exit;
+
+  Locals := FDebugInfoReader.GetScopeLocalsWithParents(RIP);
   SetLength(Result, Length(Locals));
   for I := 0 to High(Locals) do
   begin

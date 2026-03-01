@@ -436,7 +436,7 @@ begin
   // Check step result
   if WIFSTOPPED(Status) then
   begin
-    WriteLn('[INFO] Step complete');
+    if gVerbose then WriteLn('[INFO] Step complete');
     Result := True;
   end
   else if WIFEXITED(Status) then

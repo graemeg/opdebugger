@@ -3,7 +3,7 @@ break test_19_nested_scope.pas:14
 break test_19_nested_scope.pas:25
 break test_19_nested_scope.pas:30
 continue
-locals
+locals scoped
 continue
 locals
 quit

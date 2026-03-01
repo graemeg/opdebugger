@@ -1,0 +1,6 @@
+run
+break test_26_step_over.pas:19
+continue
+next
+print Counter
+quit

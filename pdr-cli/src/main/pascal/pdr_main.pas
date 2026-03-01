@@ -65,8 +65,8 @@ begin
   WriteLn('  attach <pid>   - Attach to running process');
   WriteLn('  detach         - Detach from process');
   WriteLn('  continue, c    - Continue execution');
-  WriteLn('  next, n        - Step to next source line');
-  WriteLn('  step, s        - Single instruction step');
+  WriteLn('  next, n        - Step over: next source line, skipping into calls');
+  WriteLn('  step, s        - Step into: next source line, descending into calls');
   WriteLn('  break <loc>    - Set breakpoint at location');
   WriteLn('  break <loc> if count=N - Set breakpoint that fires on Nth hit');
   WriteLn('    Location formats:');
@@ -77,7 +77,8 @@ begin
   WriteLn('  condition <num>  - Remove condition (make unconditional)');
   WriteLn('  delete <num>   - Remove breakpoint by number');
   WriteLn('  info breakpoints - List all breakpoints with conditions');
-  WriteLn('  locals         - List all local variables in current scope');
+  WriteLn('  locals         - List local variables in current function');
+  WriteLn('  locals scoped  - Include variables from enclosing scopes');
   WriteLn('  locals globals - Also include global variables');
   WriteLn('  inspect <var>  - Show structured type layout with all fields/properties');
   WriteLn('  set <var> = <value> - Assign a value to a variable');
@@ -236,7 +237,7 @@ begin
 
     'step', 's':
       begin
-        FEngine.Step;
+        FEngine.StepInto;
         PrintDisplayList;
       end;
 
@@ -438,7 +439,11 @@ begin
 
     'locals', 'lo':
       begin
-        LocalVars := FEngine.GetLocalVariables;
+        { 'locals scoped' includes enclosing scope variables (nested procedures) }
+        if (Length(Parts) > 1) and (LowerCase(Parts[1]) = 'scoped') then
+          LocalVars := FEngine.GetLocalVariablesWithParents
+        else
+          LocalVars := FEngine.GetLocalVariables;
 
         if Length(LocalVars) = 0 then
           WriteLn('[INFO] No local variables in current scope')

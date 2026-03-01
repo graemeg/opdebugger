@@ -163,7 +163,8 @@ TOPDFRecordType = (
   recInterface     = 16,  // COM or CORBA interface type
   recEnum          = 17,  // Enumeration type with named members
   recSet           = 18,  // Set type (bitfield over ordinal or enum base)
-  recUnitDirectory = 19   // Unit directory table (index of all compilation units)
+  recUnitDirectory = 19,  // Unit directory table (index of all compilation units)
+  recConstant      = 20   // Compile-time constant (value embedded in record)
 );
 ----
 
@@ -588,6 +589,69 @@ TDefParameter = packed record
 end;
 // Fixed part: 9 bytes
 ----
+
+=== Compile-Time Constant (recConstant = 20)
+
+A named constant whose value is known at compile time and has no runtime address. The value bytes are embedded directly in the record payload.
+
+[source,pascal]
+----
+TDefConstant = packed record
+  TypeID: TTypeID;    // 4 bytes — type of the constant (0 if untyped)
+  ConstKind: Byte;    // 1 byte — TConstantKind (see table below)
+  ValueLen: Word;     // 2 bytes — byte length of value data
+  NameLen: TNameLen;  // 2 bytes — byte length of name
+  // Followed by: ValueLen bytes of value data
+  // Followed by: NameLen bytes of name (unmangled Pascal identifier)
+end;
+// Fixed part: 9 bytes
+----
+
+The name is the unmangled Pascal identifier (e.g. `MaxItems`, not the linker-mangled form), since constants have no linker symbol.
+
+==== Constant Kind Encoding
+
+The `ConstKind` byte selects how the value bytes are interpreted:
+
+[cols="1,1,2,3"]
+|===
+|ConstKind |Name |Value Length |Encoding
+
+|`0`
+|`ckOrd`
+|8 bytes
+|Signed 64-bit integer (little-endian). Covers Integer, Boolean, Char, and Enum ordinal constants. The debugger uses `TypeID` to refine display: Boolean types render as `True`/`False`, Char types render as the character literal.
+
+|`1`
+|`ckString`
+|Variable
+|Raw string bytes (UTF-8 or ASCII). Length is `ValueLen`. The debugger formats this as a Pascal string literal, escaping non-printable bytes as `#$XX` hex sequences.
+
+|`2`
+|`ckReal`
+|8 bytes
+|IEEE 754 double-precision float (little-endian). Extended precision values are truncated to Double by the compiler.
+
+|`3`
+|`ckNil`
+|0 bytes
+|Nil pointer constant. No value bytes are emitted; `ValueLen` is 0.
+
+|`4`
+|`ckWideStr`
+|Variable
+|UTF-16LE encoded wide string. Length in bytes is `ValueLen` (always even). Each code unit is 2 bytes, little-endian.
+|===
+
+==== Unsupported Constant Kinds
+
+The following Pascal constant kinds are not currently emitted by the compiler and are reserved for future implementation:
+
+* `constset` — typed set constants
+* `constguid` — GUID constants
+* `constresourcestring` — resource string constants
+
+The compiler silently skips these constant kinds during emission. No record is written.
 
 == Source Information Records
 

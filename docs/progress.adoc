@@ -15,7 +15,7 @@ project, covering both the standalone debugger toolchain and the FPC compiler in
 
 == Completed Work
 
-=== Phase 3: Features 1–6, 14 (Completed)
+=== Phase 3: Features 1–6, 14–15 (Completed)
 
 * [x] Feature 1: `locals` command — lists all in-scope local variables with evaluated values
 * [x] Feature 1: `locals globals` subcommand — also enumerates global variables
@@ -24,7 +24,8 @@ project, covering both the standalone debugger toolchain and the FPC compiler in
 * [x] Feature 4: `set <var> = <value>` — in-process variable assignment (primitives and enums)
 * [x] Feature 5: `break ... if count=N` — hit-count conditional breakpoints with `condition` and `info breakpoints` commands
 * [x] Feature 6: `display` / `undisplay` — auto-print variables on every breakpoint stop, with out-of-scope handling
-* [x] Integration tests 14–21 covering all six features; 21/21 automated tests passing
+* [x] Feature 15: Step over (`next`/`n`) and step into (`step`/`s`) — source-line-aware stepping
+* [x] Integration tests 14–21, 25–27 covering all features; 27/27 automated tests passing
 * [x] Sentinel breakpoint pattern applied to all tests (prevents program output mixing with debugger output on detach)
 
 === Standalone Debugger (Phases 0–2)
@@ -351,6 +352,16 @@ Full specification: `docs/phase3-plan.adoc`
 * [ ] Extend `appendsym_const` for remaining constant kinds: `constset`, `constguid`, `constpointer`, `constresourcestring`, `constwresourcestring`
 * [ ] Add enum constant display (resolve member name from TypeID)
 
+==== Feature 15: Step Over and Step Into — DONE
+
+* [x] Fix `StepLine` (step over) — uses function scope address range (`FindFunctionByAddress`) instead of 100-line range heuristic
+* [x] Implement `StepInto` — loops `PTRACE_SINGLESTEP` until source line changes (`FindLineByAddress`)
+* [x] Wire `step`/`s` to `StepInto` and `next`/`n` to `StepLine` in CLI
+* [x] Gate ptrace adapter `[INFO] Step complete` on gVerbose to prevent noise during StepInto loops
+* [x] Fix `Continue;` name collision — FPC resolves bare `Continue;` inside `TDebuggerEngine.StepLine` to `self.Continue` (the method) instead of the loop control keyword; restructured loop to use `if-else` chains
+* [x] Integration test: `test_26_step_over.pas` — step over a procedure call stays in caller
+* [x] Integration test: `test_27_step_into.pas` — step into a function call descends into callee
+
 ==== Feature 13: Optimized Code — Register-Allocated Variables
 
 * [ ] Extend `LocationExpr` encoding: value `3` = register-allocated
@@ -399,7 +410,7 @@ x86_64/cputarg.pas   → dbgopdf registration
 i386/cputarg.pas     → dbgopdf registration
 ----
 
-=== Integration Tests (21 automated)
+=== Integration Tests (27 automated)
 
 ----
 test_01_primitives         → Integer and Boolean variables
@@ -424,6 +435,12 @@ test_18_inspect_class_intf → inspect command: class + interface with methods
 test_19_nested_scope       → nested procedure scoping: DeclIndex-based visibility
 test_20_conditional_break  → conditional breakpoint: hit-count form (count=7 in loop)
 test_21_display            → display command: auto-print Iter and Sum across continues
+test_22_watchpoint         → hardware watchpoints: DR0-DR3 write/read-write detection
+test_23_exception          → break on exception raise with class name and message
+test_24_method_properties  → method-backed property evaluation via call injection
+test_25_constants          → compile-time constant display (Integer, Boolean, Char, Real, String, UTF-8)
+test_26_step_over          → step over: next skips called procedure, stays in caller
+test_27_step_into          → step into: step descends into called function body
 ----
 
 ---
@@ -479,8 +496,8 @@ undisplay <expr>             Remove from auto-display list
 undisplay                    Remove all display entries
 info display                 List registered display expressions
 continue / c                 Resume execution
-next / n                     Step to next source line
-step / s                     Single instruction step
+next / n                     Step over: next source line, skipping into calls
+step / s                     Step into: next source line, descending into calls
 print <var>                  Print variable value
 print <var>.<field>          Dot notation for class/record fields
 print <arr>[N..M]            Array slice — elements N to M inclusive
@@ -498,8 +515,6 @@ quit                         Exit debugger
 
 [source]
 ----
-watch <var>                  Break when variable is written
-unwatch <var>                Remove watchpoint
 call <method>(<args>)        Invoke a method in the debugged process
 break foo.pas:N if <expr>    Conditional breakpoint (expression — requires Feature 9)
 ----

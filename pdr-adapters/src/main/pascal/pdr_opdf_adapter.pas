@@ -87,6 +87,7 @@ type
     function GetFileLineEntries(const FileName: String): TLineInfoArray;
     function FindFunctionByAddress(Address: QWord; out FuncInfo: TFunctionInfo): Boolean;
     function GetScopeLocals(RIP: QWord): TVariableInfoArray;
+    function GetScopeLocalsWithParents(RIP: QWord): TVariableInfoArray;
     function FindFunctionByName(const Name: String;
       out FuncInfo: TFunctionInfo): Boolean;
     function FindConstant(const Name: String; out ConstInfo: TConstantInfo): Boolean;
@@ -1217,20 +1218,28 @@ function TOPDFReaderAdapter.GetCurrentFunctionScope(RIP: QWord): Cardinal;
 var
   I: Integer;
   FuncScope: PFunctionScope;
+  BestSize, CurSize: QWord;
 begin
   Result := 0;
 
   if not FLoaded then
     Exit;
 
-  { Search for function scope containing RIP }
+  { Search for the most specific (smallest) function scope containing RIP.
+    When nested functions exist, the parent scope has a wider [LowPC, HighPC)
+    range that also contains the child's code. We need the innermost scope. }
+  BestSize := High(QWord);
   for I := 0 to FFunctionScopes.Count - 1 do
   begin
     FuncScope := PFunctionScope(FFunctionScopes[I]);
     if (RIP >= FuncScope^.LowPC) and (RIP < FuncScope^.HighPC) then
     begin
-      Result := FuncScope^.ScopeID;
-      Exit;
+      CurSize := FuncScope^.HighPC - FuncScope^.LowPC;
+      if CurSize < BestSize then
+      begin
+        BestSize := CurSize;
+        Result := FuncScope^.ScopeID;
+      end;
     end;
   end;
 end;
@@ -1257,8 +1266,47 @@ begin
     Result[I] := PLocalVariableInfo(LocalList[I])^;
 end;
 
-{ Return all local variables in scope at the given RIP }
+{ Return immediate local variables and parameters of the current function }
 function TOPDFReaderAdapter.GetScopeLocals(RIP: QWord): TVariableInfoArray;
+var
+  ScopeID: Cardinal;
+  Locals: TLocalVariableArray;
+  I: Integer;
+begin
+  SetLength(Result, 0);
+
+  if not FLoaded then
+    Exit;
+
+  ScopeID := GetCurrentFunctionScope(RIP);
+  if ScopeID = 0 then
+    Exit;
+
+  { Add locals from current scope only — no ancestor traversal }
+  Locals := FindLocalVariablesInScope(ScopeID);
+  SetLength(Result, Length(Locals));
+  for I := 0 to High(Locals) do
+  begin
+    Result[I].Name := Locals[I].Name;
+    Result[I].TypeID := Locals[I].TypeID;
+    Result[I].Address := 0;
+    Result[I].LocationExpr := Locals[I].LocationExpr;
+    Result[I].LocationData := Locals[I].LocationData;
+  end;
+end;
+
+{ Return locals including enclosing (parent) scope variables for nested procedures.
+  For a nested procedure, this includes variables from the parent function that
+  were declared before the nested procedure (Pascal scoping rules).
+
+  Note: FPC emits each procedure as a separate scope with non-overlapping
+  LowPC/HighPC ranges, so address-range nesting cannot identify parents.
+  Instead we use DeclIndex: for nested procedures, the FPC compiler sets
+  DeclIndex to the procsym's position in the parent scope's SymList.
+  Top-level procedures have DeclIndex equal to their position in the unit's
+  SymList (typically a larger value). This heuristic filters candidates by
+  comparing DeclIndex values. }
+function TOPDFReaderAdapter.GetScopeLocalsWithParents(RIP: QWord): TVariableInfoArray;
 var
   ScopeID: Cardinal;
   Locals: TLocalVariableArray;
@@ -1266,7 +1314,8 @@ var
   I, J, Count: Integer;
   CurDeclIndex: Word;
 begin
-  SetLength(Result, 0);
+  { Start with the immediate locals }
+  Result := GetScopeLocals(RIP);
 
   if not FLoaded then
     Exit;
@@ -1290,37 +1339,19 @@ begin
     Exit;
   CurDeclIndex := CurScope^.DeclIndex;
 
-  { Add locals from current scope }
-  Locals := FindLocalVariablesInScope(ScopeID);
-  SetLength(Result, Length(Locals));
-  for I := 0 to High(Locals) do
-  begin
-    Result[I].Name := Locals[I].Name;
-    Result[I].TypeID := Locals[I].TypeID;
-    Result[I].Address := 0;
-    Result[I].LocationExpr := Locals[I].LocationExpr;
-    Result[I].LocationData := Locals[I].LocationData;
-  end;
-
-  { Search enclosing scopes for variables declared before this nested procedure.
-    Only include variables whose DeclIndex < the current function's DeclIndex,
-    since Pascal scoping rules mean only variables declared before the nested
-    procedure are visible to it. Variables declared after are not accessible.
-    Skip if DeclIndex=0 (top-level procedure, no meaningful parent scope). }
+  { Only search parent scopes if this is a nested procedure (DeclIndex > 0) }
   if CurDeclIndex > 0 then
     for I := 0 to FFunctionScopes.Count - 1 do
     begin
       FuncScope := PFunctionScope(FFunctionScopes[I]);
-      if FuncScope^.ScopeID = ScopeID then
-        Continue;
-
-      { Heuristic: an ancestor's DeclIndex is larger than a child's.
-        This filters out descendants and unrelated scopes. }
-      if FuncScope^.DeclIndex > CurScope^.DeclIndex then
+      if FuncScope^.ScopeID <> ScopeID then
       begin
-        Locals := FindLocalVariablesInScope(FuncScope^.ScopeID);
-        if Length(Locals) > 0 then
+        { Heuristic: an ancestor scope's DeclIndex is typically larger than
+          the nested scope's DeclIndex because the parent is declared in a
+          higher-level symbol table (unit scope) with more entries. }
+        if FuncScope^.DeclIndex > CurScope^.DeclIndex then
         begin
+          Locals := FindLocalVariablesInScope(FuncScope^.ScopeID);
           for J := 0 to High(Locals) do
           begin
             { Only include variables declared before this nested procedure }
