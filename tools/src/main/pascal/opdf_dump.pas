@@ -24,7 +24,7 @@ uses
   Classes, SysUtils, Math, opdf_types, elf_reader;
 
 const
-  MAX_REC_TYPE = 19;
+  MAX_REC_TYPE = 20;
 
 type
   TRecordCounts = array[0..MAX_REC_TYPE] of Cardinal;
@@ -88,6 +88,7 @@ begin
   if LName = 'enum' then Exit(17);
   if LName = 'set' then Exit(18);
   if LName = 'unitdirectory' then Exit(19);
+  if LName = 'constant' then Exit(20);
   Result := -1;
 end;
 
@@ -334,6 +335,35 @@ begin
     [Def.TypeID, Def.BaseTypeID, Def.SizeInBytes, Def.LowerBound, Name]));
 end;
 
+procedure DumpConstant(Stream: TStream);
+var
+  Def: TDefConstant;
+  Name: String;
+  ValueBytes: TBytes;
+  I: Integer;
+begin
+  Stream.Read(Def, SizeOf(Def));
+  SetLength(ValueBytes, Def.ValueLen);
+  if Def.ValueLen > 0 then
+    Stream.Read(ValueBytes[0], Def.ValueLen);
+  Name := ReadString(Stream, Def.NameLen);
+  Write(Format('    TypeID=%d Kind=%d ValueLen=%d Name="%s"',
+    [Def.TypeID, Def.ConstKind, Def.ValueLen, Name]));
+  if Def.ValueLen > 0 then
+  begin
+    Write(' Value=[');
+    for I := 0 to Min(Def.ValueLen, 16) - 1 do
+    begin
+      if I > 0 then Write(' ');
+      Write(Format('%.2x', [ValueBytes[I]]));
+    end;
+    if Def.ValueLen > 16 then
+      Write('...');
+    Write(']');
+  end;
+  WriteLn;
+end;
+
 procedure DumpUnitDirectory(Stream: TStream);
 var
   UnitCnt: Word;
@@ -524,6 +554,7 @@ begin
           recEnum:          DumpEnum(Stream);
           recSet:           DumpSet(Stream);
           recUnitDirectory: DumpUnitDirectory(Stream);
+          recConstant:      DumpConstant(Stream);
         else
           { Unknown record type — skip }
         end;
@@ -606,7 +637,7 @@ begin
   WriteLn('Record types: Primitive, GlobalVar, ShortString, AnsiString,');
   WriteLn('  UnicodeString, Pointer, Array, Record, Class, Property,');
   WriteLn('  Method, LocalVar, Parameter, LineInfo, FunctionScope,');
-  WriteLn('  Interface, Enum, Set, UnitDirectory');
+  WriteLn('  Interface, Enum, Set, UnitDirectory, Constant');
 end;
 
 procedure ParseArgs;
