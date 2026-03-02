@@ -239,11 +239,11 @@ end;
 procedure DumpLocalVar(Stream: TStream);
 var
   Def: TDefLocalVar;
-  LocData: ShortInt;
+  LocData: SmallInt;
   Name: String;
 begin
   Stream.Read(Def, SizeOf(Def));
-  Stream.Read(LocData, 1);
+  Stream.Read(LocData, 2);
   Name := ReadString(Stream, Def.NameLen);
   WriteLn(Format('    TypeID=%d ScopeID=0x%x LocExpr=%d DeclIdx=%d LocData=%d Name="%s"',
     [Def.TypeID, Def.ScopeID, Def.LocationExpr, Def.DeclIndex, LocData, Name]));

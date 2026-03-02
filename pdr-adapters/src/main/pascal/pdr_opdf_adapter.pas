@@ -39,7 +39,7 @@ type
     TypeID: TTypeID;        // Type identifier
     ScopeID: Cardinal;      // Function scope ID
     LocationExpr: Byte;     // Location expression type (1=RBP-relative)
-    LocationData: ShortInt; // RBP offset (signed)
+    LocationData: SmallInt; // RBP offset (signed)
     DeclIndex: Word;        // Declaration order in parent scope
   end;
   PLocalVariableInfo = ^TLocalVariableInfo;
@@ -538,7 +538,7 @@ var
   WriteMethName: String;
   FileName: String;
   FunctionName: String;
-  LocationData: ShortInt;
+  LocationData: SmallInt;
   PType: PTypeInfo;
   PVar: PVariableInfo;
   PLine: PLineInfo;
