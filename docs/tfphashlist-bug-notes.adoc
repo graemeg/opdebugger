@@ -1,0 +1,80 @@
+= TFPHashList.Find() Bug Report Notes
+:author: Graeme Geldenhuys
+:date: 2026-03-01
+
+== Summary
+
+`TFPHashList.Find()` returns incorrect entries when the hash table contains a large number of entries (thousands). The returned entry belongs to a different key than the one requested.
+
+== Environment
+
+* FPC version: 3.3.1 (trunk/main development branch)
+* OS: Linux x86_64
+* Unit: `contnrs` (TFPHashList)
+
+== Observed Behaviour
+
+When using `TFPHashList` to store ~5000+ entries keyed by `IntToStr(TypeID)` (short numeric strings like `"2077"`, `"29609"`, etc.), `Find()` returns entries belonging to different keys.
+
+Specifically:
+
+* `FTypes.Add('2077', PtrToTfpgRect)` stores a `TfpgRect` class type
+* Later, `FTypes.Find('2077')` returns a `^TXSelectionEvent` pointer type that was stored under key `'29609'`
+
+The wrong result is consistent within a session but changes across different runs/configurations — suggesting a hash collision resolution bug rather than random corruption.
+
+== Reproduction Context
+
+This was discovered in the PDR debugger's OPDF adapter (`pdr_opdf_adapter.pas`), which loads debug type information from a large multi-unit Pascal application (docview/fpGUI: 50+ compilation units, ~5000+ type entries).
+
+=== Data Structure Usage Pattern
+
+[source,pascal]
+----
+var
+  FTypes: TFPHashList;  // TypeID -> PTypeInfo
+
+// During loading (thousands of Add calls):
+FTypes.Add(IntToStr(SomeTypeID), PType);
+
+// During lookup:
+PType := PTypeInfo(FTypes.Find(IntToStr(QueryTypeID)));
+// BUG: returns entry from a different key
+----
+
+=== Key Evidence from OPDF Dump
+
+The binary's debug data was independently verified using a raw OPDF section parser:
+
+* TypeID 2077 is defined exactly once across all 50+ headers as `TfpgRect` (a class with 4 fields)
+* TypeID 29609 is defined as `^TXSelectionEvent` (a pointer type)
+* No duplicate definitions exist for TypeID 2077
+* After `FTypes.Add('2077', PtrToTfpgRect)`, calling `FTypes.Find('2077')` returned the entry stored under `'29609'` (`^TXSelectionEvent`)
+
+=== Sequence to Reproduce
+
+. Create a `TFPHashList`
+. Add thousands of entries with short numeric string keys (`IntToStr(1)` through `IntToStr(N)` where N > 5000)
+. Call `Find()` on various keys and verify the returned pointer matches the one that was `Add()`-ed for that key
+. Expected: exact match for every key
+. Actual: some keys return entries belonging to different keys
+
+== Minimal Reproduction (TODO)
+
+A standalone test program should be created that:
+
+. Allocates ~10000 records, each with a unique ID and name
+. Stores them in `TFPHashList` keyed by `IntToStr(ID)`
+. Iterates all keys and verifies `Find(key)` returns the correct record
+. Reports any mismatches
+
+This would confirm whether the bug is in `TFPHashList` itself or requires specific hash collision patterns to trigger.
+
+== Workaround
+
+Replace `TFPHashList` with a direct-indexed dynamic array for integer-keyed lookups. This eliminates the hash table entirely and provides O(1) lookup by TypeID.
+
+== Related Files
+
+* FPC source: `packages/fcl-base/src/contnrs.pp` (TFPHashList implementation)
+* Affected code: `pdr-adapters/src/main/pascal/pdr_opdf_adapter.pas` (FTypes field)

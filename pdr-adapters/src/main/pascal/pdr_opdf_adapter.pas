@@ -45,6 +45,26 @@ type
   PLocalVariableInfo = ^TLocalVariableInfo;
   TLocalVariableArray = array of TLocalVariableInfo;
 
+  { Direct-indexed type map — replaces TFPHashList which returns wrong entries
+    at scale (see docs/tfphashlist-bug-notes.adoc) }
+  TTypeMap = class
+  private
+    FDirect: array of PTypeInfo;    // Index by TypeID for IDs < $80000000
+    FRemappedPtrs: TFPList;         // PTypeInfo entries for TypeID >= $80000000
+    FRemappedIDs: array of TTypeID; // Corresponding TypeIDs for FRemappedPtrs
+    FRemappedCount: Integer;
+    FAllItems: TFPList;             // All entries in insertion order (for iteration)
+    function GetCount: Integer;
+  public
+    constructor Create;
+    destructor Destroy; override;
+    procedure Add(TypeID: TTypeID; PType: PTypeInfo);
+    function Find(TypeID: TTypeID): PTypeInfo;
+    property Count: Integer read GetCount;
+    function GetItem(Index: Integer): PTypeInfo;
+    procedure Clear;
+  end;
+
   { OPDF Reader Adapter - implements IDebugInfoReader }
   TOPDFReaderAdapter = class(TInterfacedObject, IDebugInfoReader)
   private
@@ -55,7 +75,7 @@ type
     FHeader: TOPDFHeader;
 
     { Internal dictionaries for fast lookup }
-    FTypes: TFPHashList;            // TypeID -> TTypeInfo
+    FTypes: TTypeMap;               // TypeID -> TTypeInfo
     FVariables: TFPHashList;        // Variable name -> TVariableInfo
     FLineInfo: TFPList;             // List of TLineInfo records
     FFunctionScopes: TFPList;       // List of TFunctionScope records
@@ -63,11 +83,21 @@ type
     FConstants: TFPHashList;         // Constant name -> TConstantInfo
     FLoaded: Boolean;
 
+    { Cumulative TypeID remap for cross-compilation collision resolution.
+      Direct-indexed array: FTypeIDRemap[OrigTypeID] = RemappedTypeID (0 = no remap).
+      Persists across headers so later headers can resolve references to
+      types remapped in earlier headers from the same compilation invocation. }
+    FTypeIDRemap: array of TTypeID;
+    FNextRemappedTypeID: TTypeID;
+
     { Helper methods }
     procedure ClearCache;
     function FindOPDFFile(const BinaryPath: String): String;
     function GetCurrentFunctionScope(RIP: QWord): Cardinal;
     function FindLocalVariablesInScope(ScopeID: Cardinal): TLocalVariableArray;
+    function RemapTypeID(TypeID: TTypeID): TTypeID;
+    function ResolveTypeCollision(OrigTypeID: TTypeID; const TypeName: String;
+      out GlobalTypeID: TTypeID): Byte;
   public
     constructor Create;
     destructor Destroy; override;
@@ -95,17 +125,103 @@ type
 
 implementation
 
+{ TTypeMap }
+
+const
+  REMAP_THRESHOLD = $80000000;
+
+constructor TTypeMap.Create;
+begin
+  inherited Create;
+  SetLength(FDirect, 0);
+  FRemappedPtrs := TFPList.Create;
+  SetLength(FRemappedIDs, 0);
+  FRemappedCount := 0;
+  FAllItems := TFPList.Create;
+end;
+
+destructor TTypeMap.Destroy;
+begin
+  FRemappedPtrs.Free;
+  FAllItems.Free;
+  inherited Destroy;
+end;
+
+procedure TTypeMap.Add(TypeID: TTypeID; PType: PTypeInfo);
+var
+  Idx: Integer;
+begin
+  if TypeID < REMAP_THRESHOLD then
+  begin
+    Idx := Integer(TypeID);
+    if Idx >= Length(FDirect) then
+      SetLength(FDirect, Idx + 1024);
+    FDirect[Idx] := PType;
+  end
+  else
+  begin
+    if FRemappedCount >= Length(FRemappedIDs) then
+      SetLength(FRemappedIDs, FRemappedCount + 64);
+    FRemappedIDs[FRemappedCount] := TypeID;
+    FRemappedPtrs.Add(PType);
+    Inc(FRemappedCount);
+  end;
+  FAllItems.Add(PType);
+end;
+
+function TTypeMap.Find(TypeID: TTypeID): PTypeInfo;
+var
+  Idx, I: Integer;
+begin
+  Result := nil;
+  if TypeID < REMAP_THRESHOLD then
+  begin
+    Idx := Integer(TypeID);
+    if (Idx >= 0) and (Idx < Length(FDirect)) then
+      Result := FDirect[Idx];
+  end
+  else
+  begin
+    for I := 0 to FRemappedCount - 1 do
+      if FRemappedIDs[I] = TypeID then
+      begin
+        Result := PTypeInfo(FRemappedPtrs[I]);
+        Exit;
+      end;
+  end;
+end;
+
+function TTypeMap.GetCount: Integer;
+begin
+  Result := FAllItems.Count;
+end;
+
+function TTypeMap.GetItem(Index: Integer): PTypeInfo;
+begin
+  Result := PTypeInfo(FAllItems[Index]);
+end;
+
+procedure TTypeMap.Clear;
+begin
+  SetLength(FDirect, 0);
+  FRemappedPtrs.Clear;
+  SetLength(FRemappedIDs, 0);
+  FRemappedCount := 0;
+  FAllItems.Clear;
+end;
+
 { TOPDFReaderAdapter }
 
 constructor TOPDFReaderAdapter.Create;
 begin
   inherited Create;
-  FTypes := TFPHashList.Create;
+  FTypes := TTypeMap.Create;
   FVariables := TFPHashList.Create;
   FLineInfo := TFPList.Create;
   FFunctionScopes := TFPList.Create;
   FLocalVariables := TFPHashList.Create;
   FConstants := TFPHashList.Create;
+  SetLength(FTypeIDRemap, 0);
   FReader := nil;
   FStream := nil;
   FLoaded := False;
@@ -117,6 +233,7 @@ begin
   FTypes.Free;
   FVariables.Free;
   FConstants.Free;
+  SetLength(FTypeIDRemap, 0);
   FLineInfo.Free;
   FFunctionScopes.Free;
   FLocalVariables.Free;
@@ -133,7 +250,7 @@ begin
   // Free cached type info
   for I := 0 to FTypes.Count - 1 do
   begin
-    TypeInfo := TTypeInfo(FTypes[I]^);
+    TypeInfo := FTypes.GetItem(I)^;
     // Free ClassInfo if it's a class type
     if (TypeInfo.Category = tcClass) and (TypeInfo.ClassInfo <> nil) then
       Dispose(TypeInfo.ClassInfo);
@@ -143,7 +260,7 @@ begin
     // Free InterfaceInfo if it's an interface type
     if (TypeInfo.Category = tcInterface) and (TypeInfo.InterfaceInfo <> nil) then
       Dispose(TypeInfo.InterfaceInfo);
-    Dispose(PTypeInfo(FTypes[I]));
+    Dispose(FTypes.GetItem(I));
   end;
   FTypes.Clear;
 
@@ -183,6 +300,8 @@ begin
     LocalList.Free;
   end;
   FLocalVariables.Clear;
+
+  SetLength(FTypeIDRemap, 0);
 
   // Free reader and stream
   FreeAndNil(FReader);
@@ -318,6 +437,68 @@ begin
   end;
 end;
 
+const
+  TR_NEW_TYPE  = 0;
+  TR_DUPLICATE = 1;
+  TR_COLLISION = 2;
+
+function TOPDFReaderAdapter.RemapTypeID(TypeID: TTypeID): TTypeID;
+var
+  Idx: Integer;
+begin
+  if TypeID < REMAP_THRESHOLD then
+  begin
+    Idx := Integer(TypeID);
+    if (Idx >= 0) and (Idx < Length(FTypeIDRemap)) and (FTypeIDRemap[Idx] <> 0) then
+      Result := FTypeIDRemap[Idx]
+    else
+      Result := TypeID;
+  end
+  else
+    Result := TypeID;  { Remapped IDs are never re-remapped }
+end;
+
+function TOPDFReaderAdapter.ResolveTypeCollision(OrigTypeID: TTypeID;
+  const TypeName: String; out GlobalTypeID: TTypeID): Byte;
+var
+  ExistingType: PTypeInfo;
+  NewTypeID: TTypeID;
+begin
+  ExistingType := FTypes.Find(OrigTypeID);
+  if ExistingType = nil then
+  begin
+    { No collision — use original TypeID }
+    GlobalTypeID := OrigTypeID;
+    Result := TR_NEW_TYPE;
+  end
+  else if ExistingType^.Name = TypeName then
+  begin
+    { True dedup — same type from different compilation }
+    GlobalTypeID := ExistingType^.TypeID;
+    if ExistingType^.TypeID <> OrigTypeID then
+    begin
+      if Integer(OrigTypeID) >= Length(FTypeIDRemap) then
+        SetLength(FTypeIDRemap, Integer(OrigTypeID) + 1024);
+      FTypeIDRemap[Integer(OrigTypeID)] := ExistingType^.TypeID;
+    end;
+    Result := TR_DUPLICATE;
+  end
+  else
+  begin
+    { Collision — different type with same TypeID }
+    NewTypeID := FNextRemappedTypeID;
+    Inc(FNextRemappedTypeID);
+    GlobalTypeID := NewTypeID;
+    if Integer(OrigTypeID) >= Length(FTypeIDRemap) then
+      SetLength(FTypeIDRemap, Integer(OrigTypeID) + 1024);
+    FTypeIDRemap[Integer(OrigTypeID)] := NewTypeID;
+    if gVerbose then
+      WriteLn('[DEBUG] TypeID collision: ', OrigTypeID, ' "', ExistingType^.Name,
+              '" vs "', TypeName, '" -> remapped to ', NewTypeID);
+    Result := TR_COLLISION;
+  end;
+end;
+
 function TOPDFReaderAdapter.Load(const BinaryPath: String): Boolean;
 var
   RecType: TOPDFRecordType;
@@ -367,11 +548,15 @@ var
   I: Integer;
   ELFStream: TMemoryStream;
   RecStartPos: Int64;
+  Resolution: Byte;
+  GlobalTypeID: TTypeID;
 begin
   Result := False;
 
   // Clear any previously loaded data
   ClearCache;
+
+  FNextRemappedTypeID := $80000000;
 
   FBinaryPath := BinaryPath;
 
@@ -428,7 +613,7 @@ begin
     Exit;
   end;
 
-//  if gVerbose then
+  if gVerbose then
   begin
     WriteLn('[INFO] OPDF version: ', FHeader.Version);
     WriteLn('[INFO] Target architecture: ', ArchToString(TTargetArch(FHeader.TargetArch)));
@@ -444,8 +629,10 @@ begin
     { Check if we're at another OPDF header (next compilation unit) }
     if FReader.TryReadNextHeader then
     begin
+      { Remap table is cumulative — NOT cleared per header, because local
+        vars in later headers may reference types remapped in earlier ones }
       if gVerbose then
-        WriteLn('[DEBUG] Skipped OPDF header at offset 0x', IntToHex(FStream.Position - SizeOf(TOPDFHeader), 1));
+        WriteLn('[DEBUG] New OPDF header at offset 0x', IntToHex(FStream.Position - SizeOf(TOPDFHeader), 1));
       Continue;
     end;
 
@@ -462,12 +649,12 @@ begin
         begin
           if FReader.ReadPrimitive(DefPrimitive, TypeName) then
           begin
-            { Deduplicate: skip if TypeID already loaded from an earlier unit }
-            if FTypes.Find(IntToStr(DefPrimitive.TypeID)) = nil then
+            Resolution := ResolveTypeCollision(DefPrimitive.TypeID, TypeName, GlobalTypeID);
+            if Resolution <> TR_DUPLICATE then
             begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
-              PType^.TypeID := DefPrimitive.TypeID;
+              PType^.TypeID := GlobalTypeID;
               PType^.Name := TypeName;
               PType^.Size := DefPrimitive.SizeInBytes;
               PType^.IsSigned := DefPrimitive.IsSigned <> 0;
@@ -481,7 +668,7 @@ begin
               else
                 PType^.Category := tcPrimitive;
 
-              FTypes.Add(IntToStr(DefPrimitive.TypeID), PType);
+              FTypes.Add(GlobalTypeID, PType);
             end;
           end;
         end;
@@ -490,18 +677,19 @@ begin
         begin
           if FReader.ReadShortString(DefShortString, TypeName) then
           begin
-            if FTypes.Find(IntToStr(DefShortString.TypeID)) = nil then
+            Resolution := ResolveTypeCollision(DefShortString.TypeID, TypeName, GlobalTypeID);
+            if Resolution <> TR_DUPLICATE then
             begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
-              PType^.TypeID := DefShortString.TypeID;
+              PType^.TypeID := GlobalTypeID;
               PType^.Name := TypeName;
               PType^.Size := DefShortString.MaxLength + 1; // Length byte + data
               PType^.IsSigned := False;
               PType^.Category := tcShortString;
               PType^.MaxLength := DefShortString.MaxLength;
 
-              FTypes.Add(IntToStr(DefShortString.TypeID), PType);
+              FTypes.Add(GlobalTypeID, PType);
             end;
           end;
         end;
@@ -510,18 +698,19 @@ begin
         begin
           if FReader.ReadAnsiString(DefAnsiString, TypeName) then
           begin
-            if FTypes.Find(IntToStr(DefAnsiString.TypeID)) = nil then
+            Resolution := ResolveTypeCollision(DefAnsiString.TypeID, TypeName, GlobalTypeID);
+            if Resolution <> TR_DUPLICATE then
             begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
-              PType^.TypeID := DefAnsiString.TypeID;
+              PType^.TypeID := GlobalTypeID;
               PType^.Name := TypeName;
               PType^.Size := FHeader.PointerSize;
               PType^.IsSigned := False;
               PType^.Category := tcAnsiString;
               PType^.MaxLength := 0;
 
-              FTypes.Add(IntToStr(DefAnsiString.TypeID), PType);
+              FTypes.Add(GlobalTypeID, PType);
             end;
           end;
         end;
@@ -530,11 +719,12 @@ begin
         begin
           if FReader.ReadUnicodeString(DefUnicodeString, TypeName) then
           begin
-            if FTypes.Find(IntToStr(DefUnicodeString.TypeID)) = nil then
+            Resolution := ResolveTypeCollision(DefUnicodeString.TypeID, TypeName, GlobalTypeID);
+            if Resolution <> TR_DUPLICATE then
             begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
-              PType^.TypeID := DefUnicodeString.TypeID;
+              PType^.TypeID := GlobalTypeID;
               PType^.Name := TypeName;
               PType^.Size := FHeader.PointerSize;
               PType^.IsSigned := False;
@@ -545,7 +735,7 @@ begin
                 PType^.Category := tcUnicodeString;
               PType^.MaxLength := 0;
 
-              FTypes.Add(IntToStr(DefUnicodeString.TypeID), PType);
+              FTypes.Add(GlobalTypeID, PType);
             end;
           end;
         end;
@@ -556,7 +746,7 @@ begin
           begin
             New(PVar);
             PVar^.Name := VarName;
-            PVar^.TypeID := DefGlobalVar.TypeID;
+            PVar^.TypeID := RemapTypeID(DefGlobalVar.TypeID);
             PVar^.Address := DefGlobalVar.Address;
             PVar^.LocationExpr := 0;      // Global variables don't have location expressions
             PVar^.LocationData := 0;
@@ -584,11 +774,12 @@ begin
         begin
           if FReader.ReadClass(DefClass, TypeName, ClassFields, ClassFieldNames) then
           begin
-            if FTypes.Find(IntToStr(DefClass.TypeID)) = nil then
+            Resolution := ResolveTypeCollision(DefClass.TypeID, TypeName, GlobalTypeID);
+            if Resolution <> TR_DUPLICATE then
             begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
-              PType^.TypeID := DefClass.TypeID;
+              PType^.TypeID := GlobalTypeID;
               PType^.Name := TypeName;
               PType^.Size := FHeader.PointerSize;  // Classes are pointers
               PType^.IsSigned := False;
@@ -597,20 +788,20 @@ begin
 
               // Allocate and populate ClassInfo
               New(PType^.ClassInfo);
-              PType^.ClassInfo^.ParentTypeID := DefClass.ParentTypeID;
+              PType^.ClassInfo^.ParentTypeID := RemapTypeID(DefClass.ParentTypeID);
               PType^.ClassInfo^.VMTAddress := DefClass.VMTAddress;
               PType^.ClassInfo^.InstanceSize := DefClass.InstanceSize;
 
-              // Copy field information
+              // Copy field information with remapped TypeIDs
               SetLength(PType^.ClassInfo^.Fields, DefClass.FieldCount);
               for I := 0 to DefClass.FieldCount - 1 do
               begin
                 PType^.ClassInfo^.Fields[I].Name := ClassFieldNames[I];
-                PType^.ClassInfo^.Fields[I].TypeID := ClassFields[I].FieldTypeID;
+                PType^.ClassInfo^.Fields[I].TypeID := RemapTypeID(ClassFields[I].FieldTypeID);
                 PType^.ClassInfo^.Fields[I].Offset := ClassFields[I].Offset;
               end;
 
-              FTypes.Add(IntToStr(DefClass.TypeID), PType);
+              FTypes.Add(GlobalTypeID, PType);
             end;
           end;
         end;
@@ -630,7 +821,7 @@ begin
             { Add local variable to scope's list }
             New(PLocal);
             PLocal^.Name := VarName;
-            PLocal^.TypeID := DefLocalVar.TypeID;
+            PLocal^.TypeID := RemapTypeID(DefLocalVar.TypeID);
             PLocal^.ScopeID := DefLocalVar.ScopeID;
             PLocal^.LocationExpr := DefLocalVar.LocationExpr;
             PLocal^.LocationData := LocationData;
@@ -660,17 +851,18 @@ begin
         begin
           if FReader.ReadArray(DefArray, TypeName) then
           begin
-            if FTypes.Find(IntToStr(DefArray.TypeID)) = nil then
+            Resolution := ResolveTypeCollision(DefArray.TypeID, TypeName, GlobalTypeID);
+            if Resolution <> TR_DUPLICATE then
             begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
-              PType^.TypeID := DefArray.TypeID;
+              PType^.TypeID := GlobalTypeID;
               PType^.Name := TypeName;
               PType^.Size := 0;  // Arrays have variable size
               PType^.IsSigned := False;
               PType^.Category := tcArray;
               PType^.MaxLength := 0;
-              PType^.ElementTypeID := DefArray.ElementTypeID;
+              PType^.ElementTypeID := RemapTypeID(DefArray.ElementTypeID);
               PType^.IsDynamic := DefArray.IsDynamic <> 0;
               PType^.Dimensions := DefArray.Dimensions;
 
@@ -684,7 +876,7 @@ begin
               else
                 SetLength(PType^.Bounds, 0);
 
-              FTypes.Add(IntToStr(DefArray.TypeID), PType);
+              FTypes.Add(GlobalTypeID, PType);
             end;
           end;
         end;
@@ -693,19 +885,20 @@ begin
         begin
           if FReader.ReadPointer(DefPointer, TypeName) then
           begin
-            if FTypes.Find(IntToStr(DefPointer.TypeID)) = nil then
+            Resolution := ResolveTypeCollision(DefPointer.TypeID, TypeName, GlobalTypeID);
+            if Resolution <> TR_DUPLICATE then
             begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
-              PType^.TypeID := DefPointer.TypeID;
+              PType^.TypeID := GlobalTypeID;
               PType^.Name := TypeName;
               PType^.Size := FHeader.PointerSize;
               PType^.IsSigned := False;
               PType^.Category := tcPointer;
               PType^.MaxLength := 0;
-              PType^.PointerTo := DefPointer.TargetTypeID;
+              PType^.PointerTo := RemapTypeID(DefPointer.TargetTypeID);
 
-              FTypes.Add(IntToStr(DefPointer.TypeID), PType);
+              FTypes.Add(GlobalTypeID, PType);
             end;
           end;
         end;
@@ -714,29 +907,30 @@ begin
         begin
           if FReader.ReadRecord(DefRecord, TypeName, RecordFields, RecordFieldNames) then
           begin
-            if FTypes.Find(IntToStr(DefRecord.TypeID)) = nil then
+            Resolution := ResolveTypeCollision(DefRecord.TypeID, TypeName, GlobalTypeID);
+            if Resolution <> TR_DUPLICATE then
             begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
-              PType^.TypeID := DefRecord.TypeID;
+              PType^.TypeID := GlobalTypeID;
               PType^.Name := TypeName;
               PType^.Size := DefRecord.TotalSize;
               PType^.IsSigned := False;
               PType^.Category := tcRecord;
               PType^.MaxLength := 0;
 
-              { Allocate and populate RecordInfo }
+              { Allocate and populate RecordInfo with remapped field TypeIDs }
               New(PType^.RecordInfo);
               PType^.RecordInfo^.TotalSize := DefRecord.TotalSize;
               SetLength(PType^.RecordInfo^.Fields, DefRecord.FieldCount);
               for I := 0 to DefRecord.FieldCount - 1 do
               begin
                 PType^.RecordInfo^.Fields[I].Name := RecordFieldNames[I];
-                PType^.RecordInfo^.Fields[I].TypeID := RecordFields[I].FieldTypeID;
+                PType^.RecordInfo^.Fields[I].TypeID := RemapTypeID(RecordFields[I].FieldTypeID);
                 PType^.RecordInfo^.Fields[I].Offset := RecordFields[I].Offset;
               end;
 
-              FTypes.Add(IntToStr(DefRecord.TypeID), PType);
+              FTypes.Add(GlobalTypeID, PType);
             end;
           end;
         end;
@@ -745,11 +939,12 @@ begin
         begin
           if FReader.ReadEnum(DefEnum, TypeName, EnumMembers, EnumMemberNames) then
           begin
-            if FTypes.Find(IntToStr(DefEnum.TypeID)) = nil then
+            Resolution := ResolveTypeCollision(DefEnum.TypeID, TypeName, GlobalTypeID);
+            if Resolution <> TR_DUPLICATE then
             begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
-              PType^.TypeID := DefEnum.TypeID;
+              PType^.TypeID := GlobalTypeID;
               PType^.Name := TypeName;
               PType^.Size := DefEnum.SizeInBytes;
               PType^.IsSigned := False;
@@ -764,7 +959,7 @@ begin
                 PType^.EnumMembers[I].Value := EnumMembers[I].Value;
               end;
 
-              FTypes.Add(IntToStr(DefEnum.TypeID), PType);
+              FTypes.Add(GlobalTypeID, PType);
             end;
           end;
         end;
@@ -773,19 +968,20 @@ begin
         begin
           if FReader.ReadSet(DefSet, TypeName) then
           begin
-            if FTypes.Find(IntToStr(DefSet.TypeID)) = nil then
+            Resolution := ResolveTypeCollision(DefSet.TypeID, TypeName, GlobalTypeID);
+            if Resolution <> TR_DUPLICATE then
             begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
-              PType^.TypeID := DefSet.TypeID;
+              PType^.TypeID := GlobalTypeID;
               PType^.Name := TypeName;
               PType^.Size := DefSet.SizeInBytes;
               PType^.IsSigned := False;
               PType^.Category := tcSet;
-              PType^.ElementTypeID := DefSet.BaseTypeID;
+              PType^.ElementTypeID := RemapTypeID(DefSet.BaseTypeID);
               PType^.SetLowerBound := DefSet.LowerBound;
 
-              FTypes.Add(IntToStr(DefSet.TypeID), PType);
+              FTypes.Add(GlobalTypeID, PType);
             end;
           end;
         end;
@@ -794,28 +990,24 @@ begin
         begin
           if FReader.ReadProperty(DefProperty, VarName, ReadMethName, WriteMethName) then
           begin
-            { Find the owning class by ClassTypeID and add this property }
-            for I := 0 to FTypes.Count - 1 do
+            { Find the owning class by remapped ClassTypeID }
+            PType := FTypes.Find(RemapTypeID(DefProperty.ClassTypeID));
+            if Assigned(PType) and (PType^.Category = tcClass) and
+               Assigned(PType^.ClassInfo) then
             begin
-              PType := PTypeInfo(FTypes[I]);
-              if Assigned(PType) and (PType^.TypeID = DefProperty.ClassTypeID) and
-                 (PType^.Category = tcClass) and Assigned(PType^.ClassInfo) then
+              { Append to Properties array }
+              SetLength(PType^.ClassInfo^.Properties,
+                        Length(PType^.ClassInfo^.Properties) + 1);
+              with PType^.ClassInfo^.Properties[High(PType^.ClassInfo^.Properties)] do
               begin
-                { Append to Properties array }
-                SetLength(PType^.ClassInfo^.Properties,
-                          Length(PType^.ClassInfo^.Properties) + 1);
-                with PType^.ClassInfo^.Properties[High(PType^.ClassInfo^.Properties)] do
-                begin
-                  Name := VarName;
-                  TypeID := DefProperty.PropertyTypeID;
-                  ReadKind  := TPropertyAccessKind(DefProperty.ReadType);
-                  WriteKind := TPropertyAccessKind(DefProperty.WriteType);
-                  ReadOffset  := DefProperty.ReadAddr;
-                  WriteOffset := DefProperty.WriteAddr;
-                  ReadMethodName := ReadMethName;
-                  WriteMethodName := WriteMethName;
-                end;
-                Break;
+                Name := VarName;
+                TypeID := RemapTypeID(DefProperty.PropertyTypeID);
+                ReadKind  := TPropertyAccessKind(DefProperty.ReadType);
+                WriteKind := TPropertyAccessKind(DefProperty.WriteType);
+                ReadOffset  := DefProperty.ReadAddr;
+                WriteOffset := DefProperty.WriteAddr;
+                ReadMethodName := ReadMethName;
+                WriteMethodName := WriteMethName;
               end;
             end;
           end;
@@ -832,11 +1024,12 @@ begin
         begin
           if FReader.ReadInterface(DefInterface, TypeName, IntfMethods, IntfMethodNames) then
           begin
-            if FTypes.Find(IntToStr(DefInterface.TypeID)) = nil then
+            Resolution := ResolveTypeCollision(DefInterface.TypeID, TypeName, GlobalTypeID);
+            if Resolution <> TR_DUPLICATE then
             begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
-              PType^.TypeID := DefInterface.TypeID;
+              PType^.TypeID := GlobalTypeID;
               PType^.Name := TypeName;
               PType^.Size := FHeader.PointerSize;  // Interface is a pointer
               PType^.IsSigned := False;
@@ -844,13 +1037,13 @@ begin
               PType^.MaxLength := 0;
 
               New(PType^.InterfaceInfo);
-              PType^.InterfaceInfo^.ParentTypeID := DefInterface.ParentTypeID;
+              PType^.InterfaceInfo^.ParentTypeID := RemapTypeID(DefInterface.ParentTypeID);
               PType^.InterfaceInfo^.IntfType := DefInterface.IntfType;
               SetLength(PType^.InterfaceInfo^.Methods, Length(IntfMethodNames));
               for I := 0 to High(IntfMethodNames) do
                 PType^.InterfaceInfo^.Methods[I] := IntfMethodNames[I];
 
-              FTypes.Add(IntToStr(DefInterface.TypeID), PType);
+              FTypes.Add(GlobalTypeID, PType);
             end;
           end;
         end;
@@ -868,7 +1061,7 @@ begin
           begin
             New(PConst);
             PConst^.Name := ConstName;
-            PConst^.TypeID := DefConstant.TypeID;
+            PConst^.TypeID := RemapTypeID(DefConstant.TypeID);
             PConst^.FormattedValue := FormatConstantValue(DefConstant.ConstKind, ConstBytes);
             FConstants.Add(LowerCase(ConstName), PConst);
           end;
@@ -888,6 +1081,9 @@ begin
           ' variable(s), ', FConstants.Count, ' constant(s), ',
           FFunctionScopes.Count, ' function scope(s), and ',
           FLineInfo.Count, ' line mapping(s)');
+
+  if FNextRemappedTypeID > $80000000 then
+    WriteLn('[INFO] Remapped ', FNextRemappedTypeID - $80000000, ' colliding TypeID(s)');
 
   FLoaded := True;
   Result := True;
@@ -1039,7 +1235,6 @@ end;
 function TOPDFReaderAdapter.FindType(TypeID: TTypeID; out TypeInfo: TTypeInfo): Boolean;
 var
   PType: PTypeInfo;
-  I: Integer;
 begin
   Result := False;
 
@@ -1049,16 +1244,15 @@ begin
     Exit;
   end;
 
-  // Search by TypeID (hash list uses TypeID as hash)
-  for I := 0 to FTypes.Count - 1 do
+  { Apply remap at query time — load-time RemapTypeID calls are best-effort
+    (they succeed only if the collision was already discovered). This catch-all
+    ensures references stored before their collision was resolved get remapped. }
+  PType := FTypes.Find(RemapTypeID(TypeID));
+  if Assigned(PType) then
   begin
-    PType := PTypeInfo(FTypes[I]);
-    if Assigned(PType) and (PType^.TypeID = TypeID) then
-    begin
-      TypeInfo := PType^;
-      Result := True;
-      Exit;
-    end;
+    TypeInfo := PType^;
+    Result := True;
+    Exit;
   end;
 
   if gVerbose then
@@ -1272,6 +1466,8 @@ var
   ScopeID: Cardinal;
   Locals: TLocalVariableArray;
   I: Integer;
+  FuncScope: PFunctionScope;
+  PType: PTypeInfo;
 begin
   SetLength(Result, 0);
 
@@ -1281,6 +1477,21 @@ begin
   ScopeID := GetCurrentFunctionScope(RIP);
   if ScopeID = 0 then
     Exit;
+
+  if gVerbose then
+  begin
+    { Show which scope was matched }
+    for I := 0 to FFunctionScopes.Count - 1 do
+    begin
+      FuncScope := PFunctionScope(FFunctionScopes[I]);
+      if FuncScope^.ScopeID = ScopeID then
+      begin
+        WriteLn('[DEBUG] GetScopeLocals: scope=', FuncScope^.Name,
+                ' [0x', IntToHex(FuncScope^.LowPC, 1), '..0x', IntToHex(FuncScope^.HighPC, 1), ')');
+        Break;
+      end;
+    end;
+  end;
 
   { Add locals from current scope only — no ancestor traversal }
   Locals := FindLocalVariablesInScope(ScopeID);
@@ -1292,6 +1503,17 @@ begin
     Result[I].Address := 0;
     Result[I].LocationExpr := Locals[I].LocationExpr;
     Result[I].LocationData := Locals[I].LocationData;
+
+    if gVerbose then
+    begin
+      PType := FTypes.Find(Locals[I].TypeID);
+      if Assigned(PType) then
+        WriteLn('[DEBUG]   local: ', Locals[I].Name, ' TypeID=', Locals[I].TypeID,
+                ' -> ', PType^.Name, ' (', PType^.Size, ' bytes)')
+      else
+        WriteLn('[DEBUG]   local: ', Locals[I].Name, ' TypeID=', Locals[I].TypeID,
+                ' -> <type not found>');
+    end;
   end;
 end;
 
