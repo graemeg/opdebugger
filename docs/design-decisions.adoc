@@ -56,7 +56,7 @@ opdebugger/                          # Aggregator (packaging=pom)
 │       └── opdf_dump.pas            # OPDF section diagnostic tool (Pascal)
 └── tests/                           # Integration tests (27 automated)
     └── integration/
-        ├── run_launch_tests.sh      # Test runner
+        ├── run_tests.sh      # Test runner
         ├── test_01_primitives.pas   # Test program source
         ├── test_01_primitives.commands  # Debugger commands
         ├── test_01_primitives.expected  # Expected output
@@ -593,7 +593,7 @@ test_01_primitives.commands   # PDR commands to run
 test_01_primitives.expected   # Expected output
 ```
 
-**Test Script**: `run_launch_tests.sh`
+**Test Script**: `run_tests.sh`
 
 ```bash
 #!/bin/bash

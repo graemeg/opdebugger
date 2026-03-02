@@ -974,7 +974,7 @@ The following constant kinds are not yet supported and should be implemented in 
 
 === Regression Policy
 
-All existing tests must pass after each feature commit. A full `run_launch_tests.sh` run is required before any commit touching `pdr_engine.pas`, `pdr_typesys.pas`, or `pdr_opdf_adapter.pas`.
+All existing tests must pass after each feature commit. A full `run_tests.sh` run is required before any commit touching `pdr_engine.pas`, `pdr_typesys.pas`, or `pdr_opdf_adapter.pas`.
 
 ---
 

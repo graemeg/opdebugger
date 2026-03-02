@@ -1,10 +1,10 @@
 #!/bin/bash
 #
-# Integration Test Runner for PDR Debugger
+# Integration Test Runner for PDR Debugger (Launch Mode)
 #
-# Usage: ./run_tests.sh [test_name]
-#   If test_name provided, runs only that test
-#   Otherwise, runs all test_*.pas files
+# Tests that launch programs directly (for break/next/step commands)
+# Compiles using the FPC OPDF-capable compiler (ppcx64 -gO).
+# Debug information is embedded directly in the binary (.opdf ELF section).
 #
 
 set -e
@@ -12,152 +12,110 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# Colors for output
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 # Counters
 PASSED=0
 FAILED=0
 
-# Check if PDR binary exists
 PDR_BIN="$PROJECT_ROOT/pdr-cli/target/pdr"
-OPDF_GEN="$PROJECT_ROOT/tools/target/opdf_generator"
+PPCX64="/data/devel/fpc-3.3.1/x86_64-linux/lib/fpc/3.3.1/ppcx64"
+FPC_CFG="/data/devel/fpc-3.3.1/x86_64-linux/lib/fpc/3.3.1/fpc.cfg"
 
-echo "=== PDR Integration Test Runner ==="
+echo "=== PDR Integration Test Runner (Launch Mode) ==="
 echo
 
 if [ ! -f "$PDR_BIN" ]; then
-    echo -e "${RED}ERROR: PDR binary not found at $PDR_BIN${NC}"
-    echo "Run 'pasbuild compile' first"
+    echo -e "${RED}ERROR: PDR binary not found${NC}"
     exit 1
 fi
 
-if [ ! -f "$OPDF_GEN" ]; then
-    echo -e "${YELLOW}WARNING: OPDF generator not found at $OPDF_GEN${NC}"
-    echo "OPDF generation will be skipped"
+if [ ! -f "$PPCX64" ]; then
+    echo -e "${RED}ERROR: OPDF-capable FPC compiler not found: $PPCX64${NC}"
+    exit 1
 fi
 
-# Run a single test
+# Filter non-deterministic output
+filter_output() {
+    # Remove the debugger prompt (pdr) from each line, then filter.
+    # Only capture debugger output from print commands, callstack, and step messages.
+    # Matches: variable names with 2+ chars (optionally followed by [index]) and " = " value
+    #           e.g. Sum = 15, COUNTER = 42, BigArray[2] = 30
+    # Matches: [INFO] Stepped to line: ..., stepped to line: ...
+    # Matches: [CALLSTACK], #0 ..., #1 ..., etc.
+    # Excludes: single-char names (A, B), program WriteLn output (multi-word lines)
+    sed 's/^(pdr) //' | \
+    sed -E 's/ \(0x[0-9A-Fa-f ]+\)//' | \
+    sed -E 's/\(\$[0-9A-Fa-f]+\)/(<ptr>)/' | \
+    grep -E "^(([A-Za-z][A-Za-z0-9_.]+(\[[0-9]+\])? = )|(\[INFO\] )?[Ss]tepped to line:|\\[CALLSTACK\\]|#[0-9]+ |Exception: [A-Za-z]+ —)" | \
+    sed 's/^\[INFO\] //' || true
+}
+
 run_test() {
     local test_name=$1
     local test_base="${test_name%.pas}"
 
-    echo -e "${YELLOW}Running test: $test_base${NC}"
+    echo -e "${YELLOW}Running: $test_base${NC}"
 
-    # Compile test program
-    echo "  [1/5] Compiling test program..."
-    if ! fpc -gO "$test_name" -o"$test_base" > "$test_base.compile.log" 2>&1; then
-        echo -e "${RED}  FAILED: Compilation error${NC}"
+    # Compile with FPC OPDF support (embeds debug info in .opdf ELF section)
+    echo "  [1/3] Compiling..."
+    if ! "$PPCX64" "@$FPC_CFG" -gO "$test_name" -o"$test_base" > "$test_base.compile.log" 2>&1; then
+        echo -e "${RED}  FAILED: Compilation${NC}"
         cat "$test_base.compile.log"
         ((FAILED++))
         return 1
     fi
 
-    # Get symbol addresses using nm
-    echo "  [2/5] Extracting symbol addresses..."
-    nm "$test_base" | grep -E ' (B|D) ' > "$test_base.symbols" || true
-
-    # Generate OPDF (if generator exists)
-    if [ -f "$OPDF_GEN" ]; then
-        echo "  [3/5] Generating OPDF..."
-        if ! "$OPDF_GEN" "$test_base" > "$test_base.opdf.log" 2>&1; then
-            echo -e "${RED}  FAILED: OPDF generation error${NC}"
-            cat "$test_base.opdf.log"
-            ((FAILED++))
-            return 1
-        fi
-    else
-        echo "  [3/5] Skipping OPDF generation (generator not built)"
-    fi
-
-    # Run test program in background
-    echo "  [4/5] Running test program..."
-    ./"$test_base" > "$test_base.output.log" 2>&1 &
-    TEST_PID=$!
-
-    # Give it a moment to start
-    sleep 0.5
-
-    # Check if process is still running
-    if ! kill -0 $TEST_PID 2>/dev/null; then
-        echo -e "${RED}  FAILED: Test program exited immediately${NC}"
-        cat "$test_base.output.log"
-        ((FAILED++))
-        return 1
-    fi
-
-    # Run PDR debugger
-    echo "  [5/5] Running PDR debugger..."
+    # Run PDR with commands
+    echo "  [2/3] Running PDR..."
     if [ -f "$test_base.commands" ]; then
-        # Feed PID to debugger, then commands
-        {
-            echo "$TEST_PID"
-            cat "$test_base.commands"
-        } | "$PDR_BIN" "$test_base" > "$test_base.actual" 2>&1 || true
+        cat "$test_base.commands" | "$PDR_BIN" --verbose "$test_base" 2>&1 | filter_output > "$test_base.actual"
     else
-        echo -e "${YELLOW}  WARNING: No commands file found${NC}"
+        echo -e "${YELLOW}  No commands file${NC}"
+        return 0
     fi
 
-    # Kill test program
-    kill $TEST_PID 2>/dev/null || true
-    wait $TEST_PID 2>/dev/null || true
-
-    # Compare output
-    if [ -f "$test_base.expected" ] && [ -f "$test_base.actual" ]; then
-        if diff -u "$test_base.expected" "$test_base.actual" > "$test_base.diff"; then
+    # Compare (case-insensitive for Pascal, address-normalized)
+    echo "  [3/3] Comparing output..."
+    if [ -f "$test_base.expected" ]; then
+        # Normalize addresses in both files (replace hex addresses with placeholder)
+        # Then convert to lowercase for case-insensitive comparison
+        if diff -u <(sed -E 's/@\$[0-9A-Fa-f]+/@$<addr>/g' "$test_base.expected" | tr '[:upper:]' '[:lower:]') \
+                   <(sed -E 's/@\$[0-9A-Fa-f]+/@$<addr>/g' "$test_base.actual" | tr '[:upper:]' '[:lower:]') > "$test_base.diff"; then
             echo -e "${GREEN}  ✓ PASSED${NC}"
             ((PASSED++))
             return 0
         else
-            echo -e "${RED}  ✗ FAILED: Output mismatch${NC}"
-            echo "  Expected vs Actual:"
+            echo -e "${RED}  ✗ FAILED${NC}"
             cat "$test_base.diff"
             ((FAILED++))
             return 1
         fi
     else
-        echo -e "${YELLOW}  SKIPPED: No expected output file${NC}"
+        echo -e "${YELLOW}  SKIPPED: No expected file${NC}"
         return 0
     fi
 }
 
-# Main execution
 cd "$SCRIPT_DIR"
 
 if [ $# -eq 1 ]; then
-    # Run specific test
     TEST_NAME=$1
-    if [ ! -f "$TEST_NAME.pas" ]; then
-        TEST_NAME="test_${TEST_NAME}"
-    fi
-
-    if [ ! -f "$TEST_NAME.pas" ]; then
-        echo -e "${RED}ERROR: Test file not found: $TEST_NAME.pas${NC}"
-        exit 1
-    fi
-
-    run_test "$TEST_NAME.pas"
+    [[ ! "$TEST_NAME" =~ \.pas$ ]] && TEST_NAME="${TEST_NAME}.pas"
+    run_test "$TEST_NAME"
 else
-    # Run all tests
-    for test_file in test_*.pas; do
-        if [ -f "$test_file" ]; then
-            run_test "$test_file"
-            echo
-        fi
+    for test_file in test_*_*.pas; do
+        [ -f "$test_file" ] && run_test "$test_file" && echo
     done
 fi
 
-# Summary
 echo "==================================="
-echo -e "Tests passed: ${GREEN}$PASSED${NC}"
-echo -e "Tests failed: ${RED}$FAILED${NC}"
+echo -e "Passed: ${GREEN}$PASSED${NC}"
+echo -e "Failed: ${RED}$FAILED${NC}"
 echo "==================================="
 
-if [ $FAILED -gt 0 ]; then
-    exit 1
-fi
-
-exit 0
+[ $FAILED -eq 0 ] && exit 0 || exit 1

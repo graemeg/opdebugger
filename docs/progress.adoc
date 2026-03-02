@@ -285,7 +285,7 @@ Full specification: `docs/feature-specs.adoc`
 * [x] `inspect` shows `[use 'print Obj.Prop' to evaluate]` hint for method properties
 * [x] Updated `test_05_properties` expected output for getter annotations
 * [x] New integration test: `test_24_method_properties.pas` — AnsiString + Integer getters
-* [x] Updated output filter in `run_launch_tests.sh` to support dot-notation variable names
+* [x] Updated output filter in `run_tests.sh` to support dot-notation variable names
 * [x] 24/24 integration tests passing
 
 ==== Feature 9: Expression Evaluator
@@ -473,10 +473,10 @@ make -C compiler cycle
 ../../pdr-cli/target/pdr test_01_primitives
 
 # Run full automated test suite
-bash run_launch_tests.sh
+bash run_tests.sh
 
 # Run single test
-bash run_launch_tests.sh test_01_primitives
+bash run_tests.sh test_01_primitives
 ----
 
 === Debugger Commands (current)
