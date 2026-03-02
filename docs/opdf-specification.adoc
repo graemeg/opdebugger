@@ -9,7 +9,11 @@
 
 === Purpose
 
-The Object Pascal Debug Format (OPDF) is a custom debug information format designed specifically for the Free Pascal Compiler (FPC) and Object Pascal language features. Unlike DWARF, which is procedural-language focused and C-centric, OPDF provides native, first-class support for Object Pascal concepts including properties, string types, dynamic arrays, sets, and variant records.
+The Object Pascal Debug Format (OPDF) is a custom debug information format
+designed specifically for the Free Pascal Compiler (FPC) and Object Pascal
+language features. Unlike DWARF, which is procedural-language focused and
+C-centric, OPDF provides native, first-class support for Object Pascal concepts
+including properties, string types, dynamic arrays, sets, and variant records.
 
 === Design Philosophy
 
@@ -31,7 +35,12 @@ The Object Pascal Debug Format (OPDF) is a custom debug information format desig
 
 === Storage Container
 
-OPDF debug information is embedded directly in the compiled binary. The FPC compiler emits OPDF records into the assembler list, and the linker places them into a dedicated section. This approach enables the linker to resolve label-based address references for line information and function scopes — something that is not possible with external debug files generated as a post-compilation step.
+OPDF debug information is embedded directly in the compiled binary. The FPC
+compiler emits OPDF records into the assembler list, and the linker places them
+into a dedicated section. This approach enables the linker to resolve
+label-based address references for line information and function scopes —
+something that is not possible with external debug files generated as a
+post-compilation step.
 
 .Platform Support Matrix
 [cols="1,2,2"]
@@ -55,11 +64,24 @@ OPDF debug information is embedded directly in the compiled binary. The FPC comp
 |Segment `__OPDF`, section `__debug`
 |===
 
-NOTE: An earlier approach generated external `.opdf` files by translating DWARF debug information as a post-compilation step. This was abandoned because FPC's debug information generator emits line information during code generation using assembler labels, which the linker resolves to final addresses. An external tool operating on the compiled binary cannot access these labels, making accurate line-to-address mapping unreliable. Direct compiler integration solves this by emitting OPDF records alongside the existing debug generators, using the same label resolution mechanism.
+NOTE: An earlier approach generated external `.opdf` files by translating DWARF
+debug information as a post-compilation step. This was invaluable during the
+early phase of creating the OPDF specification and reference debugger. However,
+this was abandoned because FPC's debug information generator emits line
+information during code generation using assembler labels, which the linker
+resolves to final addresses. An external tool operating on the compiled binary
+cannot access these labels, making accurate line-to-address mapping unreliable.
+Direct compiler integration solves this by emitting OPDF records alongside the
+existing debug generators, using the same label resolution mechanism.
 
 === Multi-Unit Architecture
 
-FPC compiles each unit independently, calling the debug writer's `inserttypeinfo` once per compilation unit. In version 0.2.0, each unit emitted its own OPDF header followed by its records, resulting in multiple independent OPDF streams concatenated in the `.opdf` section. This caused several scalability problems identified during testing with large projects (93 compilation units, 81,751 records):
+FPC compiles each unit independently, calling the debug writer's
+`inserttypeinfo` once per compilation unit. In version 0.2.0, each unit emitted
+its own OPDF header followed by its records, resulting in multiple independent
+OPDF streams concatenated in the `.opdf` section. This caused several
+scalability problems identified during testing with large projects (93
+compilation units, 81,751 records):
 
 * **Type duplication** — The same types (e.g. `LongInt`, `Boolean`, `String`) were emitted by every unit that used them. In a 93-unit project, 25,652 type records were emitted but only 7,540 unique TypeIDs existed (3.4x duplication ratio). At Lazarus scale (3000+ units), this projected to ~147 MB section size and ~266 MB reader memory.
 * **Reader complexity** — The reader had to scan for multiple magic bytes to discover unit boundaries, with no directory or index structure.

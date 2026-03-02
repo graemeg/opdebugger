@@ -292,7 +292,7 @@ The optimal approach combines elements of all three options in a phased strategy
 . **Enhanced PDR**
 ** Free Vision TUI interface
 ** VSCode integration
-** Lazarus IDE integration
+** Lazarus IDE & MSEide integration
 ** Windows and macOS platform support
 
 . **Community Adoption**
