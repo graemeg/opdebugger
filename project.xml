@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project>
   <name>opdebugger</name>
-  <version>0.1.0</version>
+  <version>0.3.0</version>
   <author>Graeme Geldenhuys</author>
   <license>BSD-3-Clause</license>
   <description>Object Pascal Debug Format (OPDF) and Pascal Debug Reference (PDR) debugger</description>

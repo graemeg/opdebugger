@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project>
   <name>tools</name>
-  <version>0.1.0</version>
   <author>Graeme Geldenhuys</author>
   <license>BSD-3-Clause</license>
   <description>OPDF diagnostic tools</description>
