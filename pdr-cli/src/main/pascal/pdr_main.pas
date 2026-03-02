@@ -19,6 +19,10 @@ uses
   opdf_types, pdr_ports, pdr_engine, pdr_typesys, pdr_symbols,
   pdr_linux_ptrace, pdr_arch_adapters, pdr_opdf_adapter;
 
+const
+  PDR_VERSION = {$I version.inc};
+  PDR_BUILD_DATE = {$I %DATE%};
+
 type
   { CLI Debugger - Simple REPL interface }
   TCLIDebugger = class
@@ -608,7 +612,7 @@ procedure TCLIDebugger.Run(const BinaryPath: String; const Args: array of String
 var
   CmdLine: String;
 begin
-  WriteLn('PDR (Pascal Debug Reference) v0.2.0');
+  WriteLn('PDR (Pascal Debug Reference) ', PDR_VERSION);
   WriteLn('Copyright (c) 2025-2026 Graeme Geldenhuys');
   WriteLn;
 
@@ -689,10 +693,17 @@ var
   Args: array of String;
   FirstArg: Integer;
 begin
-  { Scan for --verbose / -v flag (may appear before the binary path) }
+  { Scan for --version and --verbose / -v flags (may appear before the binary path) }
   FirstArg := 1;
   for I := 1 to ParamCount do
   begin
+    if ParamStr(I) = '--version' then
+    begin
+      WriteLn('PDR (Pascal Debug Reference) ', PDR_VERSION);
+      WriteLn('Built: ', PDR_BUILD_DATE);
+      WriteLn('Copyright (c) 2025-2026 Graeme Geldenhuys');
+      Halt(0);
+    end;
     if (ParamStr(I) = '--verbose') or (ParamStr(I) = '-v') then
     begin
       gVerbose := True;
@@ -703,11 +714,12 @@ begin
 
   if ParamCount < FirstArg then
   begin
-    WriteLn('Usage: pdr [--verbose] <binary> [<argument> ...]');
+    WriteLn('Usage: pdr [--verbose] [--version] <binary> [<argument> ...]');
     WriteLn;
     WriteLn('Debug an Object Pascal program using OPDF debug information.');
     WriteLn;
     WriteLn('Options:');
+    WriteLn('  --version      - Show version information and exit');
     WriteLn('  --verbose, -v  - Enable diagnostic output at startup');
     WriteLn;
     WriteLn('Arguments:');

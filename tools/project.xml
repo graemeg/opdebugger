@@ -9,6 +9,9 @@
     <packaging>application</packaging>
     <mainSource>opdf_dump.pas</mainSource>
     <executableName>opdf_dump</executableName>
+    <resources>
+      <filtering>true</filtering>
+    </resources>
   </build>
 
   <moduleDependencies>

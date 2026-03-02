@@ -24,6 +24,7 @@ uses
   Classes, SysUtils, Math, opdf_types, elf_reader;
 
 const
+  OPDF_DUMP_VERSION = {$I version.inc};
   MAX_REC_TYPE = 20;
 
 type
@@ -632,6 +633,7 @@ begin
   WriteLn('  -v               Verbose mode (decode every record)');
   WriteLn('  -f <filename>    Filter LineInfo by source filename');
   WriteLn('  -t <type>        Filter by record type name');
+  WriteLn('  --version        Show version information and exit');
   WriteLn('  -h, --help       Show this help');
   WriteLn;
   WriteLn('Record types: Primitive, GlobalVar, ShortString, AnsiString,');
@@ -668,6 +670,12 @@ begin
         Halt(1);
       end;
       OptFilterType := ParamStr(I);
+    end
+    else if ParamStr(I) = '--version' then
+    begin
+      WriteLn('OPDF Dump ', OPDF_DUMP_VERSION);
+      WriteLn('Copyright (c) 2025-2026 Graeme Geldenhuys');
+      Halt(0);
     end
     else if (ParamStr(I) = '-h') or (ParamStr(I) = '--help') then
     begin

@@ -9,6 +9,9 @@
     <packaging>application</packaging>
     <mainSource>pdr_main.pas</mainSource>
     <executableName>pdr</executableName>
+    <resources>
+      <filtering>true</filtering>
+    </resources>
   </build>
 
   <!-- Dependencies -->
