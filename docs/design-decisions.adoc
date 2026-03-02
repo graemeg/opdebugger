@@ -720,5 +720,5 @@ The project has progressed well beyond the original plan:
 * Hexagonal Architecture: Alistair Cockburn (2005)
 * xref:opdf-specification.adoc[OPDF Specification]
 * xref:progress.adoc[Progress Tracker]
-* xref:phase3-plan.adoc[Feature Specifications]
+* xref:feature-specs.adoc[Feature Specifications]
 * xref:analysis.adoc[Strategic Analysis]
