@@ -24,44 +24,43 @@ opdebugger/                          # Aggregator (packaging=pom)
 │   ├── opdf-specification.adoc
 │   ├── analysis.adoc
 │   ├── implementation-plan.adoc
-│   └── design-decisions.adoc
+│   ├── design-decisions.adoc
+│   └── progress.adoc
 ├── opdf-lib/                        # Library module (packaging=library)
 │   ├── project.xml
 │   └── src/main/pascal/
 │       ├── opdf_types.pas           # Core OPDF structures and constants
 │       ├── opdf_io.pas              # Reader/writer for binary OPDF format
 │       ├── opdf_demangle.pas        # FPC symbol name demangling
-│       └── elf_reader.pas           # ELF binary parsing
+│       └── elf_reader.pas           # ELF64 section extraction
 ├── pdr-core/                        # Library module (packaging=library)
 │   ├── project.xml
-│   └── src/
-│       ├── main/pascal/
-│       │   ├── pdr_ports.pas        # Interface definitions
-│       │   ├── pdr_engine.pas       # Core debugger engine
-│       │   ├── pdr_typesys.pas      # Type system (Strategy pattern)
-│       │   └── pdr_symbols.pas      # Symbol resolver
-│       └── test/pascal/
-│           ├── test_typesys.pas
-│           └── test_symbols.pas
+│   └── src/main/pascal/
+│       ├── pdr_ports.pas            # Port interfaces and shared types
+│       ├── pdr_engine.pas           # Core debugger engine
+│       ├── pdr_typesys.pas          # Type system (Strategy pattern)
+│       └── pdr_symbols.pas          # Symbol helper utilities
 ├── pdr-adapters/                    # Library module (packaging=library)
 │   ├── project.xml
 │   └── src/main/pascal/
-│       ├── pdr_opdf_adapter.pas     # OPDF reader adapter
-│       ├── pdr_linux_ptrace.pas     # Linux ptrace
-│       ├── pdr_freebsd_ptrace.pas   # FreeBSD ptrace
-│       ├── pdr_windows_debug.pas    # Windows DebugAPI
-│       └── pdr_arch_adapters.pas    # x86/x86_64/ARM adapters
+│       ├── pdr_opdf_adapter.pas     # OPDF reader adapter (IDebugInfoReader)
+│       ├── pdr_linux_ptrace.pas     # Linux ptrace (IProcessController)
+│       └── pdr_arch_adapters.pas    # x86/x86_64 adapters (IArchAdapter)
 ├── pdr-cli/                         # Application module (packaging=application)
 │   ├── project.xml
 │   └── src/main/pascal/
 │       └── pdr_main.pas             # CLI entry point and REPL
-├── tools/                           # Standalone utilities
-│   └── opdf_dump.py                 # OPDF section dump tool
-└── tests/                           # Integration tests
+├── tools/                           # Application module (packaging=application)
+│   ├── project.xml
+│   └── src/main/pascal/
+│       └── opdf_dump.pas            # OPDF section diagnostic tool (Pascal)
+└── tests/                           # Integration tests (27 automated)
     └── integration/
-        ├── test_01_primitives.pas
-        ├── test_02_strings.pas
-        └── run_tests.sh
+        ├── run_launch_tests.sh      # Test runner
+        ├── test_01_primitives.pas   # Test program source
+        ├── test_01_primitives.commands  # Debugger commands
+        ├── test_01_primitives.expected  # Expected output
+        └── ...                      # test_01 through test_27
 ----
 
 **Root project.xml**:
@@ -71,9 +70,9 @@ opdebugger/                          # Aggregator (packaging=pom)
 <?xml version="1.0" encoding="UTF-8"?>
 <project>
   <name>opdebugger</name>
-  <version>0.1.0</version>
-  <author>FPC Community</author>
-  <license>LGPL-2.1-or-later</license>
+  <version>0.3.0</version>
+  <author>Graeme Geldenhuys</author>
+  <license>BSD-3-Clause</license>
 
   <build>
     <packaging>pom</packaging>
@@ -84,6 +83,7 @@ opdebugger/                          # Aggregator (packaging=pom)
     <module>pdr-core</module>
     <module>pdr-adapters</module>
     <module>pdr-cli</module>
+    <module>tools</module>
   </modules>
 </project>
 ----
@@ -690,12 +690,14 @@ The project has progressed well beyond the original plan:
 * PasBuild multi-module structure is in place and working
 * FPC compiler integration is complete (`-gO` flag on the `feature/opdf-support` branch)
 * All type categories are implemented: primitives, floats, enums, sets, strings, pointers, arrays, records, classes, interfaces
-* 18 integration tests passing
-* Phase 3 features implemented: inspect, set variable, callstack, method-backed properties
+* 27 integration tests passing
+* Phase 3 features implemented: locals, inspect, array slices, set variable, conditional breakpoints, display, hardware watchpoints, method call injection, exception metadata, compile-time constants, step over/into
+* Cross-compilation TypeID collision resolution for multi-unit projects (PasBuild)
+* `opdf_dump` diagnostic tool rewritten in Object Pascal (replaced original Python version)
 
 == References
 
-* PasBuild Multi-Module Tutorial: `/data/devel/opensource/pasbuild/docs/multi-module-tutorial.adoc`
+* PasBuild Multi-Module Tutorial: https://github.com/graemeg/PasBuild/blob/master/docs/multi-module-tutorial.adoc[pasbuild/docs/multi-module-tutorial.adoc]
 * Hexagonal Architecture: Alistair Cockburn (2005)
 * xref:opdf-specification.adoc[OPDF Specification]: `/docs/opdf-specification.adoc`
 * xref:implementation-plan.adoc[Implementation Plan]: `/docs/implementation-plan.adoc`
