@@ -5,6 +5,8 @@
 :version: 1.0.0
 :date: 2025-12-15
 
+NOTE: This document was written before implementation began. The strategic analysis and DWARF comparison remain relevant, but the phased timeline (Years 1-7) and some implementation details have been superseded by actual development. See `progress.adoc` for current status.
+
 == Executive Summary
 
 This document analyzes the current state of debugging Object Pascal code compiled with Free Pascal Compiler (FPC) and evaluates strategic approaches to achieve a debugging experience comparable to Delphi. The analysis compares three primary approaches: improving FPC's DWARF generation for GDB, enhancing the fpdebug project, and developing a custom Object Pascal Debug Format (OPDF).

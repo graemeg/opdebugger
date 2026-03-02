@@ -15,7 +15,7 @@ project, covering both the standalone debugger toolchain and the FPC compiler in
 
 == Completed Work
 
-=== Phase 3: Features 1–6, 14–15 (Completed)
+=== Debugger Features 1–6, 14–15 (Completed)
 
 * [x] Feature 1: `locals` command — lists all in-scope local variables with evaluated values
 * [x] Feature 1: `locals globals` subcommand — also enumerates global variables
@@ -191,9 +191,9 @@ Results: 104 units, 1.1x dedup ratio (down from 3.4x), 6.4 MB section size.
 
 ---
 
-== Phase 3: Feature Work Items
+== Feature Work Items
 
-Full specification: `docs/phase3-plan.adoc`
+Full specification: `docs/feature-specs.adoc`
 
 === Prerequisite: OPDF Format Fix — DONE
 
@@ -375,7 +375,7 @@ Full specification: `docs/phase3-plan.adoc`
 
 ---
 
-== Phase 4: Platform Expansion
+== Platform Expansion
 
 * [ ] Extend `elf_reader.pas` for ELF32 (Linux i386 support)
 * [ ] Write `pe_reader.pas` — PE/COFF section extraction (Windows binaries)
@@ -511,7 +511,7 @@ verbose on|off               Toggle verbose/debug output
 quit                         Exit debugger
 ----
 
-=== Planned Commands (Phase 3+)
+=== Planned Commands
 
 [source]
 ----

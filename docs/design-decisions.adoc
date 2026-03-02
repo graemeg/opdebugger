@@ -185,6 +185,30 @@ UI Adapter:
     └── pdr_main.pas          # Uses ICommandHandler port
 ----
 
+== OPDF Field Sizing
+
+=== Decision: Future-Proof Data Type Widths
+
+**Problem**: Initial OPDF record definitions used minimal sizes (`Word` for TypeID, `Byte` for NameLen) that could overflow with generic-heavy codebases or deeply qualified type names.
+
+**Solution**: Widen key fields before the format stabilises.
+
+[cols="2,2,2,3"]
+|===
+| Field | Original | Updated | Reason
+
+| `RecType` | `Byte` | `Byte` (unchanged) | 256 record types sufficient (currently 20)
+| `RecSize` | `Word` (64KB) | `Cardinal` (4GB) | Large classes with generics can exceed 64KB
+| `TypeID` | `Word` (65K) | `Cardinal` (4B) | Large projects with generics may need 100K+ type IDs
+| `NameLen` | `Byte` (255) | `Word` (65K) | Qualified generic names can exceed 255 chars
+| `FieldCount` | `Word` | `Cardinal` | Consistency with RecSize; auto-generated classes can have 1000+ fields
+| `Address` | `QWord` | `QWord` (unchanged) | 64-bit addresses
+|===
+
+**Storage overhead**: 13-20% increase in debug section size (acceptable; debug info is stripped from production binaries).
+
+All changes are reflected in `opdf-specification.adoc` (v0.3.0) and implemented in both `opdf_types.pas` and `dbgopdf.pas`.
+
 == 32-bit vs 64-bit Support
 
 === Decision: Architecture Metadata in OPDF
@@ -276,9 +300,9 @@ end;
 
 **Testing Strategy**:
 
-* Phase 1 MVP: 64-bit only (x86_64 Linux)
-* Phase 2: Add 32-bit support, test both architectures
-* Phase 3+: ARM support
+* Current: 64-bit only (x86_64 Linux)
+* Planned: Add 32-bit support (i386), test both architectures
+* Future: ARM support
 
 == External vs Embedded Debug Info
 
@@ -314,7 +338,7 @@ fpc myprogram.pas
 
 **Future: Embedded Support**:
 
-Phase 2+ adds embedded OPDF in `.opdf` ELF section:
+The final implementation uses embedded OPDF in an `.opdf` ELF section:
 
 ```bash
 # Compile with OPDF embedded
@@ -330,14 +354,9 @@ fpc -gopdf myprogram.pas  # Embeds .opdf section
 ----
 function TOPDFLoader.Load(const BinaryPath: String): Boolean;
 begin
-  // Phase 2+: Check for embedded section first
+  // Check for embedded section
   if HasEmbeddedOPDF(BinaryPath) then
     Exit(LoadEmbedded(BinaryPath));
-
-  // Phase 1: Check for external file
-  OPDFPath := ChangeFileExt(BinaryPath, '.opdf');
-  if FileExists(OPDFPath) then
-    Exit(LoadExternal(OPDFPath));
 
   // Not found
   Result := False;
@@ -395,14 +414,14 @@ NOTE: The external .opdf approach was abandoned during implementation. FPC's deb
 └─────────────────────────────────────────────────────────────┘
 ----
 
-**Type Implementation Order** (from implementation-plan.adoc):
+**Type Implementation Order** (original plan):
 
-. **Phase 1**: Integer (LongInt, Boolean)
-. **Phase 2**: ShortString, AnsiString
-. **Phase 3**: Pointer, Class, Property (field-backed)
-. **Phase 4**: Dynamic arrays, Sets, Generics, Property (getter/setter)
+. Integer (LongInt, Boolean)
+. ShortString, AnsiString
+. Pointer, Class, Property (field-backed)
+. Dynamic arrays, Sets, Generics, Property (getter/setter)
 
-NOTE: All types listed above have been implemented, with the exception of Generics. The actual implementation order differed from the plan — all type categories (primitives, floats, enums, sets, strings, pointers, static and dynamic arrays, records, classes, interfaces, and properties including method-backed) were completed during Phases 1-3.
+NOTE: All types listed above have been implemented, with the exception of Generics. All type categories (primitives, floats, enums, sets, strings, pointers, static and dynamic arrays, records, classes, interfaces, and properties including method-backed) are complete.
 
 **Benefits**:
 
@@ -642,34 +661,34 @@ PasBuild automatically resolves transitive dependencies.
 
 [cols="1,1,1,2,1"]
 |===
-|Platform |Binary Format |Phase |Adapter Module |Complexity
+|Platform |Binary Format |Status |Adapter Module |Complexity
 
 |Linux
 |ELF
-|**Phase 1**
+|**Implemented**
 |pdr_linux_ptrace.pas
 |Low
 
 |FreeBSD
 |ELF
-|**Phase 1**
+|Planned
 |pdr_freebsd_ptrace.pas
 |Low
 
 |Windows
 |PE/COFF
-|**Phase 2**
+|Planned
 |pdr_windows_debug.pas
 |Medium
 
 |macOS
 |Mach-O
-|**Phase 3**
+|Planned
 |pdr_macos_mach.pas
 |High (code signing)
 |===
 
-**32-bit vs 64-bit**: All platforms supported for both (via `IArchAdapter`).
+**32-bit vs 64-bit**: All platforms supported for both (via `IArchAdapter`). Currently only x86_64 is implemented.
 
 == Key Improvements Over Initial Design
 
@@ -691,7 +710,7 @@ The project has progressed well beyond the original plan:
 * FPC compiler integration is complete (`-gO` flag on the `feature/opdf-support` branch)
 * All type categories are implemented: primitives, floats, enums, sets, strings, pointers, arrays, records, classes, interfaces
 * 27 integration tests passing
-* Phase 3 features implemented: locals, inspect, array slices, set variable, conditional breakpoints, display, hardware watchpoints, method call injection, exception metadata, compile-time constants, step over/into
+* Debugger features: locals, inspect, array slices, set variable, conditional breakpoints, display, hardware watchpoints, method call injection, exception metadata, compile-time constants, step over/into
 * Cross-compilation TypeID collision resolution for multi-unit projects (PasBuild)
 * `opdf_dump` diagnostic tool rewritten in Object Pascal (replaced original Python version)
 
@@ -699,6 +718,7 @@ The project has progressed well beyond the original plan:
 
 * PasBuild Multi-Module Tutorial: https://github.com/graemeg/PasBuild/blob/master/docs/multi-module-tutorial.adoc[pasbuild/docs/multi-module-tutorial.adoc]
 * Hexagonal Architecture: Alistair Cockburn (2005)
-* xref:opdf-specification.adoc[OPDF Specification]: `/docs/opdf-specification.adoc`
-* xref:implementation-plan.adoc[Implementation Plan]: `/docs/implementation-plan.adoc`
-* xref:analysis.adoc[Strategic Analysis]: `/docs/analysis.adoc`
+* xref:opdf-specification.adoc[OPDF Specification]
+* xref:progress.adoc[Progress Tracker]
+* xref:phase3-plan.adoc[Feature Specifications]
+* xref:analysis.adoc[Strategic Analysis]

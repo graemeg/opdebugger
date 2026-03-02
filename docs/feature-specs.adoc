@@ -1,4 +1,4 @@
-= PDR Phase 3 Implementation Plan
+= PDR Feature Specifications
 :toc: left
 :toclevels: 4
 :sectnums:
@@ -9,21 +9,13 @@
 
 === Context
 
-Phases 0 through 2 of the OPDF project are complete. The FPC compiler emits all Object Pascal type categories into embedded `.opdf` ELF sections, and the PDR debugger reads, parses, and evaluates all those types. The 13-test integration suite passes.
+The OPDF format and type system foundation are complete. The FPC compiler emits all Object Pascal type categories into embedded `.opdf` ELF sections, and the PDR debugger reads, parses, and evaluates all those types.
 
-The system can currently:
-
-* Inspect global and local variables of any type
-* Navigate class field hierarchies with dot notation
-* Display field-backed properties
-* Show call stacks and step through source lines
-* Load embedded OPDF data from FPC-compiled binaries
-
-Phase 3 addresses the gap between a functional proof-of-concept and a debugger that is genuinely useful during day-to-day development. The features are ordered by the ratio of value delivered to implementation complexity.
+This document specifies the debugger features that bridge the gap between a functional proof-of-concept and a debugger that is genuinely useful during day-to-day development. Features are ordered by the ratio of value delivered to implementation complexity.
 
 === Scope
 
-Phase 3 covers the following feature areas:
+This document covers the following feature areas:
 
 . **Prerequisites** — OPDF format fix required before platform expansion
 . **`locals` command** — enumerate all in-scope variables at the current breakpoint
@@ -40,7 +32,7 @@ Phase 3 covers the following feature areas:
 . **Exception metadata** — report current exception type and message
 . **Optimized code** — handle register-allocated local variables
 
-UI and platform expansion (TUI, Windows, Lazarus/VSCode integration) are addressed in Phase 4.
+UI and platform expansion (TUI, Windows, Lazarus/VSCode integration) are separate work tracked in `progress.adoc`.
 
 === Dependency Graph
 
@@ -88,7 +80,7 @@ a 32-bit binary, this is incorrect.
 . Update `opdf_io.pas` reader to use the header's pointer size when reading address-sized fields, rather than `SizeOf(QWord)`.
 . Update `pdr_opdf_adapter.pas` to derive pointer size from the loaded header.
 
-This is a one-commit breaking format change. All existing test binaries must be recompiled after it lands. It should be the first commit in Phase 3, before any other work.
+This is a one-commit breaking format change. All existing test binaries must be recompiled after it lands. It should be the first commit before any other feature work.
 
 ==== Impact on Existing Tests
 
@@ -433,7 +425,7 @@ A `set <variable> = <value>` command that writes a new value into the debugged p
 
 ==== Scope
 
-Phase 3 supports assignment for primitive types only:
+Variable assignment supports primitive types only:
 
 * Signed and unsigned integers of all widths
 * Boolean
@@ -734,7 +726,7 @@ Handles arithmetic and logical evaluation of the pre-processed expression. This 
 
 This is not a trade-off between writing the pre-processor or contributing upstream — both are done, for different reasons. The pre-processor exists because dot notation and array indexing are debugger-specific and do not belong in fpexprpars. The upstream contribution exists because `div`/`shl`/`shr` are general Pascal operators that belong there.
 
-===== Expression Grammar (Phase 3 Subset — after pre-processing)
+===== Expression Grammar (after pre-processing)
 
 After Stage 1, the expression seen by fpexprpars contains only:
 
@@ -1081,7 +1073,7 @@ Features 9 (variant records) and 12 (optimized code) require changes to the OPDF
 
 ---
 
-== Phase 4: Platform Expansion
+== Platform Expansion
 
 === Reuse Summary
 
@@ -1238,7 +1230,7 @@ Linux i386 and Windows x86_64 are independent and can be developed in parallel.
 
 == Success Criteria
 
-Phase 3 is considered complete when all of the following hold:
+The features in this document are considered complete when all of the following hold:
 
 * All 23 integration tests (13 existing + 10 new) pass
 * `locals` enumerates variables correctly at any breakpoint
