@@ -39,7 +39,7 @@ project, covering both the standalone debugger toolchain and the FPC compiler in
 * [x] Static and dynamic array evaluators (with element limit and truncation)
 * [x] Record evaluator with field access
 * [x] Class evaluator with inheritance, nil-pointer handling, dot notation
-* [x] Interface type loading and display
+* [x] Interface type loading, display, and evaluator (nil or type name with pointer address)
 * [x] Field-backed property evaluation; method-backed properties report gracefully
 * [x] Set type evaluator — decodes bitfield using base enum member names
 * [x] Global variable support (linker-resolved addresses)
