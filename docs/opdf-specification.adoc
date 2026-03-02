@@ -588,11 +588,12 @@ TDefLocalVar = packed record
   TypeID: TTypeID;      // 4 bytes
   ScopeID: Cardinal;    // 4 bytes — matches ScopeID in recFunctionScope
   LocationExpr: Byte;   // 1 byte — location expression type
+  DeclIndex: Word;      // 2 bytes — declaration order in parent scope
   NameLen: TNameLen;    // 2 bytes
-  // Followed by: location data (see Location Expressions)
+  // Followed by: LocationData (SmallInt, 2 bytes — see Location Expressions)
   // Followed by: Name (NameLen bytes)
 end;
-// Fixed part: 11 bytes (before location data)
+// Fixed part: 13 bytes + LocationData (2 bytes) + Name
 ----
 
 === Function Parameter (recParameter = 13)
@@ -727,11 +728,11 @@ Location expressions encode where a variable resides at runtime. The `LocationEx
 
 |`1`
 |RBP-relative (current frame)
-|`ShortInt` (1 byte): signed offset from frame base pointer
+|`SmallInt` (2 bytes): signed offset from frame base pointer
 
 |`2`
 |Parent frame RBP-relative
-|`ShortInt` (1 byte): signed offset from enclosing procedure's frame base pointer
+|`SmallInt` (2 bytes): signed offset from enclosing procedure's frame base pointer
 
 |`3..255`
 |Reserved
