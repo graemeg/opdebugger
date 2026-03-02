@@ -191,11 +191,12 @@ For each variable, the type system:
 | `TAnsiStringEvaluator` | AnsiString
 | `TUnicodeStringEvaluator` | UnicodeString
 | `TShortStringEvaluator` | ShortString
-| `TArrayEvaluator` | Static and dynamic arrays
+| `TStaticArrayEvaluator` | Static arrays (fixed-size, element-by-element evaluation)
+| `TDynamicArrayEvaluator` | Dynamic arrays (dereferences pointer, reads length header)
 | `TRecordEvaluator` | Record/struct types (recursive field evaluation)
 | `TClassEvaluator` | Class instances (dereferences instance pointer, evaluates fields)
-| `TInterfaceEvaluator` | Interface references
 | `TPointerEvaluator` | Pointer types
+| `TInterfaceEvaluator` | Interface references (displays nil or type name with pointer address)
 |===
 
 Evaluators that handle composite types (records, classes, arrays) recursively call back into `TTypeSystem.EvaluateVariableInfo` for each contained element.
@@ -233,7 +234,7 @@ TDebuggerEngine.GetLocalVariables()                   [pdr_engine.pas]
   └──► for each variable:
        TTypeSystem.EvaluateVariableInfo(VarInfo)      [pdr_typesys.pas]
          ├──► IDebugInfoReader.FindType(TypeID)       [pdr_opdf_adapter.pas]
-         │      searches FTypes cache
+         │      RemapTypeID(TypeID) then searches FTypes cache
          │
          ├──► IProcessController.GetLastBreakpointRBP()
          │      returns saved breakpoint RBP          [pdr_linux_ptrace.pas]

@@ -158,6 +158,7 @@ begin
   FTypeSystem.RegisterEvaluator(TRecordEvaluator.Create);
   FTypeSystem.RegisterEvaluator(TEnumEvaluator.Create);
   FTypeSystem.RegisterEvaluator(TSetEvaluator.Create);
+  FTypeSystem.RegisterEvaluator(TInterfaceEvaluator.Create);
 end;
 
 destructor TDebuggerEngine.Destroy;

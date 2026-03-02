@@ -129,6 +129,14 @@ type
     function CanHandle(const TypeInfo: TTypeInfo): Boolean;
   end;
 
+  { Interface Type Evaluator - displays interface pointer value }
+  TInterfaceEvaluator = class(TInterfacedObject, ITypeEvaluator)
+  public
+    function Evaluate(const VarInfo: TVariableInfo; const TypeInfo: TTypeInfo;
+      ProcessController: IProcessController; TypeSystem: TTypeSystem): TVariableValue;
+    function CanHandle(const TypeInfo: TTypeInfo): Boolean;
+  end;
+
   { Type System - manages type evaluators }
   TTypeSystem = class
   private
@@ -1141,6 +1149,46 @@ begin
   end;
 
   Result.Value := '[' + Members + ']';
+  Result.IsValid := True;
+end;
+
+{ TInterfaceEvaluator }
+
+function TInterfaceEvaluator.CanHandle(const TypeInfo: TTypeInfo): Boolean;
+begin
+  Result := (TypeInfo.Category = tcInterface);
+end;
+
+function TInterfaceEvaluator.Evaluate(const VarInfo: TVariableInfo;
+  const TypeInfo: TTypeInfo; ProcessController: IProcessController;
+  TypeSystem: TTypeSystem): TVariableValue;
+var
+  PointerBuf: array[0..7] of Byte;
+  PtrValue: QWord;
+begin
+  Result.Name := TFPCDemangler.Demangle(VarInfo.Name);
+  Result.TypeName := TypeInfo.Name;
+  Result.Address := VarInfo.Address;
+  Result.IsValid := False;
+
+  { Read interface pointer value }
+  FillChar(PointerBuf, SizeOf(PointerBuf), 0);
+  if not ProcessController.ReadMemory(VarInfo.Address, 8, PointerBuf) then
+  begin
+    Result.Value := '<error: failed to read interface pointer>';
+    Exit;
+  end;
+
+  PtrValue := PQWord(@PointerBuf)^;
+
+  if PtrValue = 0 then
+  begin
+    Result.Value := 'nil';
+    Result.IsValid := True;
+    Exit;
+  end;
+
+  Result.Value := TypeInfo.Name + '($' + IntToHex(PtrValue, 16) + ')';
   Result.IsValid := True;
 end;
 

@@ -4,3 +4,5 @@ Width = 30     [read FWidth]
 Height = 20     [read FHeight]
 Increment = <method>
 GetValue = <method>
+Counter = nil
+Counter = ICounter(<ptr>)
