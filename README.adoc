@@ -1,32 +1,44 @@
 = OPDF - Object Pascal Debug Format
 :toc: left
 :toclevels: 3
+:toc-placement!:
+:sectnums:
+:source-highlighter: rouge
+:icons: font
 
 A custom debug information format and debugger designed specifically for Free Pascal Compiler (FPC) and Object Pascal language features.
+
+image:https://img.shields.io/badge/FPC-3.3.1+-blue.svg[FPC Version]
+image:https://img.shields.io/badge/license-BSD--3--Clause-green.svg[License]
+
+toc::[]
 
 == Overview
 
 The Object Pascal Debug Format (OPDF) provides native, first-class support for Object Pascal concepts that are poorly represented in DWARF:
 
-* *Properties* with getter/setter methods
+* *Properties* with getter/setter methods (field-backed and method-backed)
 * *String types* (ShortString, AnsiString, UnicodeString)
 * *Dynamic arrays* with correct length display
-* *Class instances* with inherited fields
-* *Method calls* during debugging
+* *Class instances* with inherited fields and interfaces
+* *Sets* with enum member name display
+* *Method call injection* for getter property evaluation
+
+OPDF data is embedded as an ELF `.opdf` section, with all addresses resolved at link time by the assembler/linker. The FPC compiler emits this section via the `-gO` flag.
 
 == Project Structure
 
-This is a multi-module project built with PasBuild:
+This is a multi-module project built with https://github.com/graemeg/pasbuild[PasBuild]:
 
-* *opdf-lib*: OPDF binary format definitions and I/O library
-* *pdr-core*: PDR debugger core engine (hexagonal architecture)
-* *pdr-adapters*: Platform-specific adapters (ptrace, Windows DebugAPI, etc.)
-* *pdr-cli*: Command-line debugger interface
-* *tools*: Development tools (OPDF generator)
+* *opdf-lib*: OPDF binary format definitions, reader/writer library, ELF section extractor
+* *pdr-core*: PDR debugger core engine (hexagonal architecture, platform-agnostic)
+* *pdr-adapters*: Platform-specific adapters (Linux ptrace, OPDF reader, x86_64/i386 arch)
+* *pdr-cli*: Command-line debugger interface (REPL)
+* *tools*: Diagnostic tools (`opdf_dump` — OPDF section analyser)
 
 == Building
 
-Requires https://github.com/graemeg/pasbuild[PasBuild]:
+Requires https://github.com/graemeg/pasbuild[PasBuild] and FPC 3.3.1+ with OPDF support (`-gO` flag):
 
 [source,bash]
 ----
@@ -36,52 +48,84 @@ pasbuild compile
 # Build specific module
 pasbuild compile -m pdr-core
 
-# Run tests
-pasbuild test
-
 # View dependency graph
 pasbuild compile -v
 ----
 
-== Documentation
+== Testing
 
-See `docs/` directory:
+Integration tests use a shell-based test runner that compiles test programs with `-gO`, feeds debugger commands via stdin, and compares output against expected results:
 
-* *opdf-specification.adoc*: Complete binary format specification
-* *analysis.adoc*: Strategic analysis and approach comparison
-* *implementation-plan.adoc*: 70-week phased implementation roadmap
-* *design-decisions.adoc*: Architecture and design pattern decisions
-* *data-type-decisions.adoc*: Data type size analysis
+[source,bash]
+----
+# Run all integration tests
+cd tests/integration
+bash run_tests.sh
+
+# Run a single test
+bash run_tests.sh test_01_primitives
+----
 
 == Current Status
 
-*Phase 0*: Foundation (in progress)
+PDR is a standalone CLI debugger (reference implementation) that reads OPDF data and controls the debuggee via Linux ptrace. It currently supports:
 
-* [x] Project structure and build system
-* [ ] Core OPDF data structures
-* [ ] Platform abstraction interfaces
-* [ ] Test framework with mock adapters
+* Breakpoints by file:line, hex address, or variable name
+* Hit-count conditional breakpoints (`break ... if count=N`)
+* Source-level stepping (step over and step into)
+* Call stack display with function names and source locations
+* Variable evaluation for all Object Pascal types: primitives, floats, enums, sets, ShortString, AnsiString, UnicodeString, pointers, static arrays, dynamic arrays, records, classes (with field display), interfaces
+* Compile-time constant evaluation
+* Property evaluation: field-backed (automatic) and method-backed (via call injection)
+* Array slice display: `print arr[2..5]`
+* In-process variable assignment: `set x = 42`, `set day = Monday`
+* Local variable listing with scope awareness (including nested procedures)
+* Structured inspect command for records, classes, and interfaces
+* Auto-print display list (`display`/`undisplay`)
+* Hardware watchpoints via x86_64 debug registers (DR0-DR3)
+* Break on exception raise with class name and message display
+* Method call injection for getter property evaluation (x86_64 SysV ABI, register save/restore, INT3 sentinel, red zone handling, managed return types)
 
-== License
+27 automated integration tests cover all of the above.
 
-BSD 3-Clause License (see LICENSE file)
+=== Known Limitations
 
-NOTE: When integrated into FPC compiler, those portions will be licensed under GPL-2.0-or-later to match FPC's licensing.
+* ELF64 only (Linux x86_64). Windows PE/COFF and macOS Mach-O are planned.
+* Stack unwinding relies on RBP frame pointer chains, which breaks with optimised RTL compiled without frame pointers.
+* Variant records, Variant type, and generics are not yet covered.
+
+See `docs/progress.adoc` for the full progress tracker and roadmap.
+
+== Documentation
+
+See the `docs/` directory:
+
+* *opdf-specification.adoc*: Complete binary format specification (v0.3.0, 20 record types)
+* *architecture.adoc*: Debugger architecture and command trace documentation
+* *design-decisions.adoc*: Architecture, design pattern, and data type decisions
+* *feature-specs.adoc*: Detailed feature specifications
+* *progress.adoc*: Live progress tracker and roadmap
+* *analysis.adoc*: Strategic analysis and comparison with DWARF
 
 == Architecture
 
 PDR uses Hexagonal Architecture (Ports and Adapters):
 
-* *Core Domain*: Pure debugging logic, platform-agnostic
-* *Ports*: Interfaces (IProcessController, IDebugInfoReader, IArchAdapter)
-* *Adapters*: Platform-specific implementations
+* *Core Domain*: Pure debugging logic, platform-agnostic (`pdr_engine.pas`, `pdr_typesys.pas`)
+* *Ports*: Interfaces defined in `pdr_ports.pas` (IProcessController, IDebugInfoReader, IArchAdapter)
+* *Adapters*: Platform-specific implementations (Linux ptrace, OPDF reader, x86_64 arch)
 
 This enables:
 
-* Easy testing with mock adapters
-* Platform independence
-* Support for multiple debug formats (OPDF, DWARF)
-* Multiple UI frontends (CLI, TUI, IDE integration)
+* Platform independence — core engine has no platform imports
+* Support for multiple debug formats (OPDF, potentially DWARF)
+* Multiple UI frontends (CLI, TUI, IDE integration) — integrating into an IDE requires only implementing the adapter interfaces; all type evaluation, property resolution, breakpoint logic, call injection, and display formatting are reusable as-is
+
+== Relationship with DWARF
+
+OPDF does not replace DWARF. DWARF remains valuable for interoperability with standard tools (GDB, LLDB, Valgrind, perf), for platforms where OPDF is not yet supported, and for features that OPDF does not yet cover (e.g. register-allocated variables in optimised code, `.eh_frame`-based stack unwinding).
+
+OPDF and DWARF can coexist in the same binary — they use separate ELF sections. A user who needs GDB compatibility continues using `-gw`. A user who wants first-class Object Pascal debugging uses `-gO`.
 
 == Contributing
 
@@ -92,7 +136,11 @@ This project follows Test-Driven Development (TDD) and vertical slice implementa
 . Verify test passes
 . Commit
 
-See `docs/implementation-plan.adoc` for detailed workflow.
+== License
+
+BSD 3-Clause License (see LICENSE file)
+
+NOTE: When integrated into FPC compiler, those portions will be licensed under GPL-2.0-or-later to match FPC's licensing.
 
 == Contact
 
@@ -104,5 +152,6 @@ Design influenced by:
 
 * Borland/Embarcadero Delphi debugging experience
 * fpdebug project (https://github.com/graemeg/fpdebug)
+* duby project - that sparked my interest in debuggers
 * DWARF debugging standard analysis
 * FPC community feedback
