@@ -921,6 +921,52 @@ The following constant kinds are not yet supported and should be implemented in 
 * Char constants display as the character (e.g. `A`)
 * Local/global variables take precedence over same-named constants
 
+=== Feature 16: Implicit Self Field Resolution
+
+==== Description
+
+When the debugger is paused inside a method (e.g. `TRichTextView.Draw`), typing
+`print FFontManager` should resolve the name as a field of the current class instance,
+accessed via the implicit `Self` parameter. Currently the debugger only searches local
+variables, enclosing scopes, globals, and constants — class fields are not checked.
+
+The user must currently type `print Self.FFontManager` (if Self were available), but
+Self is not emitted into OPDF because the FPC compiler skips hidden parameters
+(`vo_is_hidden_para`).
+
+==== FPC Compiler Change
+
+In `dbgopdf.pas`, the `appendsym_localvar` handler skips symbols with
+`vo_is_hidden_para` in `varoptions`. For method Self parameters specifically, this
+skip must be relaxed: emit a `recLocalVar` record for Self so the debugger can locate
+the instance pointer on the stack.
+
+The hidden VMT and function-result parameters should remain skipped.
+
+==== Debugger Change
+
+In `pdr_typesys.pas`, `EvaluateVariable` must add a new resolution tier between the
+scope-aware lookup and the global fallback:
+
+. Look up `Self` in the current scope (via `FindVariableWithScope`)
+. If found, get Self's TypeID and resolve the class type
+. Search the class fields (and parent class fields, walking the inheritance chain)
+  for a field matching the bare variable name
+. If found, construct a `TVariableInfo` pointing to `InstancePtr + FieldOffset`
+  and evaluate it
+
+This reuses the existing `ResolveFieldAccess` infrastructure. The new tier effectively
+transforms `print FFontManager` into `print Self.FFontManager` transparently.
+
+==== Acceptance Criteria
+
+* `print FFontManager` inside `TRichTextView.Draw` resolves to the class field value
+* `print FLayout` inside any method resolves correctly
+* `locals` inside a method shows `Self` as one of the in-scope variables
+* Dot notation still works: `print Self.FFontManager` remains valid
+* Fields from parent classes are found (inheritance chain walk)
+* Local variables with the same name as a field take precedence (shadowing)
+
 ---
 
 == Test Strategy
@@ -1043,6 +1089,10 @@ All existing tests must pass after each feature commit. A full `run_tests.sh` ru
 |14
 |Optimized code (Feature 13)
 |Requires OPDF format extension and FPC compiler change
+
+|15
+|Implicit Self field resolution (Feature 16)
+|High daily-use value; compiler emits Self, debugger resolves bare field names
 |===
 
 ---
