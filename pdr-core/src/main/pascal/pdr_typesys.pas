@@ -1559,6 +1559,18 @@ begin
       Exit;
     end;
 
+    { TIER 4: Try implicit Self field resolution — when inside a method,
+      resolve bare field names via the Self instance pointer }
+    if RIP <> 0 then
+    begin
+      Result := ResolveFieldAccess('Self', VarName);
+      if Result.IsValid then
+      begin
+        Result.Name := VarName;  { display as bare name, not Self.name }
+        Exit;
+      end;
+    end;
+
     Result.Value := '<error: variable not found>';
     Result.TypeName := '<unknown>';
     Exit;
