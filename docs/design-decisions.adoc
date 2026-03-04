@@ -657,6 +657,33 @@ pdr-cli (depends on: pdr-adapters, pdr-core, opdf-lib)
 
 PasBuild automatically resolves transitive dependencies.
 
+== Hash-Based TypeID Allocation
+
+=== Decision: FNV-1a Hash for Deterministic TypeIDs
+
+**Problem**: TypeIDs were allocated sequentially (1, 2, 3...) per compiler invocation. When separately compiled modules (e.g. a framework and an application) were linked together, their OPDF sections were concatenated in the ELF `.opdf` section. Both compilations started from TypeID 1, so the same TypeID value mapped to completely different types across compilation boundaries. The debugger's remap infrastructure (`FTypeIDRemap`, `FHeaderTypeIDRemap`, `RemapTypeID`, `ResolveTypeCollision`) attempted to resolve these at load time, but no single remap strategy worked reliably for all cases.
+
+**Solution**: Hash each type's canonical mangled name using FNV-1a (32-bit) to produce its TypeID. The same type name produces the same hash regardless of which compilation emitted it. Cross-compilation collisions are eliminated at the source.
+
+**Implementation**:
+
+* `dbgopdf_typemap.pas` — `TTypeMapper.GetTypeID` calls `FNV1aHash(key)` for named types (where `key` is the mangled name) instead of incrementing a sequential counter. Anonymous types with a valid `GetTypeName` result are also hashed; truly anonymous types (no name or `<`-prefixed placeholders) fall back to sequential allocation from the reserved range `$F0000000`+.
+* `pdr_opdf_adapter.pas` — The `TTypeMap` is replaced with an open-addressing hash table (linear probing, power-of-two capacity) to support hash-based TypeIDs spanning the full 32-bit range. The remap infrastructure (`FTypeIDRemap`, `FHeaderTypeIDRemap`, `RemapTypeID`) is removed. A minimal collision-remap array handles the extremely rare case of two different types hashing to the same value.
+
+**Collision probability** (FNV-1a 32-bit, birthday bound):
+
+* 10,000 types: ~0.01 expected collisions
+* 50,000 types: ~0.3 expected collisions
+* 100,000 types: ~1.2 expected collisions
+
+The `ResolveTypeCollision` safety net allocates a synthetic TypeID from the `$80000000`+ range for the rare collision case.
+
+**Trade-offs**:
+
+* Cross-references (ParentTypeID, PointerTo, ElementTypeID, BaseTypeID, field TypeIDs) are resolved naturally — the compiler calls `G_TypeMapper.GetTypeID(def)` for every referenced type, which returns the same deterministic hash.
+* The debugger's deduplication logic is greatly simplified: same TypeID + same name = skip (common case); same TypeID + different name = hash collision (allocate synthetic ID).
+* No OPDF version bump required — the format is pre-release and all binaries are recompiled.
+
 == Platform Support Matrix
 
 [cols="1,1,1,2,1"]
@@ -711,7 +738,7 @@ The project has progressed well beyond the original plan:
 * All type categories are implemented: primitives, floats, enums, sets, strings, pointers, arrays, records, classes, interfaces
 * 27 integration tests passing
 * Debugger features: locals, inspect, array slices, set variable, conditional breakpoints, display, hardware watchpoints, method call injection, exception metadata, compile-time constants, step over/into
-* Cross-compilation TypeID collision resolution for multi-unit projects (PasBuild)
+* Hash-based TypeID allocation (FNV-1a) eliminates cross-compilation TypeID collisions
 * `opdf_dump` diagnostic tool rewritten in Object Pascal (replaced original Python version)
 
 == References

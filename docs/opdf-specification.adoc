@@ -159,7 +159,9 @@ TTypeID  = Cardinal;  // 4 bytes — unique type identifier
 TNameLen = Word;      // 2 bytes — byte length of a name string
 ----
 
-Type IDs are assigned sequentially by the compiler during type processing. ID 0 is reserved to mean "no type" or "void".
+Type IDs are computed as 32-bit FNV-1a hashes of the type's canonical mangled name. This produces deterministic, globally unique identifiers: the same type receives the same TypeID regardless of which compilation unit emits it. Hash-based allocation eliminates cross-compilation TypeID collisions that occurred with the previous sequential scheme.
+
+ID 0 is reserved to mean "no type" or "void". If a hash produces 0, it is replaced with 1. Anonymous types without a canonical name fall back to sequential allocation from the reserved range `$F0000000`+.
 
 ==== Record Type Enumeration
 
