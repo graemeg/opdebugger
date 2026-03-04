@@ -969,6 +969,57 @@ transforms `print FFontManager` into `print Self.FFontManager` transparently.
 
 ---
 
+=== Feature 17: Primitive SubKind Byte
+
+==== Description
+
+The `recPrimitive` OPDF record previously carried only `TypeID`, `SizeInBytes`, `IsSigned`,
+and `Name`. The debugger used heuristic name-matching to distinguish booleans, chars, and
+floats from integers — e.g. `Pos('BOOL', UpperCase(TypeInfo.Name))`. This is fragile and
+breaks for user-defined types with similar names.
+
+The fix adds a `SubKind` byte to `TDefPrimitive` so the compiler emits the semantic type
+directly. The debugger dispatches on SubKind instead of pattern-matching type names.
+
+==== SubKind Values
+
+[cols="1,2,4"]
+|===
+| Value | Name | Types
+
+| 0 | skInteger  | All signed/unsigned integer ordinals
+| 1 | skBoolean  | Boolean, ByteBool, WordBool, LongBool, QWordBool
+| 2 | skChar     | Char, AnsiChar
+| 3 | skWideChar | WideChar, UnicodeChar
+| 4 | skFloat    | Single, Double, Extended, Comp, Real
+| 5 | skCurrency | Currency (fixed-point, stored as Int64 * 10000)
+|===
+
+Currency is separated from float because it requires special formatting (divide by 10000).
+WideChar is separated from Char because it is 2 bytes and UTF-16 encoded.
+
+==== Changes
+
+* `opdf_types.pas` — `TOPDFPrimitiveSubKind` enum, `SubKind: Byte` in `TDefPrimitive`
+* `opdf_io.pas` — `WritePrimitive` accepts `SubKind` parameter
+* `dbgopdf.pas` — `SUBKIND_*` constants, derived from `def.ordtype` in `appenddef_ord`,
+  `SUBKIND_FLOAT` in `appenddef_float`
+* `pdr_opdf_adapter.pas` — reads SubKind, uses it for `tcFloat` vs `tcPrimitive`
+* `pdr_ports.pas` — `SubKind: Byte` field in `TTypeInfo`
+* `pdr_typesys.pas` — 5 name-matching heuristics replaced with SubKind checks
+* `opdf_dump.pas` — displays SubKind with human-readable label
+* `opdf-specification.adoc` — documents SubKind byte and value table
+
+==== Acceptance Criteria
+
+* Boolean variables display as `True`/`False`, not integer ordinals
+* Char variables display as characters, not integer ordinals
+* Float types are categorised as `tcFloat` without name-matching
+* All existing integration tests pass unchanged
+* `opdf_dump -v` shows SubKind labels for primitive records
+
+---
+
 == Test Strategy
 
 === New Integration Tests

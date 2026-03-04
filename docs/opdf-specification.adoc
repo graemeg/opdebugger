@@ -2,8 +2,8 @@
 :toc: left
 :toclevels: 4
 :sectnums:
-:version: 0.3.0
-:date: 2026-02-20
+:version: 0.4.0
+:date: 2026-03-04
 
 == Introduction
 
@@ -872,11 +872,11 @@ Microsoft's debug format, used by Visual Studio. Stored in a separate `.pdb` fil
 * **Directory/index**: Section Contribution stream maps address ranges to compilation units. DBI (Debug Information) stream provides module-level indexes. All access is indexed — no linear scans required.
 * **Lesson for OPDF**: PDB confirms that global type pools and directory-based access are essential for scalability. PDB's MSF container complexity is unnecessary for OPDF (which is embedded in the ELF section), but the type deduplication and indexed access principles apply directly.
 
-==== Summary: Design Influence on OPDF v0.3.0
+==== Summary: Design Influence on OPDF
 
 [cols="1,1,1,1,1,1"]
 |===
-|Feature |STABS |DWARF |TD32 |PDB |OPDF 0.3.0
+|Feature |STABS |DWARF |TD32 |PDB |OPDF
 
 |Type duplication
 |Per-file

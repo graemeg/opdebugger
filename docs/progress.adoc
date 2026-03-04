@@ -15,7 +15,7 @@ project, covering both the standalone debugger toolchain and the FPC compiler in
 
 == Completed Work
 
-=== Debugger Features 1–6, 14–15 (Completed)
+=== Debugger Features 1–6, 14–17 (Completed)
 
 * [x] Feature 1: `locals` command — lists all in-scope local variables with evaluated values
 * [x] Feature 1: `locals globals` subcommand — also enumerates global variables
@@ -25,6 +25,7 @@ project, covering both the standalone debugger toolchain and the FPC compiler in
 * [x] Feature 5: `break ... if count=N` — hit-count conditional breakpoints with `condition` and `info breakpoints` commands
 * [x] Feature 6: `display` / `undisplay` — auto-print variables on every breakpoint stop, with out-of-scope handling
 * [x] Feature 15: Step over (`next`/`n`) and step into (`step`/`s`) — source-line-aware stepping
+* [x] Feature 17: `recPrimitive` SubKind byte — compiler-emitted semantic classification (Integer, Boolean, Char, WideChar, Float, Currency) replaces name-matching heuristics in debugger
 * [x] Integration tests 14–21, 25–27 covering all features; 27/27 automated tests passing
 * [x] Sentinel breakpoint pattern applied to all tests (prevents program output mixing with debugger output on detach)
 
@@ -69,6 +70,7 @@ project, covering both the standalone debugger toolchain and the FPC compiler in
 * [x] Cross-module type dedup via global state (`G_TypeMapper`, `G_EmittedTypeIDs`)
 * [x] Unit directory record (type 19) — indexes per-unit data sizes
 * [x] Method scopes emitted independently of parent class dedup state
+* [x] SubKind byte in `recPrimitive` — derived from `def.ordtype` / `tfloatdef` in `appenddef_ord` / `appenddef_float`
 * [x] Verified: 104-unit project loads 24K types, 1K scopes, 70K line mappings
 
 === Design Decisions (Resolved)
@@ -371,6 +373,18 @@ Full specification: `docs/feature-specs.adoc`
 * [x] Add Self-field fallback in `TDebuggerEngine.GetInspectLines` (`pdr_engine.pas`) — `inspect FFontManager` inside a method resolves via Self and renders the full structured view
 * [ ] Integration test: `print FFontManager` inside a method resolves the class field
 * [ ] Verify: local variables shadow class fields of the same name
+
+==== Feature 17: Primitive SubKind Byte — DONE
+
+* [x] Add `TOPDFPrimitiveSubKind` enum and `SubKind: Byte` field to `TDefPrimitive` (`opdf_types.pas`)
+* [x] Update `WritePrimitive` to accept and write SubKind (`opdf_io.pas`)
+* [x] Emit SubKind from FPC compiler — derive from `def.ordtype` in `appenddef_ord`, emit `SUBKIND_FLOAT` in `appenddef_float` (`dbgopdf.pas`)
+* [x] Read SubKind in adapter, use for `tcFloat` vs `tcPrimitive` categorisation (`pdr_opdf_adapter.pas`)
+* [x] Add `SubKind: Byte` to `TTypeInfo` (`pdr_ports.pas`)
+* [x] Replace all 5 name-matching heuristics with SubKind-based checks (`pdr_typesys.pas`)
+* [x] Display SubKind in `opdf_dump` output (`opdf_dump.pas`)
+* [x] Update OPDF specification with SubKind byte and value table (`opdf-specification.adoc`)
+* [x] All 27 integration tests pass unchanged
 
 ==== Feature 13: Optimized Code — Register-Allocated Variables
 
