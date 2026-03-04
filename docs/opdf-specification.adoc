@@ -198,7 +198,7 @@ Readers encountering an unknown record type must use `RecSize` to skip it withou
 
 === Primitive Types (recPrimitive = 1)
 
-Covers integer, boolean, character, and float types. All are emitted with the same format; the debugger infers display format from the type name.
+Covers integer, boolean, character, and float types. All are emitted with the same record format. The `SubKind` byte provides semantic classification so the debugger can dispatch directly without name-matching heuristics.
 
 [source,pascal]
 ----
@@ -206,19 +206,34 @@ TDefPrimitive = packed record
   TypeID: TTypeID;    // 4 bytes
   SizeInBytes: Byte;  // 1 byte — storage size (1, 2, 4, 8, 10 bytes)
   IsSigned: Byte;     // 1 byte — 1=signed, 0=unsigned
+  SubKind: Byte;      // 1 byte — semantic sub-classification (see below)
   NameLen: TNameLen;  // 2 bytes
   // Followed by: Name (NameLen bytes)
 end;
-// Fixed part: 8 bytes
+// Fixed part: 9 bytes
 ----
 
-.Examples
-* `Size=4, Signed=1, Name="LongInt"` — 32-bit signed integer
-* `Size=1, Signed=0, Name="Boolean"` — boolean
-* `Size=8, Signed=1, Name="Double"` — 64-bit float
-* `Size=10, Signed=1, Name="Extended"` — 80-bit extended float (x87)
+.SubKind values
+[cols="1,2,4"]
+|===
+| Value | Name | Description
 
-Float types are identified by their FPC type names (`Single`, `Double`, `Extended`, `Currency`, `Comp`). The debugger uses the name to select the correct floating-point decode path.
+| 0 | skInteger  | All signed/unsigned integer ordinals (LongInt, Byte, Int64, etc.)
+| 1 | skBoolean  | Boolean, ByteBool, WordBool, LongBool, QWordBool
+| 2 | skChar     | Char, AnsiChar (single-byte)
+| 3 | skWideChar | WideChar, UnicodeChar (2 bytes, UTF-16)
+| 4 | skFloat    | Single, Double, Extended, Comp, Real (IEEE floating-point)
+| 5 | skCurrency | Currency (fixed-point, stored as Int64 * 10000)
+|===
+
+.Examples
+
+* `Size=4, Signed=1, SubKind=0(Integer), Name="LongInt"` — 32-bit signed integer
+* `Size=1, Signed=0, SubKind=1(Boolean), Name="Boolean"` — boolean
+* `Size=1, Signed=0, SubKind=2(Char), Name="Char"` — single-byte character
+* `Size=8, Signed=1, SubKind=4(Float), Name="Double"` — 64-bit float
+* `Size=10, Signed=1, SubKind=4(Float), Name="Extended"` — 80-bit extended float (x87)
+* `Size=8, Signed=1, SubKind=5(Currency), Name="Currency"` — fixed-point currency
 
 === ShortString Type (recShortStr = 3)
 

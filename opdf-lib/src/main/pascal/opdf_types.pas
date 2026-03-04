@@ -95,11 +95,22 @@ type
   { Name Length - 2 bytes (supports 65K character names) }
   TNameLen = Word;
 
+  { Primitive SubKind — semantic classification within recPrimitive }
+  TOPDFPrimitiveSubKind = (
+    skInteger  = 0,  // All signed/unsigned integer ordinals
+    skBoolean  = 1,  // Boolean, ByteBool, WordBool, LongBool, QWordBool
+    skChar     = 2,  // Char, AnsiChar
+    skWideChar = 3,  // WideChar, UnicodeChar
+    skFloat    = 4,  // Single, Double, Extended, Comp, Real
+    skCurrency = 5   // Currency (fixed-point, stored as Int64 * 10000)
+  );
+
   { Primitive Type Definition }
   TDefPrimitive = packed record
     TypeID: TTypeID;        // 4 bytes
     SizeInBytes: Byte;      // 1 byte
     IsSigned: Byte;         // 1 byte (1=signed, 0=unsigned)
+    SubKind: Byte;          // 1 byte (TOPDFPrimitiveSubKind)
     NameLen: TNameLen;      // 2 bytes
     // Followed by Name (NameLen bytes)
   end;

@@ -138,6 +138,7 @@ type
     Name: String;
     Size: Cardinal;
     IsSigned: Boolean;
+    SubKind: Byte;         // TOPDFPrimitiveSubKind (0=integer, 1=bool, 2=char, 3=widechar, 4=float, 5=currency)
     Category: TTypeCategory;
     // String-specific
     MaxLength: Byte;  // For ShortString: max length (0-255)

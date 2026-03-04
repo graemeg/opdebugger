@@ -44,7 +44,8 @@ type
 
     { Write type definitions }
     procedure WritePrimitive(TypeID: TTypeID; const Name: String;
-                            Size: Byte; IsSigned: Boolean);
+                            Size: Byte; IsSigned: Boolean;
+                            SubKind: TOPDFPrimitiveSubKind = skInteger);
     procedure WriteShortString(TypeID: TTypeID; const Name: String;
                               MaxLen: Byte);
     procedure WriteAnsiString(TypeID: TTypeID; const Name: String);
@@ -226,7 +227,8 @@ begin
 end;
 
 procedure TOPDFWriter.WritePrimitive(TypeID: TTypeID; const Name: String;
-                                    Size: Byte; IsSigned: Boolean);
+                                    Size: Byte; IsSigned: Boolean;
+                                    SubKind: TOPDFPrimitiveSubKind = skInteger);
 var
   RecHeader: TOPDFRecordHeader;
   Payload: TDefPrimitive;
@@ -240,6 +242,7 @@ begin
     Payload.IsSigned := 1
   else
     Payload.IsSigned := 0;
+  Payload.SubKind := Ord(SubKind);
   Payload.NameLen := Length(Name);
 
   RecHeader.RecType := Ord(recPrimitive);

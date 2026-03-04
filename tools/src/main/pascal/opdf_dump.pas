@@ -103,6 +103,20 @@ end;
 
 { ---- Record dumpers (verbose mode) ---- }
 
+function SubKindToString(SK: Byte): String;
+begin
+  case SK of
+    0: Result := 'Integer';
+    1: Result := 'Boolean';
+    2: Result := 'Char';
+    3: Result := 'WideChar';
+    4: Result := 'Float';
+    5: Result := 'Currency';
+  else
+    Result := Format('Unknown(%d)', [SK]);
+  end;
+end;
+
 procedure DumpPrimitive(Stream: TStream);
 var
   Def: TDefPrimitive;
@@ -110,8 +124,8 @@ var
 begin
   Stream.Read(Def, SizeOf(Def));
   Name := ReadString(Stream, Def.NameLen);
-  WriteLn(Format('    TypeID=%d Size=%d Signed=%d Name="%s"',
-    [Def.TypeID, Def.SizeInBytes, Def.IsSigned, Name]));
+  WriteLn(Format('    TypeID=%d Size=%d Signed=%d SubKind=%s Name="%s"',
+    [Def.TypeID, Def.SizeInBytes, Def.IsSigned, SubKindToString(Def.SubKind), Name]));
 end;
 
 procedure DumpGlobalVar(Stream: TStream);

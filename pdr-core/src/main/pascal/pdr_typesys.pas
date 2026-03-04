@@ -226,23 +226,20 @@ begin
       Exit;
     end;
 
-    // Special formatting for Boolean (case-insensitive check)
-    if (TypeInfo.Size = 1) and (Pos('BOOL', UpperCase(TypeInfo.Name)) > 0) then
-    begin
-      if UValue <> 0 then
-        Result.Value := 'True'
-      else
-        Result.Value := 'False';
-    end
-    // Special formatting for Char / AnsiChar (display as character, not ordinal)
-    else if (TypeInfo.Size = 1) and
-            ((UpperCase(TypeInfo.Name) = 'CHAR') or
-             (UpperCase(TypeInfo.Name) = 'ANSICHAR')) then
-    begin
-      Result.Value := Chr(Byte(UValue));
-    end
+    // Use SubKind for type-specific formatting
+    case TypeInfo.SubKind of
+      Ord(skBoolean):
+        begin
+          if UValue <> 0 then
+            Result.Value := 'True'
+          else
+            Result.Value := 'False';
+        end;
+      Ord(skChar):
+        begin
+          Result.Value := Chr(Byte(UValue));
+        end;
     else
-    begin
       Result.Value := IntToStr(UValue);
     end;
   end;
@@ -514,7 +511,7 @@ begin
     { Ordinal return in RAX — format based on type }
     if (PropTypeInfo.Category = tcPrimitive) then
     begin
-      if (PropTypeInfo.Size = 1) and (Pos('BOOL', UpperCase(PropTypeInfo.Name)) > 0) then
+      if PropTypeInfo.SubKind = Ord(skBoolean) then
       begin
         if (RetVal and $FF) <> 0 then Result := 'True'
         else Result := 'False';
@@ -1536,8 +1533,8 @@ begin
          FDebugInfoReader.FindType(ConstInfo.TypeID, TypeInfo) then
       begin
         Result.TypeName := TypeInfo.Name;
-        if (TypeInfo.Category = tcPrimitive) and (TypeInfo.Size = 1) and
-           (Pos('BOOL', UpperCase(TypeInfo.Name)) > 0) then
+        if (TypeInfo.Category = tcPrimitive) and
+           (TypeInfo.SubKind = Ord(skBoolean)) then
         begin
           IVal := StrToInt64Def(ConstInfo.FormattedValue, 0);
           if IVal <> 0 then
@@ -1545,9 +1542,8 @@ begin
           else
             Result.Value := 'False';
         end
-        else if (TypeInfo.Category = tcPrimitive) and (TypeInfo.Size = 1) and
-                ((UpperCase(TypeInfo.Name) = 'CHAR') or
-                 (UpperCase(TypeInfo.Name) = 'ANSICHAR')) then
+        else if (TypeInfo.Category = tcPrimitive) and
+                (TypeInfo.SubKind = Ord(skChar)) then
         begin
           IVal := StrToInt64Def(ConstInfo.FormattedValue, 0);
           if (IVal >= 32) and (IVal <= 126) then

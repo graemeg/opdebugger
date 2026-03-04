@@ -680,12 +680,11 @@ begin
               PType^.Name := TypeName;
               PType^.Size := DefPrimitive.SizeInBytes;
               PType^.IsSigned := DefPrimitive.IsSigned <> 0;
+              PType^.SubKind := DefPrimitive.SubKind;
               PType^.MaxLength := 0;
 
-              { Detect float types by name — FPC emits them as primitives }
-              if (TypeName = 'Single') or (TypeName = 'Double') or
-                 (TypeName = 'Extended') or (TypeName = 'Currency') or
-                 (TypeName = 'Comp') or (TypeName = 'Real') then
+              { Use SubKind to categorise float vs primitive }
+              if DefPrimitive.SubKind in [Ord(skFloat), Ord(skCurrency)] then
                 PType^.Category := tcFloat
               else
                 PType^.Category := tcPrimitive;
