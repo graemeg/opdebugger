@@ -105,9 +105,8 @@ project, covering both the standalone debugger toolchain and the FPC compiler in
 * `GetPointerSize` in `pdr_opdf_adapter.pas` is conditioned on the debugger's compile-time
   architecture, not the debuggee's — will be wrong when a 64-bit debugger debugs a 32-bit
   binary; fixed by the PointerSize prerequisite below
-* Class field access inside methods requires explicit `Self.FieldName` dot notation — bare field
-  names (e.g. `print FFontManager`) are not resolved via the implicit Self parameter because
-  the FPC compiler does not emit Self into OPDF (Feature 16)
+* Class field access inside methods now resolves bare field names via implicit Self (Feature 16);
+  method-backed properties still require explicit `Self.PropertyName` dot notation
 * `elf_reader.pas` only supports ELF64; ELF32 (Linux i386) requires a format extension
 
 === Stack Frame Resolution
@@ -367,8 +366,9 @@ Full specification: `docs/feature-specs.adoc`
 
 ==== Feature 16: Implicit Self Field Resolution
 
-* [ ] Emit `Self` as `recLocalVar` in `dbgopdf.pas` — relax the `vo_is_hidden_para` skip for method Self parameters only
-* [ ] Add Self-field resolution tier in `TTypeSystem.EvaluateVariable` (`pdr_typesys.pas`) — when a bare name is not found in locals/globals/constants, look up `Self` in scope, resolve its class type, and search fields (with inheritance chain walk)
+* [x] Emit `Self` as `recLocalVar` in `dbgopdf.pas` — relax the `vo_is_hidden_para` skip for method Self parameters only
+* [x] Add Self-field resolution tier in `TTypeSystem.EvaluateVariable` (`pdr_typesys.pas`) — when a bare name is not found in locals/globals/constants, look up `Self` in scope, resolve its class type, and search fields (with inheritance chain walk)
+* [x] Add Self-field fallback in `TDebuggerEngine.GetInspectLines` (`pdr_engine.pas`) — `inspect FFontManager` inside a method resolves via Self and renders the full structured view
 * [ ] Integration test: `print FFontManager` inside a method resolves the class field
 * [ ] Verify: local variables shadow class fields of the same name
 

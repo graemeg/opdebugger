@@ -1425,6 +1425,12 @@ function TDebuggerEngine.GetInspectLines(const Expr: String): TStringArray;
 var
   RIP: QWord;
   VarInfo: TVariableInfo;
+  SelfVarInfo: TVariableInfo;
+  SelfTypeInfo: TTypeInfo;
+  SelfAddr: QWord;
+  InstancePtr: QWord;
+  PtrBuf: array[0..7] of Byte;
+  RBP: QWord;
   TypeInfo: TTypeInfo;
   ParentTypeInfo: TTypeInfo;
   ParentTypeID: TTypeID;
@@ -1434,6 +1440,7 @@ var
   I, J: Integer;
   BackingField: String;
   SingleValue: TVariableValue;
+  FoundField: Boolean;
 begin
   SetLength(Result, 0);
 
@@ -1450,8 +1457,49 @@ begin
   { Find the variable }
   if not FDebugInfoReader.FindVariableWithScope(Expr, RIP, VarInfo) then
   begin
-    AddLine('[INSPECT] Error: variable not found: ' + Expr);
-    Exit;
+    { Try implicit Self field resolution — when inside a method,
+      resolve bare field names via the Self instance pointer }
+    FoundField := False;
+    if (RIP <> 0) and FDebugInfoReader.FindVariableWithScope('Self', RIP, SelfVarInfo) then
+    begin
+      if FDebugInfoReader.FindType(SelfVarInfo.TypeID, SelfTypeInfo) and
+         (SelfTypeInfo.Category = tcClass) and (SelfTypeInfo.ClassInfo <> nil) then
+      begin
+        { Resolve Self's stack address to get instance pointer }
+        RBP := FProcessController.GetLastBreakpointRBP;
+        if RBP = 0 then
+          RBP := FProcessController.GetFrameBasePointer;
+        if RBP <> 0 then
+        begin
+          SelfAddr := RBP + SelfVarInfo.LocationData;
+          FillChar(PtrBuf, SizeOf(PtrBuf), 0);
+          if FProcessController.ReadMemory(SelfAddr, 8, PtrBuf) then
+          begin
+            InstancePtr := PQWord(@PtrBuf)^;
+            { Search class fields for a match }
+            for I := 0 to High(SelfTypeInfo.ClassInfo^.Fields) do
+            begin
+              if CompareText(SelfTypeInfo.ClassInfo^.Fields[I].Name, Expr) = 0 then
+              begin
+                VarInfo.Name := Expr;
+                VarInfo.TypeID := SelfTypeInfo.ClassInfo^.Fields[I].TypeID;
+                VarInfo.Address := InstancePtr + SelfTypeInfo.ClassInfo^.Fields[I].Offset;
+                VarInfo.LocationExpr := 0;
+                VarInfo.LocationData := 0;
+                FoundField := True;
+                Break;
+              end;
+            end;
+          end;
+        end;
+      end;
+    end;
+
+    if not FoundField then
+    begin
+      AddLine('[INSPECT] Error: variable not found: ' + Expr);
+      Exit;
+    end;
   end;
 
   { Find its type }
