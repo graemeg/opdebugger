@@ -827,6 +827,10 @@ location expression table. Document dynamic array layout (x86_64).
 duplicate types), per-unit record grouping, recUnitDirectory (19) for
 indexed access. Add debug format comparison appendix (STABS, DWARF, TD32,
 PDB). Motivated by 3.4x type duplication observed in 93-unit project.
+
+|0.4.0
+|2026-03-04
+|Hash-based TypeID allocation. recPrimitive now supports sub-kind values.
 |===
 
 == Appendices
