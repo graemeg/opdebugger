@@ -42,6 +42,11 @@ type
     FCommandLineArgs: array of String;  // Command-line arguments for the program
     FWatchSlots: array[0..3] of TWatchSlotInfo;
     FLastFiredWatchpoint: Integer;  // -1 = none, 0-3 = slot
+    FPendingSignal: Integer;       // Signal to deliver on next continue (0 = none)
+
+    { Signal classification helpers }
+    function IsStopSignal(Sig: Integer): Boolean;
+    function SignalName(Sig: Integer): String;
 
     { Breakpoint management helpers }
     function FindBreakpoint(Address: QWord): Integer;
@@ -118,7 +123,22 @@ const
   PTRACE_SETSIGINFO = $4203;
 
   { Signal numbers }
-  SIGTRAP = 5;
+  SIGHUP    = 1;
+  SIGINT    = 2;
+  SIGQUIT   = 3;
+  SIGILL    = 4;
+  SIGTRAP   = 5;
+  SIGABRT   = 6;
+  SIGBUS    = 7;
+  SIGFPE    = 8;
+  SIGKILL   = 9;
+  SIGSEGV   = 11;
+  SIGPIPE   = 13;
+  SIGALRM   = 14;
+  SIGTERM   = 15;
+  SIGSTOP   = 19;
+  SIGTSTP   = 20;
+  SIGWINCH  = 28;
 
 { External ptrace function }
 function ptrace(request: cInt; pid: TPid; addr: Pointer; data: Pointer): cLong; cdecl; external 'c' name 'ptrace';
@@ -134,6 +154,7 @@ begin
   FAttached := False;
   FLastBreakpointAddr := 0;
   FLastFiredWatchpoint := -1;
+  FPendingSignal := 0;
   for I := 0 to 3 do
     FWatchSlots[I].Active := False;
 end;
@@ -143,6 +164,41 @@ begin
   if FAttached then
     Detach;
   inherited Destroy;
+end;
+
+function TLinuxPtraceAdapter.IsStopSignal(Sig: Integer): Boolean;
+begin
+  { Signals that indicate a real problem — stop and report to user }
+  case Sig of
+    SIGSEGV, SIGFPE, SIGILL, SIGBUS, SIGABRT:
+      Result := True;
+  else
+    Result := False;
+  end;
+end;
+
+function TLinuxPtraceAdapter.SignalName(Sig: Integer): String;
+begin
+  case Sig of
+    SIGHUP:   Result := 'SIGHUP';
+    SIGINT:   Result := 'SIGINT';
+    SIGQUIT:  Result := 'SIGQUIT';
+    SIGILL:   Result := 'SIGILL';
+    SIGTRAP:  Result := 'SIGTRAP';
+    SIGABRT:  Result := 'SIGABRT';
+    SIGBUS:   Result := 'SIGBUS';
+    SIGFPE:   Result := 'SIGFPE';
+    SIGKILL:  Result := 'SIGKILL';
+    SIGSEGV:  Result := 'SIGSEGV';
+    SIGPIPE:  Result := 'SIGPIPE';
+    SIGALRM:  Result := 'SIGALRM';
+    SIGTERM:  Result := 'SIGTERM';
+    SIGSTOP:  Result := 'SIGSTOP';
+    SIGTSTP:  Result := 'SIGTSTP';
+    SIGWINCH: Result := 'SIGWINCH';
+  else
+    Result := 'SIG' + IntToStr(Sig);
+  end;
 end;
 
 function TLinuxPtraceAdapter.Launch(const BinaryPath: String): Boolean;
@@ -313,6 +369,8 @@ var
   DR6: QWord;
   Regs: TRegisters;
   WatchSlot: Integer;
+  Sig: Integer;
+  SignalToDeliver: Pointer;
 begin
   Result := False;
   FLastFiredWatchpoint := -1;
@@ -323,93 +381,134 @@ begin
     Exit;
   end;
 
-  if ptrace(PTRACE_CONT, FPID, nil, nil) = -1 then
+  // Deliver any pending signal from a previous stop, otherwise no signal
+  if FPendingSignal <> 0 then
   begin
-    WriteLn('[ERROR] Failed to continue process: ', SysErrorMessage(fpgeterrno));
-    Exit;
-  end;
+    SignalToDeliver := Pointer(PtrUInt(FPendingSignal));
+    if gVerbose then
+      WriteLn('[DEBUG] Delivering pending signal ', SignalName(FPendingSignal),
+              ' to process');
+    FPendingSignal := 0;
+  end
+  else
+    SignalToDeliver := nil;
 
-  // Wait for process to stop (breakpoint, signal, or exit)
-  WaitResult := FpWaitPid(FPID, @Status, 0);
-  if WaitResult = -1 then
+  // Continue + wait loop: re-injects benign signals automatically
+  while True do
   begin
-    WriteLn('[ERROR] Failed to wait for process: ', SysErrorMessage(fpgeterrno));
-    Exit;
-  end;
-
-  // Check why the process stopped
-  if WIFSTOPPED(Status) then
-  begin
-    if WSTOPSIG(Status) = SIGTRAP then
+    if ptrace(PTRACE_CONT, FPID, nil, SignalToDeliver) = -1 then
     begin
-      // Check DR6 to distinguish watchpoint from software breakpoint
-      DR6 := ReadDebugRegister(6);
-      // Clear DR6 status to prevent stale triggers
-      WriteDebugRegister(6, 0);
+      WriteLn('[ERROR] Failed to continue process: ', SysErrorMessage(fpgeterrno));
+      Exit;
+    end;
 
-      if (DR6 and $F) <> 0 then
+    // After the first continue, clear the signal for subsequent iterations
+    SignalToDeliver := nil;
+
+    // Wait for process to stop (breakpoint, signal, or exit)
+    WaitResult := FpWaitPid(FPID, @Status, 0);
+    if WaitResult = -1 then
+    begin
+      WriteLn('[ERROR] Failed to wait for process: ', SysErrorMessage(fpgeterrno));
+      Exit;
+    end;
+
+    // Check why the process stopped
+    if WIFSTOPPED(Status) then
+    begin
+      Sig := WSTOPSIG(Status);
+
+      if Sig = SIGTRAP then
       begin
-        // Hardware watchpoint triggered
-        WatchSlot := -1;
-        if (DR6 and 1) <> 0 then WatchSlot := 0
-        else if (DR6 and 2) <> 0 then WatchSlot := 1
-        else if (DR6 and 4) <> 0 then WatchSlot := 2
-        else if (DR6 and 8) <> 0 then WatchSlot := 3;
+        // Check DR6 to distinguish watchpoint from software breakpoint
+        DR6 := ReadDebugRegister(6);
+        // Clear DR6 status to prevent stale triggers
+        WriteDebugRegister(6, 0);
 
-        FLastFiredWatchpoint := WatchSlot;
-
-        // Save current RIP/RBP for scope-aware variable evaluation
-        if GetRegisters(Regs) then
+        if (DR6 and $F) <> 0 then
         begin
-          {$IFDEF CPUX86_64}
-          FLastBreakpointAddr := Regs.RIP;
-          FLastBreakpointRBP := Regs.RBP;
-          {$ENDIF}
-          {$IFDEF CPUI386}
-          FLastBreakpointAddr := Regs.EIP;
-          FLastBreakpointRBP := Regs.EBP;
-          {$ENDIF}
-        end;
+          // Hardware watchpoint triggered
+          WatchSlot := -1;
+          if (DR6 and 1) <> 0 then WatchSlot := 0
+          else if (DR6 and 2) <> 0 then WatchSlot := 1
+          else if (DR6 and 4) <> 0 then WatchSlot := 2
+          else if (DR6 and 8) <> 0 then WatchSlot := 3;
 
-        if gVerbose then
-          WriteLn('[DEBUG] Hardware watchpoint hit: slot ', WatchSlot);
+          FLastFiredWatchpoint := WatchSlot;
+
+          // Save current RIP/RBP for scope-aware variable evaluation
+          if GetRegisters(Regs) then
+          begin
+            {$IFDEF CPUX86_64}
+            FLastBreakpointAddr := Regs.RIP;
+            FLastBreakpointRBP := Regs.RBP;
+            {$ENDIF}
+            {$IFDEF CPUI386}
+            FLastBreakpointAddr := Regs.EIP;
+            FLastBreakpointRBP := Regs.EBP;
+            {$ENDIF}
+          end;
+
+          if gVerbose then
+            WriteLn('[DEBUG] Hardware watchpoint hit: slot ', WatchSlot);
+        end
+        else
+        begin
+          // Software breakpoint (INT3)
+          if not HandleBreakpointHit then
+          begin
+            WriteLn('[ERROR] Failed to handle breakpoint');
+            Exit;
+          end;
+        end;
+        Result := True;
+        Exit;
+      end
+      else if IsStopSignal(Sig) then
+      begin
+        // Serious signal — stop and report to user
+        WriteLn('[INFO] Process received ', SignalName(Sig), ' (signal ', Sig, ')');
+        FPendingSignal := Sig;
+        Result := True;
+        Exit;
       end
       else
       begin
-        // Software breakpoint (INT3)
-        if not HandleBreakpointHit then
-        begin
-          WriteLn('[ERROR] Failed to handle breakpoint');
-          Exit;
-        end;
+        // Benign signal — re-inject and continue waiting
+        if gVerbose then
+          WriteLn('[DEBUG] Passing through ', SignalName(Sig), ' to process');
+        SignalToDeliver := Pointer(PtrUInt(Sig));
+        // Loop continues: PTRACE_CONT with signal re-injection
       end;
     end
-    else
+    else if WIFEXITED(Status) then
     begin
-      WriteLn('[INFO] Process stopped (signal: ', WSTOPSIG(Status), ')');
+      WriteLn('[INFO] Process exited with code ', WEXITSTATUS(Status));
+      FAttached := False;
+      FPID := -1;
+      FPendingSignal := 0;
+      Result := True;
+      Exit;
+    end
+    else if WIFSIGNALED(Status) then
+    begin
+      WriteLn('[INFO] Process terminated by signal ',
+              SignalName(WTERMSIG(Status)), ' (', WTERMSIG(Status), ')');
+      FAttached := False;
+      FPID := -1;
+      FPendingSignal := 0;
+      Result := True;
+      Exit;
     end;
-    Result := True;
-  end
-  else if WIFEXITED(Status) then
-  begin
-    WriteLn('[INFO] Process exited with code ', WEXITSTATUS(Status));
-    FAttached := False;
-    FPID := -1;
-    Result := True;
-  end
-  else if WIFSIGNALED(Status) then
-  begin
-    WriteLn('[INFO] Process terminated by signal ', WTERMSIG(Status));
-    FAttached := False;
-    FPID := -1;
-    Result := True;
-  end;
+  end; { while True }
 end;
 
 function TLinuxPtraceAdapter.Step: Boolean;
 var
   Status: cInt;
   WaitResult: TPid;
+  Sig: Integer;
+  SignalToDeliver: Pointer;
 begin
   Result := False;
 
@@ -419,40 +518,78 @@ begin
     Exit;
   end;
 
-  if ptrace(PTRACE_SINGLESTEP, FPID, nil, nil) = -1 then
-  begin
-    WriteLn('[ERROR] Failed to single step: ', SysErrorMessage(fpgeterrno));
-    Exit;
-  end;
+  SignalToDeliver := nil;
 
-  // Wait for step to complete
-  WaitResult := FpWaitPid(FPID, @Status, 0);
-  if WaitResult = -1 then
+  // Step + wait loop: re-injects benign signals and re-steps automatically
+  while True do
   begin
-    WriteLn('[ERROR] Failed to wait for step: ', SysErrorMessage(fpgeterrno));
-    Exit;
-  end;
+    if ptrace(PTRACE_SINGLESTEP, FPID, nil, SignalToDeliver) = -1 then
+    begin
+      WriteLn('[ERROR] Failed to single step: ', SysErrorMessage(fpgeterrno));
+      Exit;
+    end;
 
-  // Check step result
-  if WIFSTOPPED(Status) then
-  begin
-    if gVerbose then WriteLn('[INFO] Step complete');
-    Result := True;
-  end
-  else if WIFEXITED(Status) then
-  begin
-    WriteLn('[INFO] Process exited during step with code ', WEXITSTATUS(Status));
-    FAttached := False;
-    FPID := -1;
-    Result := True;
-  end
-  else if WIFSIGNALED(Status) then
-  begin
-    WriteLn('[INFO] Process terminated during step by signal ', WTERMSIG(Status));
-    FAttached := False;
-    FPID := -1;
-    Result := True;
-  end;
+    SignalToDeliver := nil;
+
+    // Wait for step to complete
+    WaitResult := FpWaitPid(FPID, @Status, 0);
+    if WaitResult = -1 then
+    begin
+      WriteLn('[ERROR] Failed to wait for step: ', SysErrorMessage(fpgeterrno));
+      Exit;
+    end;
+
+    // Check step result
+    if WIFSTOPPED(Status) then
+    begin
+      Sig := WSTOPSIG(Status);
+
+      if Sig = SIGTRAP then
+      begin
+        // Normal single-step completion
+        if gVerbose then WriteLn('[INFO] Step complete');
+        Result := True;
+        Exit;
+      end
+      else if IsStopSignal(Sig) then
+      begin
+        // Serious signal during step — stop and report
+        WriteLn('[INFO] Process received ', SignalName(Sig),
+                ' (signal ', Sig, ') during step');
+        FPendingSignal := Sig;
+        Result := True;
+        Exit;
+      end
+      else
+      begin
+        // Benign signal during step — re-inject and re-step
+        if gVerbose then
+          WriteLn('[DEBUG] Passing through ', SignalName(Sig),
+                  ' during step');
+        SignalToDeliver := Pointer(PtrUInt(Sig));
+        // Loop continues
+      end;
+    end
+    else if WIFEXITED(Status) then
+    begin
+      WriteLn('[INFO] Process exited during step with code ', WEXITSTATUS(Status));
+      FAttached := False;
+      FPID := -1;
+      FPendingSignal := 0;
+      Result := True;
+      Exit;
+    end
+    else if WIFSIGNALED(Status) then
+    begin
+      WriteLn('[INFO] Process terminated during step by signal ',
+              SignalName(WTERMSIG(Status)), ' (', WTERMSIG(Status), ')');
+      FAttached := False;
+      FPID := -1;
+      FPendingSignal := 0;
+      Result := True;
+      Exit;
+    end;
+  end; { while True }
 end;
 
 function TLinuxPtraceAdapter.ReadMemory(Address: QWord; Size: Cardinal; out Buffer): Boolean;
