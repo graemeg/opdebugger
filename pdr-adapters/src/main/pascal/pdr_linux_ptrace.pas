@@ -143,11 +143,27 @@ const
 { External ptrace function }
 function ptrace(request: cInt; pid: TPid; addr: Pointer; data: Pointer): cLong; cdecl; external 'c' name 'ptrace';
 
+{ External setpgid function }
+function c_setpgid(pid: TPid; pgid: TPid): cInt; cdecl; external 'c' name 'setpgid';
+
+var
+  { Ctrl+C support: unit-level state for SIGINT handler }
+  gWaitingPID: TPid = -1;           { PID of tracee we are blocked waiting on; -1 = not waiting }
+  gUserInterrupted: Boolean = False; { Set True by SIGINT handler }
+
+procedure HandleSIGINT(Sig: cInt); cdecl;
+begin
+  if gWaitingPID > 0 then
+    FpKill(gWaitingPID, SIGSTOP);
+  gUserInterrupted := True;
+end;
+
 { TLinuxPtraceAdapter }
 
 constructor TLinuxPtraceAdapter.Create;
 var
   I: Integer;
+  SigAct, OldAct: SigActionRec;
 begin
   inherited Create;
   FPID := -1;
@@ -157,6 +173,12 @@ begin
   FPendingSignal := 0;
   for I := 0 to 3 do
     FWatchSlots[I].Active := False;
+
+  { Install SIGINT handler so Ctrl+C interrupts the tracee instead of killing pdr }
+  FillChar(SigAct, SizeOf(SigAct), 0);
+  SigAct.sa_handler := SigActionHandler(@HandleSIGINT);
+  SigAct.sa_flags := SA_RESTART;  { FpWaitPid restarts; handler sends SIGSTOP to wake it }
+  FpSigAction(SIGINT, @SigAct, @OldAct);
 end;
 
 destructor TLinuxPtraceAdapter.Destroy;
@@ -237,6 +259,11 @@ begin
   if ChildPID = 0 then
   begin
     // Child process - enable tracing and exec the target program
+
+    // Put child in its own process group so terminal Ctrl+C
+    // only goes to pdr, not the tracee
+    c_setpgid(0, 0);
+
     if ptrace(PTRACE_TRACEME, 0, nil, nil) = -1 then
     begin
       WriteLn('[ERROR] Child: Failed to enable tracing');
@@ -263,11 +290,15 @@ begin
     if gVerbose then
       WriteLn('[INFO] Child process created with PID ', ChildPID);
 
+    gWaitingPID := ChildPID;
+    gUserInterrupted := False;
     if FpWaitPid(ChildPID, @Status, 0) = -1 then
     begin
+      gWaitingPID := -1;
       WriteLn('[ERROR] Failed to wait for child process: ', SysErrorMessage(fpgeterrno));
       Exit;
     end;
+    gWaitingPID := -1;
 
     // Check if child stopped due to SIGTRAP (from ptrace)
     if not WIFSTOPPED(Status) then
@@ -406,7 +437,10 @@ begin
     SignalToDeliver := nil;
 
     // Wait for process to stop (breakpoint, signal, or exit)
+    gWaitingPID := FPID;
+    gUserInterrupted := False;
     WaitResult := FpWaitPid(FPID, @Status, 0);
+    gWaitingPID := -1;
     if WaitResult = -1 then
     begin
       WriteLn('[ERROR] Failed to wait for process: ', SysErrorMessage(fpgeterrno));
@@ -461,6 +495,15 @@ begin
             Exit;
           end;
         end;
+        Result := True;
+        Exit;
+      end
+      else if Sig = SIGSTOP then
+      begin
+        // User pressed Ctrl+C or external SIGSTOP — return to prompt
+        gUserInterrupted := False;
+        WriteLn('');
+        WriteLn('[INFO] Interrupted');
         Result := True;
         Exit;
       end
@@ -532,7 +575,10 @@ begin
     SignalToDeliver := nil;
 
     // Wait for step to complete
+    gWaitingPID := FPID;
+    gUserInterrupted := False;
     WaitResult := FpWaitPid(FPID, @Status, 0);
+    gWaitingPID := -1;
     if WaitResult = -1 then
     begin
       WriteLn('[ERROR] Failed to wait for step: ', SysErrorMessage(fpgeterrno));
@@ -548,6 +594,15 @@ begin
       begin
         // Normal single-step completion
         if gVerbose then WriteLn('[INFO] Step complete');
+        Result := True;
+        Exit;
+      end
+      else if Sig = SIGSTOP then
+      begin
+        // User pressed Ctrl+C during step — return to prompt
+        gUserInterrupted := False;
+        WriteLn('');
+        WriteLn('[INFO] Interrupted');
         Result := True;
         Exit;
       end
