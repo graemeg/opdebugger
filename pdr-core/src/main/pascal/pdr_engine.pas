@@ -321,7 +321,8 @@ begin
     Exit;
   end;
 
-  if gVerbose then WriteLn('[INFO] Continuing process...');
+  if gVerbose then
+    WriteLn('[INFO] Continuing process...');
 
   repeat
     if not FProcessController.Continue then
@@ -333,7 +334,9 @@ begin
     { Check if process exited }
     if FProcessController.GetCurrentAddress = 0 then
     begin
-      if gVerbose then WriteLn('[INFO] Process stopped and ready for commands');
+      if gVerbose then
+        WriteLn('[INFO] Process terminated');
+      FState := dsTerminated;
       Result := True;
       Exit;
     end;
@@ -359,7 +362,8 @@ begin
           Break;
         end;
 
-      if gVerbose then WriteLn('[INFO] Process stopped and ready for commands');
+      if gVerbose then
+        WriteLn('[INFO] Process stopped and ready for commands');
       Result := True;
       Exit;
     end;
@@ -409,7 +413,8 @@ begin
     end;
   until ConditionMet;
 
-  if gVerbose then WriteLn('[INFO] Process stopped and ready for commands');
+  if gVerbose then
+    WriteLn('[INFO] Process stopped and ready for commands');
   Result := True;
 end;
 
