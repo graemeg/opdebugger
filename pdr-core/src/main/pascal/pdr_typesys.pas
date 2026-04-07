@@ -1080,7 +1080,11 @@ function TSetEvaluator.Evaluate(const VarInfo: TVariableInfo;
   const TypeInfo: TTypeInfo; ProcessController: IProcessController;
   TypeSystem: TTypeSystem): TVariableValue;
 var
-  Buffer: array[0..7] of Byte;
+  { FPC packs sets into 1, 2, 4 or 32 bytes depending on the element
+    ordinal range. Allocate dynamically to cover the 32-byte "big set"
+    form used when the lower bound is non-zero or element values reach
+    or exceed 32. }
+  Buffer: array of Byte;
   BaseTypeInfo: TTypeInfo;
   HasBaseEnum: Boolean;
   BitNum: Integer;
@@ -1104,8 +1108,9 @@ begin
     Exit;
   end;
 
-  FillChar(Buffer, SizeOf(Buffer), 0);
-  if not ProcessController.ReadMemory(VarInfo.Address, TypeInfo.Size, Buffer) then
+  SetLength(Buffer, TypeInfo.Size);
+  FillChar(Buffer[0], TypeInfo.Size, 0);
+  if not ProcessController.ReadMemory(VarInfo.Address, TypeInfo.Size, Buffer[0]) then
   begin
     Result.Value := '<error: failed to read memory>';
     Exit;
@@ -1124,7 +1129,13 @@ begin
     BitIdx  := BitNum mod 8;
     if (Buffer[ByteIdx] and (1 shl BitIdx)) <> 0 then
     begin
-      OrdValue := TypeInfo.SetLowerBound + BitNum;
+      { FPC stores small sets (1/2/4 bytes) shifted so bit 0 = LowerBound,
+        but big sets (32 bytes) store the raw ordinal as the bit index
+        with bits below LowerBound left unused. }
+      if TypeInfo.Size >= 32 then
+        OrdValue := BitNum
+      else
+        OrdValue := TypeInfo.SetLowerBound + BitNum;
       MemberName := '';
 
       if HasBaseEnum then

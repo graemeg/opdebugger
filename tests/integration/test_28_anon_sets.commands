@@ -1,0 +1,6 @@
+run
+break test_28_anon_sets.pas:22
+continue
+print SetOne
+print SetTwo
+quit
