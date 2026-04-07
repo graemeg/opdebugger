@@ -319,8 +319,12 @@ type
   TDefSet = packed record
     TypeID: TTypeID;        // 4 bytes - this type's ID
     BaseTypeID: TTypeID;    // 4 bytes - ID of base ordinal/enum type
-    SizeInBytes: Byte;      // 1 byte - storage size (1, 2, 4, or 8)
-    LowerBound: LongInt;    // 4 bytes - lowest valid ordinal value (setlow)
+    SizeInBytes: Byte;      // 1 byte - storage size: 1, 2, 4 (small set,
+                            //   bit 0 = LowerBound) or 32 (big set,
+                            //   bit N = raw ordinal N)
+    LowerBound: LongInt;    // 4 bytes - lowest valid ordinal value (setlow);
+                            //   used as bit-0 anchor for small sets and as
+                            //   metadata only for big sets
     NameLen: TNameLen;      // 2 bytes
     // Followed by Name (NameLen bytes)
   end;

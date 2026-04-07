@@ -499,26 +499,50 @@ A Pascal `set of` type stored as a compact bitfield. Each bit represents members
 TDefSet = packed record
   TypeID: TTypeID;      // 4 bytes — this set type's ID
   BaseTypeID: TTypeID;  // 4 bytes — base ordinal or enum type ID
-  SizeInBytes: Byte;    // 1 byte — storage size in bytes (1, 2, 4, or 8)
-  LowerBound: LongInt;  // 4 bytes — lowest valid ordinal value (setlow)
+  SizeInBytes: Byte;    // 1 byte — storage size: 1, 2, 4 (small set form)
+                        //          or 32 (big set form, 256-bit flat)
+  LowerBound: LongInt;  // 4 bytes — lowest valid ordinal value (setlow);
+                        //          interpretation depends on SizeInBytes
   NameLen: TNameLen;    // 2 bytes
   // Followed by: Name (NameLen bytes)
 end;
 // Fixed part: 15 bytes
 ----
 
-.Bit Encoding
+.Storage Forms
 
-Given a `SizeInBytes`-byte value read from the variable address, bit position `B` (where `B = 0` is the least significant bit of byte 0) corresponds to ordinal value `LowerBound + B`. The member name is obtained by looking up `LowerBound + B` in the base enum type's `recEnum` record.
+FPC packs sets into one of two physical layouts depending on the element ordinal range, and the bit-to-ordinal mapping differs between them. Consumers must branch on `SizeInBytes`:
 
-.Example: `TDaySet = set of TDays` where `TDays = (Mon, Tue, Wed, Thu, Fri, Sat, Sun)`
+[cols="1,3,3"]
+|===
+| `SizeInBytes` | Form | Bit-to-ordinal mapping
+
+| 1, 2 or 4
+| **Small set.** Storage is shifted so bit 0 of byte 0 corresponds to ordinal `LowerBound`. Used when the element range fits in 32 bits after shifting.
+| Bit `B` ↔ ordinal `LowerBound + B`
+
+| 32
+| **Big set.** Storage is a flat 256-bit field where bit `N` corresponds to raw ordinal `N`. Bits below `LowerBound` are reserved and must be ignored. Used whenever any element ordinal is ≥ 32 or the shifted range exceeds 32 bits.
+| Bit `B` ↔ ordinal `B` (raw); `LowerBound` is metadata only
+|===
+
+In both forms, bit position `B` is counted from the least significant bit of byte 0, ascending through the bytes of the storage. Member names are obtained by looking up the resolved ordinal in the base enum type's `recEnum` record.
+
+.Example 1: small set — `TDaySet = set of TDays` where `TDays = (Mon, Tue, Wed, Thu, Fri, Sat, Sun)`
 
 * `LowerBound = 0`, `SizeInBytes = 1`
 * Raw byte `0x1F` (binary `00011111`) → bits 0..4 set → `[Mon, Tue, Wed, Thu, Fri]`
 * Raw byte `0x60` (binary `01100000`) → bits 5..6 set → `[Sat, Sun]`
 * Raw byte `0x00` → `[]` (empty set)
 
-`BaseTypeID` references the `recEnum` record for `TDays`, from which member names are resolved. If the base type is a subrange rather than an enum, member names are not available and ordinal values are displayed numerically.
+.Example 2: big set — `set of (xx1=2, xx2=8, xx3=44, xx4=55)`
+
+* `LowerBound = 2`, `SizeInBytes = 32`
+* Membership `[xx1, xx2]` → bit 2 of byte 0 set, bit 0 of byte 1 set (bit 8 overall)
+* Raw bytes `04 01 00 00 ... 00` → bits 2 and 8 set → ordinals 2 and 8 → `[xx1, xx2]`
+* Note that `LowerBound + B` would yield ordinals `4` and `10`, which is incorrect for big sets — the `+ LowerBound` shift only applies to the small-set form.
+
+`BaseTypeID` references the `recEnum` record for the element type, from which member names are resolved. If the base type is a subrange rather than an enum, member names are not available and ordinal values are displayed numerically.
 
 === Interface Type (recInterface = 16)
 
