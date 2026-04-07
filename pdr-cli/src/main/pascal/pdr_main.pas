@@ -83,7 +83,7 @@ begin
   WriteLn('  info breakpoints - List all breakpoints with conditions');
   WriteLn('  locals         - List local variables in current function');
   WriteLn('  locals scoped  - Include variables from enclosing scopes');
-  WriteLn('  locals globals - Also include global variables');
+  WriteLn('  globals (gl)   - List global (program-level) variables');
   WriteLn('  inspect <var>  - Show structured type layout with all fields/properties');
   WriteLn('  set <var> = <value> - Assign a value to a variable');
   WriteLn('  display <expr>  - Auto-print expression on every stop');
@@ -159,7 +159,6 @@ var
   Limit: Integer;
   CallStack: TStringArray;
   LocalVars: TVariableValueArray;
-  GlobalNames: TStringArray;
   SliceResult: TVariableValueArray;
   SliceVarName: String;
   SliceLow, SliceHigh: Int64;
@@ -459,20 +458,21 @@ begin
             else
               WriteLn('[WARN] ', LocalVars[I].Name, ': ', LocalVars[I].Value);
           end;
+      end;
 
-        { 'locals globals' also lists global variables }
-        if (Length(Parts) > 1) and (LowerCase(Parts[1]) = 'globals') then
-        begin
-          GlobalNames := FDebugInfoReader.GetGlobalVariables;
-          for I := 0 to High(GlobalNames) do
+    'globals', 'gl':
+      begin
+        LocalVars := FEngine.GetGlobalVariables;
+        if Length(LocalVars) = 0 then
+          WriteLn('[INFO] No global variables found')
+        else
+          for I := 0 to High(LocalVars) do
           begin
-            VarValue := FEngine.EvaluateExpression(GlobalNames[I]);
-            if VarValue.IsValid then
-              WriteLn(VarValue.Name, ' = ', VarValue.Value)
-            else if gVerbose then
-              WriteLn('[DEBUG] ', VarValue.Name, ': ', VarValue.Value);
+            if LocalVars[I].IsValid then
+              WriteLn(LocalVars[I].Name, ' = ', LocalVars[I].Value)
+            else
+              WriteLn('[WARN] ', LocalVars[I].Name, ': ', LocalVars[I].Value);
           end;
-        end;
       end;
 
     'inspect', 'ins':
