@@ -730,6 +730,10 @@ begin
               PType^.IsSigned := False;
               PType^.Category := tcAnsiString;
               PType^.MaxLength := 0;
+              PType^.StrLengthOffset := DefAnsiString.LengthOffset;
+              PType^.StrRefCountOffset := DefAnsiString.RefCountOffset;
+              PType^.StrCodePageOffset := DefAnsiString.CodePageOffset;
+              PType^.StrElementSizeOffset := DefAnsiString.ElementSizeOffset;
 
               FTypes.Add(GlobalTypeID, PType);
             end;
@@ -755,6 +759,10 @@ begin
               else
                 PType^.Category := tcUnicodeString;
               PType^.MaxLength := 0;
+              PType^.StrLengthOffset := DefUnicodeString.LengthOffset;
+              PType^.StrRefCountOffset := DefUnicodeString.RefCountOffset;
+              PType^.StrCodePageOffset := DefUnicodeString.CodePageOffset;
+              PType^.StrElementSizeOffset := DefUnicodeString.ElementSizeOffset;
 
               FTypes.Add(GlobalTypeID, PType);
             end;

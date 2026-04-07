@@ -132,16 +132,32 @@ type
   end;
 
   { AnsiString Type Definition }
+  { Header field offsets are signed byte offsets from the runtime data pointer
+    (typically negative, since FPC stores the header below the data). The
+    compiler emits these at build time so the debugger does not have to
+    hardcode FPC's AnsiString header layout. }
   TDefAnsiString = packed record
-    TypeID: TTypeID;        // 4 bytes
-    NameLen: TNameLen;      // 2 bytes
+    TypeID: TTypeID;            // 4 bytes
+    LengthOffset: SmallInt;     // 2 bytes - offset to Length field
+    RefCountOffset: SmallInt;   // 2 bytes - offset to RefCount field
+    CodePageOffset: SmallInt;   // 2 bytes - offset to CodePage field
+    ElementSizeOffset: SmallInt;// 2 bytes - offset to ElementSize field
+    NameLen: TNameLen;          // 2 bytes
     // Followed by Name (NameLen bytes)
   end;
 
-  { UnicodeString Type Definition }
+  { UnicodeString / WideString Type Definition }
+  { Same offset rationale as TDefAnsiString. On Linux, UnicodeString and
+    WideString share the AnsiString-style header; on Windows, WideString is
+    BSTR-like — the compiler is responsible for emitting the correct offsets
+    for the target. }
   TDefUnicodeString = packed record
-    TypeID: TTypeID;        // 4 bytes
-    NameLen: TNameLen;      // 2 bytes
+    TypeID: TTypeID;            // 4 bytes
+    LengthOffset: SmallInt;     // 2 bytes - offset to Length field
+    RefCountOffset: SmallInt;   // 2 bytes - offset to RefCount field
+    CodePageOffset: SmallInt;   // 2 bytes - offset to CodePage field
+    ElementSizeOffset: SmallInt;// 2 bytes - offset to ElementSize field
+    NameLen: TNameLen;          // 2 bytes
     // Followed by Name (NameLen bytes)
   end;
 

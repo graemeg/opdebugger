@@ -48,8 +48,10 @@ type
                             SubKind: TOPDFPrimitiveSubKind = skInteger);
     procedure WriteShortString(TypeID: TTypeID; const Name: String;
                               MaxLen: Byte);
-    procedure WriteAnsiString(TypeID: TTypeID; const Name: String);
-    procedure WriteUnicodeString(TypeID: TTypeID; const Name: String);
+    procedure WriteAnsiString(TypeID: TTypeID; const Name: String;
+      LengthOffset, RefCountOffset, CodePageOffset, ElementSizeOffset: SmallInt);
+    procedure WriteUnicodeString(TypeID: TTypeID; const Name: String;
+      LengthOffset, RefCountOffset, CodePageOffset, ElementSizeOffset: SmallInt);
     procedure WritePointer(TypeID: TTypeID; TargetTypeID: TTypeID;
                           const Name: String);
 
@@ -278,7 +280,8 @@ begin
   Inc(FRecordCount);
 end;
 
-procedure TOPDFWriter.WriteAnsiString(TypeID: TTypeID; const Name: String);
+procedure TOPDFWriter.WriteAnsiString(TypeID: TTypeID; const Name: String;
+  LengthOffset, RefCountOffset, CodePageOffset, ElementSizeOffset: SmallInt);
 var
   RecHeader: TOPDFRecordHeader;
   Payload: TDefAnsiString;
@@ -287,6 +290,10 @@ begin
     WriteHeader;
 
   Payload.TypeID := TypeID;
+  Payload.LengthOffset := LengthOffset;
+  Payload.RefCountOffset := RefCountOffset;
+  Payload.CodePageOffset := CodePageOffset;
+  Payload.ElementSizeOffset := ElementSizeOffset;
   Payload.NameLen := Length(Name);
 
   RecHeader.RecType := Ord(recAnsiStr);
@@ -299,7 +306,8 @@ begin
   Inc(FRecordCount);
 end;
 
-procedure TOPDFWriter.WriteUnicodeString(TypeID: TTypeID; const Name: String);
+procedure TOPDFWriter.WriteUnicodeString(TypeID: TTypeID; const Name: String;
+  LengthOffset, RefCountOffset, CodePageOffset, ElementSizeOffset: SmallInt);
 var
   RecHeader: TOPDFRecordHeader;
   Payload: TDefUnicodeString;
@@ -308,6 +316,10 @@ begin
     WriteHeader;
 
   Payload.TypeID := TypeID;
+  Payload.LengthOffset := LengthOffset;
+  Payload.RefCountOffset := RefCountOffset;
+  Payload.CodePageOffset := CodePageOffset;
+  Payload.ElementSizeOffset := ElementSizeOffset;
   Payload.NameLen := Length(Name);
 
   RecHeader.RecType := Ord(recUnicodeStr);

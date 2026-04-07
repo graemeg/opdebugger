@@ -142,6 +142,12 @@ type
     Category: TTypeCategory;
     // String-specific
     MaxLength: Byte;  // For ShortString: max length (0-255)
+    // AnsiString / UnicodeString / WideString header layout (compiler-emitted,
+    // signed offsets from the runtime data pointer to each header field)
+    StrLengthOffset: SmallInt;
+    StrRefCountOffset: SmallInt;
+    StrCodePageOffset: SmallInt;
+    StrElementSizeOffset: SmallInt;
     // Pointer-specific
     PointerTo: TTypeID; // For pointers: the type ID of the pointed-to type
     // Class-specific

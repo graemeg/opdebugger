@@ -321,8 +321,9 @@ begin
   Result.Address := VarInfo.Address;
   Result.IsValid := False;
 
-  // AnsiString is a pointer to heap memory
-  // Format: [pointer] -> [length: LongInt at -8][refcount: LongInt at -4][data bytes][null]
+  // AnsiString is a pointer to heap memory. The header layout is described
+  // by the type record itself (StrLengthOffset etc), emitted by the compiler,
+  // so the debugger does not hardcode FPC's internal AnsiString format.
 
   // Read pointer
   FillChar(PointerBuf, SizeOf(PointerBuf), 0);
@@ -342,9 +343,10 @@ begin
     Exit;
   end;
 
-  // Read header (length at StringPtr - 8)
+  // Read length using compiler-supplied offset
   FillChar(HeaderBuf, SizeOf(HeaderBuf), 0);
-  if not ProcessController.ReadMemory(StringPtr - 8, 8, HeaderBuf) then
+  if not ProcessController.ReadMemory(QWord(Int64(StringPtr) + TypeInfo.StrLengthOffset),
+       SizeOf(LongInt), HeaderBuf) then
   begin
     Result.Value := '<error: failed to read string header>';
     Exit;
@@ -404,8 +406,9 @@ begin
   Result.Address := VarInfo.Address;
   Result.IsValid := False;
 
-  // UnicodeString is a pointer to heap memory (similar to AnsiString but WideChar elements)
-  // Format: [pointer] -> [length: LongInt at -8][refcount: LongInt at -4][WideChar data][null]
+  // UnicodeString / WideString is a pointer to heap memory. The header layout
+  // is described by the type record itself (StrLengthOffset etc), emitted by
+  // the compiler.
 
   // Read pointer
   FillChar(PointerBuf, SizeOf(PointerBuf), 0);
@@ -425,9 +428,10 @@ begin
     Exit;
   end;
 
-  // Read header (length at StringPtr - 8)
+  // Read length using compiler-supplied offset
   FillChar(HeaderBuf, SizeOf(HeaderBuf), 0);
-  if not ProcessController.ReadMemory(StringPtr - 8, 8, HeaderBuf) then
+  if not ProcessController.ReadMemory(QWord(Int64(StringPtr) + TypeInfo.StrLengthOffset),
+       SizeOf(LongInt), HeaderBuf) then
   begin
     Result.Value := '<error: failed to read string header>';
     Exit;
@@ -490,9 +494,10 @@ begin
       Result := '''''';
       Exit;
     end;
-    { Read AnsiString length at StringPtr - 8 }
+    { Read AnsiString length using compiler-supplied header offset }
     FillChar(HeaderBuf, SizeOf(HeaderBuf), 0);
-    if not ProcessController.ReadMemory(StringPtr - 8, 8, HeaderBuf) then
+    if not ProcessController.ReadMemory(QWord(Int64(StringPtr) + PropTypeInfo.StrLengthOffset),
+         SizeOf(LongInt), HeaderBuf) then
       Exit;
     Len := PLongInt(@HeaderBuf)^;
     if (Len < 0) or (Len > 65536) then

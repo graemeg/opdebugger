@@ -157,7 +157,9 @@ var
 begin
   Stream.Read(Def, SizeOf(Def));
   Name := ReadString(Stream, Def.NameLen);
-  WriteLn(Format('    TypeID=%d Name="%s"', [Def.TypeID, Name]));
+  WriteLn(Format('    TypeID=%d Name="%s" Hdr(len=%d ref=%d cp=%d es=%d)',
+    [Def.TypeID, Name, Def.LengthOffset, Def.RefCountOffset,
+     Def.CodePageOffset, Def.ElementSizeOffset]));
 end;
 
 procedure DumpUnicodeString(Stream: TStream);
@@ -167,7 +169,9 @@ var
 begin
   Stream.Read(Def, SizeOf(Def));
   Name := ReadString(Stream, Def.NameLen);
-  WriteLn(Format('    TypeID=%d Name="%s"', [Def.TypeID, Name]));
+  WriteLn(Format('    TypeID=%d Name="%s" Hdr(len=%d ref=%d cp=%d es=%d)',
+    [Def.TypeID, Name, Def.LengthOffset, Def.RefCountOffset,
+     Def.CodePageOffset, Def.ElementSizeOffset]));
 end;
 
 procedure DumpPointer(Stream: TStream);

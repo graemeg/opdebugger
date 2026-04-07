@@ -265,26 +265,34 @@ Reference-counted heap-allocated string with 8-bit characters.
 [source,pascal]
 ----
 TDefAnsiString = packed record
-  TypeID: TTypeID;    // 4 bytes
-  NameLen: TNameLen;  // 2 bytes
+  TypeID: TTypeID;             // 4 bytes
+  LengthOffset: SmallInt;      // 2 bytes - signed offset from data ptr
+  RefCountOffset: SmallInt;    // 2 bytes
+  CodePageOffset: SmallInt;    // 2 bytes
+  ElementSizeOffset: SmallInt; // 2 bytes
+  NameLen: TNameLen;           // 2 bytes
   // Followed by: Name (NameLen bytes)
 end;
-// Fixed part: 6 bytes
+// Fixed part: 14 bytes
 ----
 
-Memory layout at runtime (x86_64):
+`LengthOffset`, `RefCountOffset`, `CodePageOffset` and `ElementSizeOffset` are signed byte offsets from the runtime data pointer to each header field. They are emitted by the compiler at build time so consumers do not have to hardcode FPC's AnsiString header layout. Offsets are typically negative because FPC stores the header below the data.
+
+Memory layout at runtime (Linux x86_64, FPC default):
 
 ----
 Variable: [Pointer: 8 bytes]
   -> Heap block:
-     Offset -16: CodePage (Word)
-     Offset -14: ElementSize (Word)
-     Offset -12: RefCount (LongInt)
-     Offset  -8: Length (LongInt)   -- character count
-     Offset   0: Character data (Length bytes) + NUL terminator
+     CodePageOffset    = -16: CodePage (Word)
+     ElementSizeOffset = -14: ElementSize (Word)
+     RefCountOffset    = -12: RefCount (LongInt, 4 bytes)
+     LengthOffset      =  -8: Length (SizeInt, 8 bytes)
+     Offset 0:                Character data (Length bytes) + NUL terminator
 ----
 
-The debugger reads the pointer, then dereferences at `Pointer - 8` for length and `Pointer + 0` for the character data.
+On 32-bit targets the header is 12 bytes (Length is 4 bytes) so the offsets are -12/-10/-8/-4. Consumers must use the offsets from the type record rather than the values shown above.
+
+The debugger reads the pointer, then dereferences at `Pointer + LengthOffset` for the length and `Pointer + 0` for the character data.
 
 === UnicodeString / WideString Type (recUnicodeStr = 5)
 
@@ -293,14 +301,20 @@ UTF-16 encoded dynamic string. Both `UnicodeString` and `WideString` emit this r
 [source,pascal]
 ----
 TDefUnicodeString = packed record
-  TypeID: TTypeID;    // 4 bytes
-  NameLen: TNameLen;  // 2 bytes
+  TypeID: TTypeID;             // 4 bytes
+  LengthOffset: SmallInt;      // 2 bytes
+  RefCountOffset: SmallInt;    // 2 bytes
+  CodePageOffset: SmallInt;    // 2 bytes
+  ElementSizeOffset: SmallInt; // 2 bytes
+  NameLen: TNameLen;           // 2 bytes
   // Followed by: Name (NameLen bytes)
 end;
-// Fixed part: 6 bytes
+// Fixed part: 14 bytes
 ----
 
-Memory layout is the same as AnsiString but with 2-byte WideChar elements. Length at `Pointer - 8` is the character count (not byte count).
+Header offsets follow the same convention as `TDefAnsiString`. On non-Windows targets the header layout is identical to AnsiString (only the element size differs — 2 bytes per character). On Windows, `WideString` is BSTR-like with a different header; the compiler is responsible for emitting the correct offsets per target so the debugger does not need to special-case the platform.
+
+`LengthOffset` always refers to a character count (not a byte count).
 
 === Pointer Type (recPointer = 6)
 
