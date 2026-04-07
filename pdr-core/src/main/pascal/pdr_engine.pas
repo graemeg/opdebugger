@@ -109,6 +109,7 @@ type
     function EvaluateExpression(const Expr: String): TVariableValue;
     function GetLocalVariables: TVariableValueArray;
     function GetLocalVariablesWithParents: TVariableValueArray;
+    function GetGlobalVariables: TVariableValueArray;
     function GetInspectLines(const Expr: String): TStringArray;
     function EvaluateArraySlice(const VarName: String;
                                 LowIndex, HighIndex: Int64): TVariableValueArray;
@@ -1415,6 +1416,33 @@ begin
         Result[I].TypeName := '';
         Result[I].IsValid := False;
       end;
+    end;
+  end;
+end;
+
+function TDebuggerEngine.GetGlobalVariables: TVariableValueArray;
+var
+  Names: TStringArray;
+  I: Integer;
+  Val: TVariableValue;
+begin
+  SetLength(Result, 0);
+
+  if FState = dsIdle then
+    Exit;
+
+  Names := FDebugInfoReader.GetGlobalVariables;
+  for I := 0 to High(Names) do
+  begin
+    try
+      Val := EvaluateExpression(Names[I]);
+      if Val.IsValid then
+      begin
+        SetLength(Result, Length(Result) + 1);
+        Result[High(Result)] := Val;
+      end;
+    except
+      { Skip globals that fail to evaluate }
     end;
   end;
 end;
