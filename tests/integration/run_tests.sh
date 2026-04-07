@@ -24,7 +24,7 @@ FAILED=0
 
 PDR_BIN="$PROJECT_ROOT/pdr-cli/target/pdr"
 PPCX64="/data/devel/fpc-3.3.1/x86_64-linux/lib/fpc/3.3.1/ppcx64"
-FPC_CFG="/data/devel/fpc-3.3.1/x86_64-linux/lib/fpc/3.3.1/fpc.cfg"
+FPC_CFG="~/.fpc.cfg"
 
 echo "=== PDR Integration Test Runner (Launch Mode) ==="
 echo
