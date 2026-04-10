@@ -199,7 +199,7 @@ UI Adapter:
 
 | `RecType` | `Byte` | `Byte` (unchanged) | 256 record types sufficient (currently 20)
 | `RecSize` | `Word` (64KB) | `Cardinal` (4GB) | Large classes with generics can exceed 64KB
-| `TypeID` | `Word` (65K) | `Cardinal` (4B) | Large projects with generics may need 100K+ type IDs
+| `TypeID` | `Word` (65K) | `Cardinal` (~4.3 billion) | Large projects with generics may need 100K+ type IDs
 | `NameLen` | `Byte` (255) | `Word` (65K) | Qualified generic names can exceed 255 chars
 | `FieldCount` | `Word` | `Cardinal` | Consistency with RecSize; auto-generated classes can have 1000+ fields
 | `Address` | `QWord` | `QWord` (unchanged) | 64-bit addresses
