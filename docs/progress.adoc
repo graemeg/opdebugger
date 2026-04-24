@@ -239,6 +239,16 @@ Full specification: `docs/feature-specs.adoc`
 * [x] Register `set <var> = <value>` command in `pdr_main.pas`
 * [x] Integration test: `test_17_set_variable.pas`
 
+===== Feature 4b: Array Element Assignment
+
+* [ ] CLI parsing — detect `VarName[Index]` syntax in `pdr_main.pas`; split into base name and integer index
+* [ ] Engine logic — look up base array variable, verify `tcArray`, compute element address as `base + (index - LowBound) * ElementSize`
+* [ ] Add `tcFloat` write support to `SetVariable` (currently only `tcPrimitive` and `tcEnum` are handled) — parse value string via `Val`, write raw bytes
+* [ ] Support element types: `tcPrimitive`, `tcEnum`, `tcFloat`
+* [ ] Integration test: `test_17b_set_array_element.pas`
+
+NOTE: Consider whether array assignment should remain strictly per-element (`SomeArray[3] = value`), or whether a range form is useful — e.g. `SomeArray[1..3] = (1, 2, 3)` for assigning distinct values, or `SomeArray[1..3] = (all 2)` for flood-filling a range to a single value. The latter would be handy for initialising or resetting an array during a debug session without stepping through setup code. No decision taken yet — the per-element form is sufficient for an initial implementation.
+
 ==== Feature 5: Conditional Breakpoints (hit-count form) — DONE
 
 * [x] Extend `TBreakpointEntry` record with `ConditionType`, `HitCount`, `CurrentHitCount`
