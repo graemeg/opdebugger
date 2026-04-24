@@ -970,17 +970,6 @@ begin
     FLastException.SourceLine := 0;
   end;
 
-  { Display exception info }
-  if ExcMessage <> '' then
-    WriteLn('Exception: ', ExcClassName, ' — ''', ExcMessage, '''')
-  else
-    WriteLn('Exception: ', ExcClassName, ' — (no message)');
-
-  { Show raise location if available }
-  if FLastException.SourceFile <> '' then
-    WriteLn('  raised at ', FLastException.SourceFile, ':', FLastException.SourceLine)
-  else if RaiseAddr <> 0 then
-    WriteLn('  raised at $', HexStr(RaiseAddr, 16));
 end;
 
 { Breakpoints }

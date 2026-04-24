@@ -36,6 +36,7 @@ type
 
     procedure PrintHelp;
     procedure PrintDisplayList;
+    procedure PrintExceptionInfo;
     procedure ProcessCommand(const CmdLine: String);
   public
     constructor Create;
@@ -113,6 +114,23 @@ begin
     WriteLn(DisplayVals[I].Name, ' = ', DisplayVals[I].Value);
 end;
 
+procedure TCLIDebugger.PrintExceptionInfo;
+var
+  Exc: TExceptionInfo;
+begin
+  Exc := FEngine.LastException;
+  if not Exc.IsValid then
+    Exit;
+  if Exc.Message <> '' then
+    WriteLn('Exception: ', Exc.ClassName, ' — ''', Exc.Message, '''')
+  else
+    WriteLn('Exception: ', Exc.ClassName, ' — (no message)');
+  if Exc.SourceFile <> '' then
+    WriteLn('  raised at ', Exc.SourceFile, ':', Exc.SourceLine)
+  else if Exc.RaiseAddr <> 0 then
+    WriteLn('  raised at $', HexStr(Exc.RaiseAddr, 16));
+end;
+
 { Parse "VarName[N..M]" slice notation from a print expression.
   Returns True and fills VarName, LowIdx, HighIdx if the pattern is found. }
 function TryParseSlice(const Expr: String; out VarName: String;
@@ -184,7 +202,10 @@ begin
       end;
 
     'run', 'r':
-      FEngine.Run;
+      begin
+        FEngine.Run;
+        PrintExceptionInfo;
+      end;
 
     'args':
       begin
@@ -229,18 +250,21 @@ begin
     'continue', 'c':
       begin
         FEngine.Continue;
+        PrintExceptionInfo;
         PrintDisplayList;
       end;
 
     'next', 'n':
       begin
         FEngine.StepLine;
+        PrintExceptionInfo;
         PrintDisplayList;
       end;
 
     'step', 's':
       begin
         FEngine.StepInto;
+        PrintExceptionInfo;
         PrintDisplayList;
       end;
 
