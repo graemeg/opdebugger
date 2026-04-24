@@ -57,6 +57,7 @@ type
     FWatchpoints: array of TWatchpointEntry;
     FRaiseBreakpointAddr: QWord;     // Address of fpc_raiseexception (0 = not set)
     FCatchExceptions: Boolean;        // Break on raise (default: True)
+    FLastException: TExceptionInfo;  // Cleared on each Run/Continue/Step; set in HandleExceptionBreakpoint
 
     { Helper methods for breakpoint management }
     function ParseLocation(const Location: String; out Address: QWord): Boolean;
@@ -124,6 +125,9 @@ type
     property BinaryPath: String read FBinaryPath;
     property AttachedPID: Integer read FAttachedPID;
     property CatchExceptions: Boolean read FCatchExceptions write FCatchExceptions;
+    { Exception info from the last HandleExceptionBreakpoint call.
+      IsValid=False if the last stop was not an exception. Cleared at Run/Continue/Step. }
+    property LastException: TExceptionInfo read FLastException;
   end;
 
 implementation
@@ -259,6 +263,7 @@ end;
 function TDebuggerEngine.Run: Boolean;
 begin
   Result := False;
+  FLastException.IsValid := False;
 
   if FState <> dsIdle then
   begin
@@ -315,6 +320,7 @@ var
   NewValue: TVariableValue;
 begin
   Result := False;
+  FLastException.IsValid := False;
 
   if FState <> dsPaused then
   begin
@@ -455,6 +461,7 @@ var
   InScope: Boolean;
 begin
   Result := False;
+  FLastException.IsValid := False;
 
   if FState <> dsPaused then
   begin
@@ -617,6 +624,7 @@ var
   MaxSteps: Integer;
 begin
   Result := False;
+  FLastException.IsValid := False;
 
   if FState <> dsPaused then
   begin
@@ -946,6 +954,22 @@ begin
     end;
   end;
 
+  { Store exception info for IDE / caller to retrieve via LastException }
+  FLastException.IsValid   := True;
+  FLastException.ClassName := ExcClassName;
+  FLastException.Message   := ExcMessage;
+  FLastException.RaiseAddr := RaiseAddr;
+  if (RaiseAddr <> 0) and FDebugInfoReader.FindLineByAddress(RaiseAddr, LineInfo) then
+  begin
+    FLastException.SourceFile := LineInfo.FileName;
+    FLastException.SourceLine := Integer(LineInfo.LineNumber);
+  end
+  else
+  begin
+    FLastException.SourceFile := '';
+    FLastException.SourceLine := 0;
+  end;
+
   { Display exception info }
   if ExcMessage <> '' then
     WriteLn('Exception: ', ExcClassName, ' — ''', ExcMessage, '''')
@@ -953,8 +977,8 @@ begin
     WriteLn('Exception: ', ExcClassName, ' — (no message)');
 
   { Show raise location if available }
-  if (RaiseAddr <> 0) and FDebugInfoReader.FindLineByAddress(RaiseAddr, LineInfo) then
-    WriteLn('  raised at ', LineInfo.FileName, ':', LineInfo.LineNumber)
+  if FLastException.SourceFile <> '' then
+    WriteLn('  raised at ', FLastException.SourceFile, ':', FLastException.SourceLine)
   else if RaiseAddr <> 0 then
     WriteLn('  raised at $', HexStr(RaiseAddr, 16));
 end;

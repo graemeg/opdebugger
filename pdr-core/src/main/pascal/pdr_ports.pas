@@ -200,6 +200,17 @@ type
     ColumnNumber: Word;
   end;
 
+  { Exception information captured at the exception breakpoint (fpc_raiseexception).
+    Populated by TDebuggerEngine.HandleExceptionBreakpoint. }
+  TExceptionInfo = record
+    IsValid:    Boolean;   { True when this record holds valid exception data }
+    ClassName:  String;    { Exception class name, e.g. 'EAccessViolation' }
+    Message:    String;    { FMessage value (may be empty) }
+    RaiseAddr:  QWord;     { Address passed to fpc_raiseexception }
+    SourceFile: String;    { Source file of the raise site (may be empty) }
+    SourceLine: Integer;   { Source line of the raise site (0 if unknown) }
+  end;
+
   { Function information for callstack }
   TFunctionInfo = record
     Name: String;
