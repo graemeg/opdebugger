@@ -1,0 +1,6 @@
+TCounter.Count = 43
+TCounter.Total = 100
+TCounter.MaxCount = 50
+Total = 100     [LongInt, class var]
+Count = 43     [LongInt, class var]
+MaxCount = 50     [ShortInt, class const]

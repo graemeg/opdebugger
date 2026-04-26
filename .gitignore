@@ -8,6 +8,9 @@ build/
 # Progress tracking (session-specific, not committed)
 PROGRESS.adoc
 
+# Claude project instructions (local only, not committed)
+CLAUDE.md
+
 # FPC compiled units
 *.ppu
 *.o
@@ -49,3 +52,4 @@ backup/
 # Operating system
 Thumbs.db
 .directory
+.gstack/

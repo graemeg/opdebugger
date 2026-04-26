@@ -71,7 +71,9 @@ type
     recEnum          = 17, // Enumeration type with member names
     recSet           = 18, // Set type (bitfield over ordinal/enum base)
     recUnitDirectory = 19, // Unit directory (index of per-unit data offsets)
-    recConstant      = 20  // Compile-time constant (value embedded in record)
+    recConstant      = 20, // Compile-time constant (value embedded in record)
+    recClassVar      = 21, // Class variable (static field) — owner class TypeID + global address
+    recClassConst    = 22  // Class constant — owner class TypeID + embedded value
   );
 
   { Constant value kind }
@@ -368,6 +370,26 @@ type
     // Followed by NameLen bytes of name
   end;
 
+  { Class Variable Definition (recClassVar = 21) }
+  TDefClassVar = packed record
+    ClassTypeID: TTypeID;   // 4 bytes — owning class type
+    VarTypeID:   TTypeID;   // 4 bytes — variable type
+    Address:     QWord;     // 8 bytes (absolute address, resolved by linker)
+    NameLen:     TNameLen;  // 2 bytes
+    // Followed by Name (NameLen bytes)
+  end;
+
+  { Class Constant Definition (recClassConst = 22) }
+  TDefClassConst = packed record
+    ClassTypeID: TTypeID;   // 4 bytes — owning class type
+    TypeID:      TTypeID;   // 4 bytes — constant's type (0 if untyped)
+    ConstKind:   Byte;      // 1 byte (TConstantKind)
+    ValueLen:    Word;      // 2 bytes (byte length of value data)
+    NameLen:     TNameLen;  // 2 bytes
+    // Followed by ValueLen bytes of value data
+    // Followed by NameLen bytes of name
+  end;
+
   TEnumMemberArray = array of TEnumMember;
   TInterfaceMethodDescriptorArray = array of TInterfaceMethodDescriptor;
 
@@ -420,6 +442,8 @@ begin
     recSet:           Result := 'Set';
     recUnitDirectory: Result := 'UnitDirectory';
     recConstant:      Result := 'Constant';
+    recClassVar:      Result := 'ClassVar';
+    recClassConst:    Result := 'ClassConst';
     else              Result := 'Unknown';
   end;
 end;

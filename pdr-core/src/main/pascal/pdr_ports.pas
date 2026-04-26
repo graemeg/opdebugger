@@ -92,6 +92,23 @@ type
   end;
   TDebuggerPropertyArray = array of TDebuggerProperty;
 
+  TDebuggerClassVar = record
+    Name:    String;
+    TypeID:  TTypeID;
+    Address: QWord;
+  end;
+  TDebuggerClassVarArray = array of TDebuggerClassVar;
+
+  TDebuggerClassConst = record
+    Name:     String;
+    TypeID:   TTypeID;
+    Kind:     Byte;      // TConstantKind ordinal value
+    OrdValue: Int64;     // For ckOrd, ckNil
+    DblValue: Double;    // For ckFloat
+    StrValue: String;    // For ckString, ckWideStr (UTF-8 encoded)
+  end;
+  TDebuggerClassConstArray = array of TDebuggerClassConst;
+
   TDebuggerClass = record
     ParentTypeID: TTypeID;
     VMTAddress: QWord;
@@ -99,6 +116,8 @@ type
     Fields: TDebuggerFieldArray;
     Properties: TDebuggerPropertyArray;
     Methods: array of String;     { method names (from matching function scopes) }
+    ClassVars:   TDebuggerClassVarArray;    { class variables (static fields) }
+    ClassConsts: TDebuggerClassConstArray;  { class constants }
   end;
   PDebuggerClass = ^TDebuggerClass;
 
@@ -357,6 +376,9 @@ type
 
     { Find a compile-time constant by name }
     function FindConstant(const Name: String; out ConstInfo: TConstantInfo): Boolean;
+
+    { Find a type by name (case-insensitive) }
+    function FindTypeByName(const Name: String; out TypeInfo: TTypeInfo): Boolean;
   end;
 
   { Architecture Adapter Port - Architecture-specific operations }

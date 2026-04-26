@@ -168,6 +168,9 @@ type
     function ReadParameter(out Def: TDefParameter; out Name: String): Boolean;
     function ReadConstant(out Def: TDefConstant; out ValueBytes: TBytes;
                          out Name: String): Boolean;
+    function ReadClassVar(out Def: TDefClassVar; out Name: String): Boolean;
+    function ReadClassConst(out Def: TDefClassConst; out ValueBytes: TBytes;
+                            out Name: String): Boolean;
 
     { Skip current record (for unsupported types) }
     procedure SkipRecord(const RecHeader: TOPDFRecordHeader);
@@ -1293,6 +1296,49 @@ begin
   Result := False;
 
   if FStream.Position + SizeOf(TDefConstant) > FStream.Size then
+    Exit;
+
+  FStream.Read(Def, SizeOf(Def));
+
+  if FStream.Position + Def.ValueLen + Def.NameLen > FStream.Size then
+    Exit;
+
+  SetLength(ValueBytes, Def.ValueLen);
+  if Def.ValueLen > 0 then
+    FStream.Read(ValueBytes[0], Def.ValueLen);
+
+  SetLength(Name, Def.NameLen);
+  if Def.NameLen > 0 then
+    FStream.Read(Name[1], Def.NameLen);
+
+  Result := True;
+end;
+
+function TOPDFReader.ReadClassVar(out Def: TDefClassVar; out Name: String): Boolean;
+begin
+  Result := False;
+
+  if FStream.Position + SizeOf(TDefClassVar) > FStream.Size then
+    Exit;
+
+  FStream.Read(Def, SizeOf(Def));
+
+  if FStream.Position + Def.NameLen > FStream.Size then
+    Exit;
+
+  SetLength(Name, Def.NameLen);
+  if Def.NameLen > 0 then
+    FStream.Read(Name[1], Def.NameLen);
+
+  Result := True;
+end;
+
+function TOPDFReader.ReadClassConst(out Def: TDefClassConst; out ValueBytes: TBytes;
+                                    out Name: String): Boolean;
+begin
+  Result := False;
+
+  if FStream.Position + SizeOf(TDefClassConst) > FStream.Size then
     Exit;
 
   FStream.Read(Def, SizeOf(Def));

@@ -25,7 +25,7 @@ uses
 
 const
   OPDF_DUMP_VERSION = {$I version.inc};
-  MAX_REC_TYPE = 20;
+  MAX_REC_TYPE = 22;
 
 type
   TRecordCounts = array[0..MAX_REC_TYPE] of Cardinal;
@@ -90,6 +90,8 @@ begin
   if LName = 'set' then Exit(18);
   if LName = 'unitdirectory' then Exit(19);
   if LName = 'constant' then Exit(20);
+  if LName = 'classvar' then Exit(21);
+  if LName = 'classconst' then Exit(22);
   Result := -1;
 end;
 
@@ -383,6 +385,46 @@ begin
   WriteLn;
 end;
 
+procedure DumpClassVar(Stream: TStream);
+var
+  Def: TDefClassVar;
+  Name: String;
+begin
+  Stream.Read(Def, SizeOf(Def));
+  Name := ReadString(Stream, Def.NameLen);
+  WriteLn(Format('    ClassTypeID=%d VarTypeID=%d Address=0x%x Name="%s"',
+    [Def.ClassTypeID, Def.VarTypeID, Def.Address, Name]));
+end;
+
+procedure DumpClassConst(Stream: TStream);
+var
+  Def: TDefClassConst;
+  Name: String;
+  ValueBytes: TBytes;
+  I: Integer;
+begin
+  Stream.Read(Def, SizeOf(Def));
+  SetLength(ValueBytes, Def.ValueLen);
+  if Def.ValueLen > 0 then
+    Stream.Read(ValueBytes[0], Def.ValueLen);
+  Name := ReadString(Stream, Def.NameLen);
+  Write(Format('    ClassTypeID=%d TypeID=%d Kind=%d ValueLen=%d Name="%s"',
+    [Def.ClassTypeID, Def.TypeID, Def.ConstKind, Def.ValueLen, Name]));
+  if Def.ValueLen > 0 then
+  begin
+    Write(' Value=[');
+    for I := 0 to Min(Def.ValueLen, 16) - 1 do
+    begin
+      if I > 0 then Write(' ');
+      Write(Format('%.2x', [ValueBytes[I]]));
+    end;
+    if Def.ValueLen > 16 then
+      Write('...');
+    Write(']');
+  end;
+  WriteLn;
+end;
+
 procedure DumpUnitDirectory(Stream: TStream);
 var
   UnitCnt: Word;
@@ -574,6 +616,8 @@ begin
           recSet:           DumpSet(Stream);
           recUnitDirectory: DumpUnitDirectory(Stream);
           recConstant:      DumpConstant(Stream);
+          recClassVar:      DumpClassVar(Stream);
+          recClassConst:    DumpClassConst(Stream);
         else
           { Unknown record type — skip }
         end;

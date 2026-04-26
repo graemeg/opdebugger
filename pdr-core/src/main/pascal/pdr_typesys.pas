@@ -165,6 +165,9 @@ type
     function EvaluateVariableInfo(const VarInfo: TVariableInfo): TVariableValue;
   end;
 
+{ Format a class constant value for display }
+function FormatClassConst(const C: TDebuggerClassConst): String;
+
 implementation
 
 { TPrimitiveEvaluator }
@@ -467,6 +470,18 @@ begin
 end;
 
 { Helper: Format the return value from an injected method call }
+function FormatClassConst(const C: TDebuggerClassConst): String;
+begin
+  case C.Kind of
+    Ord(ckOrd):     Result := IntToStr(C.OrdValue);
+    Ord(ckReal):    Result := FloatToStr(C.DblValue);
+    Ord(ckString):  Result := '''' + C.StrValue + '''';
+    Ord(ckNil):     Result := 'nil';
+    Ord(ckWideStr): Result := '''' + C.StrValue + '''';
+    else            Result := '<const>';
+  end;
+end;
+
 function FormatInjectedReturnValue(RetVal: QWord; TypeID: TTypeID;
   IsManaged: Boolean; ProcessController: IProcessController;
   TypeSystem: TTypeSystem): String;
@@ -607,15 +622,42 @@ begin
     Exit;
   end;
 
-  // Build field output
+  // Build field output — class vars first (absolute address, no instance needed)
   FieldOutput := '';
+  for I := 0 to High(TypeInfo.ClassInfo^.ClassVars) do
+  begin
+    FillChar(FieldInfo, SizeOf(FieldInfo), 0);
+    FieldInfo.Name    := TypeInfo.ClassInfo^.ClassVars[I].Name;
+    FieldInfo.TypeID  := TypeInfo.ClassInfo^.ClassVars[I].TypeID;
+    FieldInfo.Address := TypeInfo.ClassInfo^.ClassVars[I].Address;
+    if FieldOutput <> '' then FieldOutput := FieldOutput + ', ';
+    if FieldInfo.TypeID <> 0 then
+    begin
+      FieldValue := TypeSystem.EvaluateVariableInfo(FieldInfo);
+      FieldOutput := FieldOutput + '[class] ' + FieldInfo.Name + ': ' + FieldValue.Value;
+    end
+    else
+      FieldOutput := FieldOutput + '[class] ' + FieldInfo.Name + ': <untyped>';
+  end;
+
+  // Class consts (embedded values, no memory read needed)
+  for I := 0 to High(TypeInfo.ClassInfo^.ClassConsts) do
+  begin
+    if FieldOutput <> '' then FieldOutput := FieldOutput + ', ';
+    FieldOutput := FieldOutput + '[class const] ' +
+                   TypeInfo.ClassInfo^.ClassConsts[I].Name + ': ' +
+                   FormatClassConst(TypeInfo.ClassInfo^.ClassConsts[I]);
+  end;
+
+  // Instance fields
   for I := 0 to High(TypeInfo.ClassInfo^.Fields) do
   begin
+    FillChar(FieldInfo, SizeOf(FieldInfo), 0);
     FieldInfo.Name := TypeInfo.ClassInfo^.Fields[I].Name;
     FieldInfo.TypeID := TypeInfo.ClassInfo^.Fields[I].TypeID;
     FieldInfo.Address := InstancePtr + TypeInfo.ClassInfo^.Fields[I].Offset;
 
-    if I > 0 then FieldOutput := FieldOutput + ', ';
+    if FieldOutput <> '' then FieldOutput := FieldOutput + ', ';
 
     // Only evaluate if TypeID is known (not 0)
     if FieldInfo.TypeID <> 0 then
@@ -1332,17 +1374,47 @@ begin
   RIP := FProcessController.GetLastBreakpointAddress;
   if RIP = 0 then
     RIP := FProcessController.GetCurrentAddress;
+
+  Found := False;
   if RIP <> 0 then
   begin
-    if not FDebugInfoReader.FindVariableWithScope(BaseName, RIP, VarInfo) then
-      if not FDebugInfoReader.FindVariable(BaseName, VarInfo) then
-      begin
-        Result.Value := '<error: variable not found>';
-        Exit;
-      end;
+    if FDebugInfoReader.FindVariableWithScope(BaseName, RIP, VarInfo) or
+       FDebugInfoReader.FindVariable(BaseName, VarInfo) then
+      Found := True;
   end
-  else if not FDebugInfoReader.FindVariable(BaseName, VarInfo) then
+  else if FDebugInfoReader.FindVariable(BaseName, VarInfo) then
+    Found := True;
+
+  if not Found then
   begin
+    { BaseName is not a variable — try it as a class type name for class var/const access }
+    if FDebugInfoReader.FindTypeByName(BaseName, TypeInfo) and
+       (TypeInfo.Category = tcClass) and Assigned(TypeInfo.ClassInfo) then
+    begin
+      { Search class variables }
+      for I := 0 to High(TypeInfo.ClassInfo^.ClassVars) do
+        if CompareText(TypeInfo.ClassInfo^.ClassVars[I].Name, FieldPath) = 0 then
+        begin
+          FillChar(FieldVarInfo, SizeOf(FieldVarInfo), 0);
+          FieldVarInfo.Name    := TypeInfo.ClassInfo^.ClassVars[I].Name;
+          FieldVarInfo.TypeID  := TypeInfo.ClassInfo^.ClassVars[I].TypeID;
+          FieldVarInfo.Address := TypeInfo.ClassInfo^.ClassVars[I].Address;
+          Result := EvaluateVariableInfo(FieldVarInfo);
+          Result.Name := BaseName + '.' + FieldPath;
+          Exit;
+        end;
+      { Search class constants }
+      for I := 0 to High(TypeInfo.ClassInfo^.ClassConsts) do
+        if CompareText(TypeInfo.ClassInfo^.ClassConsts[I].Name, FieldPath) = 0 then
+        begin
+          Result.Name    := BaseName + '.' + FieldPath;
+          Result.Value   := FormatClassConst(TypeInfo.ClassInfo^.ClassConsts[I]);
+          Result.TypeName := '<class const>';
+          Result.Address  := 0;
+          Result.IsValid  := True;
+          Exit;
+        end;
+    end;
     Result.Value := '<error: variable not found>';
     Exit;
   end;

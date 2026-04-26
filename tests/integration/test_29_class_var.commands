@@ -1,0 +1,8 @@
+run
+break test_29_class_var.pas:16
+continue
+print TCounter.Count
+print TCounter.Total
+print TCounter.MaxCount
+inspect Self
+quit

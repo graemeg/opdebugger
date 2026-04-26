@@ -1607,6 +1607,40 @@ begin
         if ParentChain <> TypeInfo.Name then
           AddLine('[INSPECT] parent chain: ' + ParentChain);
 
+        if Length(TypeInfo.ClassInfo^.ClassVars) > 0 then
+        begin
+          AddLine('[INSPECT] class vars (' +
+                  IntToStr(Length(TypeInfo.ClassInfo^.ClassVars)) + '):');
+          for I := 0 to High(TypeInfo.ClassInfo^.ClassVars) do
+          begin
+            FieldValue := EvaluateExpression(TypeInfo.Name + '.' + TypeInfo.ClassInfo^.ClassVars[I].Name);
+            if FDebugInfoReader.FindType(TypeInfo.ClassInfo^.ClassVars[I].TypeID, FieldTypeInfo) then
+              BackingField := '     [' + FieldTypeInfo.Name + ', class var]'
+            else
+              BackingField := '     [class var]';
+            if FieldValue.IsValid then
+              AddLine(TypeInfo.ClassInfo^.ClassVars[I].Name + ' = ' + FieldValue.Value + BackingField)
+            else
+              AddLine(TypeInfo.ClassInfo^.ClassVars[I].Name + ' = <error>' + BackingField);
+          end;
+        end;
+
+        if Length(TypeInfo.ClassInfo^.ClassConsts) > 0 then
+        begin
+          AddLine('[INSPECT] class consts (' +
+                  IntToStr(Length(TypeInfo.ClassInfo^.ClassConsts)) + '):');
+          for I := 0 to High(TypeInfo.ClassInfo^.ClassConsts) do
+          begin
+            if FDebugInfoReader.FindType(TypeInfo.ClassInfo^.ClassConsts[I].TypeID, FieldTypeInfo) then
+              BackingField := '     [' + FieldTypeInfo.Name + ', class const]'
+            else
+              BackingField := '     [class const]';
+            AddLine(TypeInfo.ClassInfo^.ClassConsts[I].Name + ' = ' +
+                    FormatClassConst(TypeInfo.ClassInfo^.ClassConsts[I]) +
+                    BackingField);
+          end;
+        end;
+
         if Length(TypeInfo.ClassInfo^.Fields) > 0 then
         begin
           AddLine('[INSPECT] fields (' +

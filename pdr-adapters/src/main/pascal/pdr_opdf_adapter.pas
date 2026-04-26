@@ -132,6 +132,7 @@ type
     function FindFunctionByName(const Name: String;
       out FuncInfo: TFunctionInfo): Boolean;
     function FindConstant(const Name: String; out ConstInfo: TConstantInfo): Boolean;
+    function FindTypeByName(const Name: String; out TypeInfo: TTypeInfo): Boolean;
   end;
 
 implementation
@@ -545,6 +546,8 @@ var
   DefInterface: TDefInterface;
   DefProperty: TDefProperty;
   DefConstant: TDefConstant;
+  DefClassVar: TDefClassVar;
+  DefClassConst: TDefClassConst;
   ConstBytes: TBytes;
   ConstName: String;
   PConst: PConstantInfo;
@@ -1093,6 +1096,65 @@ begin
             PConst^.TypeID := DefConstant.TypeID;
             PConst^.FormattedValue := FormatConstantValue(DefConstant.ConstKind, ConstBytes);
             FConstants.Add(LowerCase(ConstName), PConst);
+          end;
+        end;
+
+      recClassVar:
+        begin
+          if FReader.ReadClassVar(DefClassVar, VarName) then
+          begin
+            PType := FTypes.Find(DefClassVar.ClassTypeID);
+            if Assigned(PType) and (PType^.Category = tcClass) and
+               Assigned(PType^.ClassInfo) then
+            begin
+              SetLength(PType^.ClassInfo^.ClassVars,
+                        Length(PType^.ClassInfo^.ClassVars) + 1);
+              with PType^.ClassInfo^.ClassVars[High(PType^.ClassInfo^.ClassVars)] do
+              begin
+                Name    := VarName;
+                TypeID  := DefClassVar.VarTypeID;
+                Address := DefClassVar.Address;
+              end;
+            end;
+          end;
+        end;
+
+      recClassConst:
+        begin
+          if FReader.ReadClassConst(DefClassConst, ConstBytes, ConstName) then
+          begin
+            PType := FTypes.Find(DefClassConst.ClassTypeID);
+            if Assigned(PType) and (PType^.Category = tcClass) and
+               Assigned(PType^.ClassInfo) then
+            begin
+              SetLength(PType^.ClassInfo^.ClassConsts,
+                        Length(PType^.ClassInfo^.ClassConsts) + 1);
+              with PType^.ClassInfo^.ClassConsts[High(PType^.ClassInfo^.ClassConsts)] do
+              begin
+                Name     := ConstName;
+                TypeID   := DefClassConst.TypeID;
+                Kind     := DefClassConst.ConstKind;
+                OrdValue := 0;
+                DblValue := 0.0;
+                StrValue := '';
+                if DefClassConst.ConstKind = Ord(ckOrd) then
+                begin
+                  if Length(ConstBytes) >= 8 then
+                    OrdValue := PInt64(@ConstBytes[0])^;
+                end
+                else if DefClassConst.ConstKind = Ord(ckReal) then
+                begin
+                  if Length(ConstBytes) >= 8 then
+                    DblValue := PDouble(@ConstBytes[0])^;
+                end
+                else if DefClassConst.ConstKind in [Ord(ckString), Ord(ckWideStr)] then
+                begin
+                  SetLength(StrValue, Length(ConstBytes));
+                  if Length(ConstBytes) > 0 then
+                    Move(ConstBytes[0], StrValue[1], Length(ConstBytes));
+                end;
+              end;
+            end;
           end;
         end;
 
@@ -1712,6 +1774,31 @@ begin
 
   if gVerbose then
     WriteLn('[DEBUG] Constant not found: ', Name);
+end;
+
+function TOPDFReaderAdapter.FindTypeByName(const Name: String;
+  out TypeInfo: TTypeInfo): Boolean;
+var
+  PType: PTypeInfo;
+  I: Integer;
+  SearchName: String;
+begin
+  Result := False;
+
+  if not FLoaded then
+    Exit;
+
+  SearchName := LowerCase(Name);
+  for I := 0 to FTypes.Count - 1 do
+  begin
+    PType := FTypes.GetItem(I);
+    if Assigned(PType) and (LowerCase(PType^.Name) = SearchName) then
+    begin
+      TypeInfo := PType^;
+      Result := True;
+      Exit;
+    end;
+  end;
 end;
 
 end.
