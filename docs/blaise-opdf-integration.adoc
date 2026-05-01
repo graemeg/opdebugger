@@ -1,0 +1,1111 @@
+= Blaise Compiler: OPDF Debug Info Integration Guide
+:toc: left
+:toclevels: 4
+:sectnums:
+:version: 1.0.0
+:date: 2026-05-01
+
+== Introduction
+
+=== Purpose
+
+This document is an implementation guide for adding OPDF (Object Pascal Debug
+Format) debug info emission to the Blaise compiler
+(`/data/devel/new-pascal-compiler`). It is written for an engineer or agent
+working on the Blaise codebase who needs to understand what to build, where to
+build it, and how the output must be structured so that the existing PDR
+debugger (`/data/devel/opdebugger`) can consume it without modification.
+
+=== Key Finding: What Is and Is Not Reusable
+
+The OPDF ecosystem has two entirely separate sides — an emit side (compiler)
+and a read side (debugger) — connected only by the binary format contract.
+
+[cols="2,1,3"]
+|===
+|Component |Reusable? |Notes
+
+|OPDF binary format / specification
+|Yes — unchanged
+|`docs/opdf-specification.adoc`; compiler-agnostic by design
+
+|`opdf-lib` (reader, type constants, ELF extractor)
+|Yes — unchanged
+|`opdf_types.pas`, `opdf_io.pas`, `elf_reader.pas`
+
+|`pdr-core` (engine, type system evaluators)
+|Yes — unchanged
+|Reads records by TypeID; does not care which compiler emitted them
+
+|`pdr-adapters`, `pdr-cli`
+|Yes — unchanged
+|Platform and format adapters; no compiler assumptions
+
+|FPC emit code (`dbgopdf.pas`, `dbgopdf_typemap.pas`)
+|No — full rewrite
+|Coupled to FPC's internal AST, symbol table APIs, and assembler list
+|===
+
+The practical conclusion: implement a new unit `uDebugOPDF.pas` inside the
+Blaise compiler. Everything on the debugger side stays exactly as it is. Once
+Blaise emits a valid `.opdf` ELF section, the existing `pdr` debugger works
+with no changes.
+
+=== OPDF Specification Reference
+
+The authoritative binary format specification is:
+
+  /data/devel/opdebugger/docs/opdf-specification.adoc  (v0.4.0)
+
+All record structures, field sizes, endianness rules, and TypeID semantics are
+defined there. This document focuses on the compiler-side implementation: how
+Blaise's internal data maps to those records, and how to get linker-resolved
+addresses into the stream.
+
+== OPDF Binary Format Summary
+
+=== On-Disk Layout
+
+[source]
+----
+[TOPDFHeader  32 bytes]
+[recUnitDirectory record]        ← index of all compilation units
+[per-unit type records]          ← recPrimitive, recClass, recRecord, ...
+[per-unit symbol records]        ← recGlobalVar, recClassVar, recConstant, ...
+[per-unit scope/line records]    ← recFunctionScope, recLineInfo, recLocalVar, recParameter
+----
+
+All data is **little-endian**. The section is placed in the ELF `.opdf` section
+by the linker and extracted at runtime by `elf_reader.pas`.
+
+=== Header (32 bytes, fixed)
+
+[source,pascal]
+----
+TOPDFHeader = packed record
+  Magic        : array[0..3] of Char;  // 'OPDF'
+  Version      : Word;                 // 1
+  BuildID      : TGUID;                // 16-byte UUID
+  TargetArch   : Byte;                 // archX86_64 = 2
+  PointerSize  : Byte;                 // 8 for 64-bit
+  TotalRecords : Cardinal;             // count of all records that follow
+  Flags        : Cardinal;             // OPDF_FLAG_HAS_DIRECTORY = 1
+end;
+----
+
+=== Record Header (5 bytes, precedes every record payload)
+
+[source,pascal]
+----
+TOPDFRecordHeader = packed record
+  RecType : Byte;     // one of the REC_* constants
+  RecSize : Cardinal; // byte length of the payload that follows (NOT including this header)
+end;
+----
+
+=== Record Type Constants
+
+Defined in `opdf-lib/src/main/pascal/opdf_types.pas`:
+
+[cols="1,2,3"]
+|===
+|Constant |Value |Purpose
+
+|`recPrimitive`     |1  |Integer, Boolean, Char, Float, Currency
+|`recGlobalVar`     |2  |Unit-level or program-level variable
+|`recShortStr`      |3  |ShortString[N]
+|`recAnsiStr`       |4  |AnsiString
+|`recUnicodeStr`    |5  |UnicodeString / WideString
+|`recPointer`       |6  |Typed or untyped pointer
+|`recArray`         |7  |Static or dynamic array
+|`recRecord`        |8  |Record (stack-allocated value type)
+|`recClass`         |9  |Class (heap-allocated, with VMT)
+|`recProperty`      |10 |Class property (field-backed or method-backed)
+|`recMethod`        |11 |Standalone function or class method
+|`recLocalVar`      |12 |Stack-based local variable
+|`recParameter`     |13 |Function or method parameter
+|`recLineInfo`      |14 |Source line → machine address mapping
+|`recFunctionScope` |15 |Function address range + name
+|`recInterface`     |16 |COM/CORBA interface type
+|`recEnum`          |17 |Enumeration with named members
+|`recSet`           |18 |Set type (bit field over ordinal base)
+|`recUnitDirectory` |19 |Index of all compilation units (emitted once)
+|`recConstant`      |20 |Compile-time constant value
+|`recClassVar`      |21 |Class variable (static field)
+|`recClassConst`    |22 |Class constant
+|===
+
+== Blaise Compiler Architecture: Relevant Components
+
+=== Source Tree
+
+[source]
+----
+/data/devel/new-pascal-compiler/
+  compiler/src/main/pascal/
+    Blaise.pas          ← main entry point, compile pipeline
+    uLexer.pas          ← tokeniser
+    uPasTokeniser.pas   ← Pascal token definitions (Token.Line, Token.Column)
+    uParser.pas         ← recursive-descent parser
+    uAST.pas            ← AST node definitions (all nodes carry Line, Col)
+    uSymbolTable.pas    ← type system and resolved symbol tables
+    uSemantic.pas       ← type checking; populates symbol table on AST
+    uCodeGenQBE.pas     ← QBE IR emitter (the code generator)
+    uUnitLoader.pas     ← unit/import resolution
+----
+
+=== Compile Pipeline (Blaise.pas)
+
+[source]
+----
+ParseArgs()
+  → TLexer + TParser → TProgram AST
+  → TUnitLoader (if uses clause present)
+  → TSemanticAnalyser.Analyse()          ← symbol table fully populated here
+  → TCodeGenQBE.Generate()               ← emits QBE IR text
+  → IR written to .ssa temp file
+  → qbe <ir> -o <asm>                    ← QBE translates IR to x86_64 ASM
+  → cc -o <binary> <asm> [rtl]           ← GCC assembles and links
+----
+
+**OPDF hook point**: immediately after `TCodeGenQBE.Generate()` returns and
+before the `qbe` invocation. At this point the full AST (with semantic
+annotations), the resolved symbol table, and the code generator's label map are
+all in memory.
+
+=== Type System (uSymbolTable.pas)
+
+The Blaise type system maps cleanly to OPDF record types:
+
+[cols="2,2,3"]
+|===
+|Blaise Type Class |OPDF Record |Key Fields Available
+
+|Scalar `tyInteger`, `tyByte`, `tyInt64`, `tyBoolean`, `tyChar`
+|`recPrimitive`
+|`TypeDesc.ByteSize()`, `TypeDesc.Kind` (for SubKind), `TypeDesc.IsSigned`
+
+|`TPointerTypeDesc`
+|`recPointer`
+|`BaseType: TTypeDesc` (nil = untyped)
+
+|`TEnumTypeDesc`
+|`recEnum`
+|`Members: TStringList` (0-indexed ordinals)
+
+|`TSetTypeDesc`
+|`recSet`
+|`BaseType: TEnumTypeDesc`, `BitCount: Integer`
+
+|`TStaticArrayTypeDesc`
+|`recArray` (IsDynamic=0)
+|`ElementType`, `LowBound`, `HighBound`
+
+|`TOpenArrayTypeDesc`
+|`recArray` (IsDynamic=1)
+|`ElementType`
+
+|`TRecordTypeDesc` (kind=tyRecord)
+|`recRecord`
+|`FFields`, `TotalSize()`, field offsets in `TFieldInfo.Offset`
+
+|`TRecordTypeDesc` (kind=tyClass)
+|`recClass`
+|`FParent`, `FFields`, `FVTable`, `FProperties`, `InstanceSize()`
+
+|`TInterfaceTypeDesc`
+|`recInterface`
+|`FMethods`, `FReturnTypes`, `FParent`
+
+|String scalar `tyString`
+|`recAnsiStr`
+|Header offsets are fixed for Blaise's RTL string layout
+|===
+
+==== Field Layout Details
+
+`TFieldInfo` carries everything needed for `TFieldDescriptor` in OPDF:
+
+[source,pascal]
+----
+TFieldInfo = class
+  Name     : string;
+  TypeDesc : TTypeDesc;   // not owned; resolved type
+  Offset   : Integer;     // byte offset from record/class instance base
+  IsWeak   : Boolean;
+end;
+----
+
+For classes, the first 8 bytes are the vptr. Field offsets reported by Blaise
+already account for this — they are measured from the start of the heap-
+allocated instance. Emit them directly.
+
+==== Enum Members
+
+`TEnumTypeDesc.Members` is a `TStringList` where index position equals ordinal
+value (0-indexed). Iterate with `for i := 0 to Members.Count - 1` and emit
+each member as `TEnumMember { Value=i, Name=Members[i] }`.
+
+==== Size Queries
+
+[cols="2,3"]
+|===
+|Method |Use
+
+|`TypeDesc.ByteSize()`   |QBE allocation size (pads small scalars to 4)
+|`TypeDesc.RawSize()`    |True storage footprint (1 for Byte/Boolean, 4 for Integer, 8 for Int64/pointer/string)
+|`TRecordTypeDesc.TotalSize()` |Total instance size including vptr
+|`TRecordTypeDesc.MaxAlign()`  |Maximum field alignment
+|===
+
+Use `RawSize()` for the `SizeInBytes` field in `recPrimitive`, `recEnum`,
+`recSet`. Use `TotalSize()` for the `TotalSize` field in `recRecord` and
+`InstanceSize` field in `recClass`.
+
+=== AST Nodes (uAST.pas)
+
+All AST nodes carry source location:
+
+[source,pascal]
+----
+TASTNode = class
+  Line : Integer;   // 1-based
+  Col  : Integer;   // 1-based
+end;
+----
+
+The parser populates these from the current token during all `Parse*` methods.
+They are never cleared by semantic analysis. Use `Line` from the
+`TMethodDecl.Body` statement nodes when emitting `recLineInfo` records.
+
+Key declaration nodes for OPDF emission:
+
+[source,pascal]
+----
+TMethodDecl = class(TASTNode)
+  Name             : string;
+  OwnerTypeName    : string;         // set by semantic; empty for standalone
+  Params           : TObjectList;    // TMethodParam items
+  ReturnTypeName   : string;         // empty = procedure
+  ResolvedReturnType : TTypeDesc;
+  Body             : TBlock;
+  IsVirtual, IsOverride : Boolean;
+  VTableSlot       : Integer;        // -1 = non-virtual
+end;
+
+TMethodParam = class
+  ParamName     : string;
+  IsVarParam    : Boolean;
+  IsConstParam  : Boolean;
+  IsOpenArray   : Boolean;
+  ResolvedType  : TTypeDesc;
+end;
+
+TVarDecl = class(TASTNode)
+  Names        : TStringList;
+  ResolvedType : TTypeDesc;
+  IsGlobal     : Boolean;
+end;
+----
+
+=== Code Generator Labels (uCodeGenQBE.pas)
+
+The QBE IR and the companion assembly file share the same label namespace. The
+following label conventions are used by the code generator:
+
+[cols="2,3"]
+|===
+|Label Pattern |Meaning
+
+|`$FunctionName`              |Standalone function entry point
+|`$ClassName_MethodName`      |Method entry point (QBE naming convention)
+|`$varname`                   |Global variable data section label
+|`$__s0`, `$__s1`, ...        |String literal labels (indexed)
+|`$vtable_ClassName`          |Virtual method table for a class
+|`$typeinfo_ClassName`        |Type info pointer (first vtable slot)
+|===
+
+These labels can be used directly as assembler references in the `.opdf.s`
+companion file (see <<address-resolution>>).
+
+== TypeID Allocation Strategy
+
+=== Scheme: FNV-1a Hash of Canonical Name
+
+OPDF TypeIDs are `Cardinal` (32-bit unsigned). The recommended scheme for
+Blaise is **FNV-1a (32-bit) hash of the canonical type name** — the same
+approach used in the FPC integration.
+
+This produces deterministic, globally unique identifiers that are stable across
+recompilation. The debugger treats TypeIDs as opaque handles; it does not care
+how they were generated, only that they are consistent within a single binary.
+
+[source,pascal]
+----
+function FNV1a32(const S: string): Cardinal;
+const
+  FNV_PRIME  = $01000193;
+  FNV_OFFSET = $811C9DC5;
+var
+  i: Integer;
+begin
+  Result := FNV_OFFSET;
+  for i := 1 to Length(S) do
+  begin
+    Result := Result xor Ord(S[i]);
+    Result := Result * FNV_PRIME;
+  end;
+  if Result = 0 then Result := 1;  // 0 is reserved for "no type"
+end;
+----
+
+=== Canonical Name Rules
+
+[cols="2,3"]
+|===
+|Type |Canonical Name
+
+|Scalar `tyInteger`    |`Integer`
+|Scalar `tyByte`       |`Byte`
+|Scalar `tyInt64`      |`Int64`
+|Scalar `tyBoolean`    |`Boolean`
+|Scalar `tyChar`       |`Char`
+|Scalar `tyString`     |`AnsiString`
+|Named type `TFoo`     |`TFoo`
+|Pointer to `TFoo`     |`^TFoo`
+|Array of `Integer`    |`array of Integer`
+|Static `array[1..10] of Integer` |`array[1..10] of Integer`
+|Anonymous record      |`__anon_record_<N>` (N = sequential counter)
+|===
+
+The `TTypeID = 0` value is reserved to mean "no type" or "void". Never emit
+zero as a TypeID for a real type.
+
+=== Deduplication
+
+Maintain a `TDictionary<string, TTypeID>` keyed on canonical name. Before
+emitting any type record, check whether that name is already registered. If so,
+reuse the existing TypeID and skip emission. This prevents duplicate type
+records across compilation units.
+
+== Address Resolution Strategy
+
+[[address-resolution]]
+=== The Problem
+
+OPDF records for `recGlobalVar`, `recFunctionScope`, `recLineInfo`,
+`recClassVar`, and `recProperty` (method-backed) all contain absolute memory
+addresses. These addresses are only known after linking. Blaise's pipeline is:
+
+  Blaise → QBE IR → qbe tool → .s assembly → gcc/ld → ELF binary
+
+The addresses cannot be hardcoded during compilation.
+
+=== Solution: Companion Assembly File
+
+The cleanest approach for the QBE backend is to emit a **companion `.opdf.s`
+assembly file** alongside the QBE IR. This file defines a `.opdf` ELF section
+and uses the same label names as the QBE-generated code to reference
+unresolved addresses. The linker resolves everything when it links both files
+together.
+
+==== Companion File Structure
+
+[source,asm]
+----
+    .section .opdf, "a", @progbits
+
+    # OPDF header (32 bytes)
+    .byte  79, 80, 68, 70          # Magic: 'OPDF'
+    .word  1                        # Version
+    .byte  ... (16 bytes UUID)      # BuildID
+    .byte  2                        # TargetArch: archX86_64
+    .byte  8                        # PointerSize: 8
+    .int   <total_record_count>     # TotalRecords
+    .int   1                        # Flags: OPDF_FLAG_HAS_DIRECTORY
+
+    # Record: recGlobalVar for MyVar
+    .byte  2                        # RecType = recGlobalVar
+    .int   14                       # RecSize (fixed part) + name length
+    .int   <TypeID>                 # TypeID
+    .quad  MyVar                    # Address — linker resolves $MyVar label
+    .word  5                        # NameLen
+    .ascii "MyVar"                  # Name
+
+    # Record: recFunctionScope for MyProc
+    .byte  15                       # RecType = recFunctionScope
+    .int   <RecSize>                # RecSize
+    .int   <ScopeID>                # ScopeID (low 32 bits of LowPC — see below)
+    .quad  MyProc                   # LowPC — resolves to function entry label
+    .quad  MyProc_end               # HighPC — resolves to function exit label
+    .word  0                        # DeclIndex
+    .word  6                        # NameLen
+    .ascii "MyProc"                 # Name
+----
+
+The assembler label names used in `.quad` directives must match exactly the
+label names emitted by the QBE code generator (e.g. `$MyProc` in QBE IR
+becomes `MyProc` in x86_64 assembly, no leading `$`).
+
+==== ScopeID Derivation
+
+`recFunctionScope.ScopeID` is used as the key that links function scopes to
+their local variables. Use the low 32 bits of the function's entry label
+address. Since the address is not known at compile time, use a **placeholder**
+strategy:
+
+. Assign a sequential integer as the ScopeID during emit (e.g. the order in
+  which functions are processed: 1, 2, 3, ...).
+. Emit `recLocalVar` records with that same sequential ScopeID.
+. Emit `recFunctionScope` with the same ScopeID.
+
+The debugger (`pdr_opdf_adapter.pas`) finds in-scope locals by matching
+`recLocalVar.ScopeID == recFunctionScope.ScopeID`. Since both sides use the
+same sequential integer, the matching works correctly without needing the
+actual runtime address.
+
+==== Function Exit Labels
+
+The QBE code generator already uses `AllocLabel('method_exit')` and
+`AllocLabel('func_exit')` as exit labels. The OPDF companion file needs a
+`HighPC` that covers the function body. Options:
+
+. **Emit a size directive**: after the function body label, emit
+  `.size MyProc, .-MyProc` in the QBE-generated assembly. The OPDF companion
+  can then use `MyProc + sizeof(MyProc)`. This is the most precise option but
+  requires patching the QBE assembly output.
+. **Emit a trailing label**: add a unique `MyProc__opdf_end:` label at the
+  function epilogue in the companion file and reference it as HighPC. The
+  label must be in the same section as the function. This is not straightforward
+  for the companion-file approach.
+. **Use the next function's start address as an approximation**: acceptable for
+  debugging purposes; the debugger only uses HighPC to determine whether RIP is
+  inside a scope, and approximate is sufficient.
+. **Emit `HighPC = LowPC + 0` as a placeholder**, then patch with a post-link
+  tool. Not recommended.
+
+The recommended approach for Blaise Phase 4 is **option 3** (next function's
+start as HighPC approximation) — it is simple to implement and sufficient for
+the debugger's scope-lookup logic. Exact HighPC can be added later.
+
+==== Integrating the Companion File into the Build
+
+In `Blaise.pas`, after calling `CG.GetOutput()`:
+
+[source,pascal]
+----
+OPDFAsmFile := ChangeFileExt(OutputFile, '.opdf.s');
+EmitOPDFCompanionFile(Program, CG, OPDFAsmFile);
+
+// Then in CompileToNative, pass both .ssa and .opdf.s to QBE/GCC
+qbe IRFile -o AsmFile
+cc -o OutputFile AsmFile OPDFAsmFile rtl.a
+----
+
+The companion file is compiled by GCC as a plain assembly file. It goes through
+the assembler and linker exactly like the QBE-generated assembly, with all
+label references resolved in the final link step.
+
+== New Module: uDebugOPDF.pas
+
+=== Responsibilities
+
+`uDebugOPDF.pas` encapsulates all OPDF emission logic. It depends on:
+
+* `uAST.pas` — AST node types
+* `uSymbolTable.pas` — `TTypeDesc` hierarchy, `TFieldInfo`, `TSymbolTable`
+* `uCodeGenQBE.pas` — for label name queries (function entry labels, global
+  variable labels)
+
+It has no dependency on `uSemantic.pas`, `uParser.pas`, or any IO beyond
+writing to a `TStringList` (or `TStream`).
+
+=== Public Interface
+
+[source,pascal]
+----
+unit uDebugOPDF;
+
+interface
+
+uses uAST, uSymbolTable, uCodeGenQBE;
+
+type
+  TOPDFEmitter = class
+  public
+    constructor Create(AProgram: TProgram; ACodeGen: TCodeGenQBE);
+    { Emit the full companion .opdf.s file to AFileName }
+    procedure EmitToFile(const AFileName: string);
+    destructor Destroy; override;
+  end;
+
+implementation
+// ...
+----
+
+=== Internal Structure
+
+[source]
+----
+TOPDFEmitter
+  FProgram     : TProgram
+  FCodeGen     : TCodeGenQBE
+  FOutput      : TStringList         ← assembly text accumulates here
+  FTypeIDs     : TDictionary<string, Cardinal>   ← canonical name → TypeID
+  FEmittedTypes: TDictionary<Cardinal, Boolean>  ← dedup guard
+  FNextScopeID : Cardinal            ← sequential function scope counter
+  FRecordCount : Integer             ← total record count (for header patch)
+
+  procedure EmitHeader
+  procedure EmitUnitDirectory
+  procedure EmitAllTypes(ABlock: TBlock)
+  procedure EmitTypeDesc(AType: TTypeDesc)
+  procedure EmitPrimitive(AType: TTypeDesc)
+  procedure EmitEnum(AType: TEnumTypeDesc)
+  procedure EmitSet(AType: TSetTypeDesc)
+  procedure EmitPointer(AType: TPointerTypeDesc)
+  procedure EmitStaticArray(AType: TStaticArrayTypeDesc)
+  procedure EmitDynamicArray(AType: TOpenArrayTypeDesc)
+  procedure EmitRecord(AType: TRecordTypeDesc)
+  procedure EmitClass(AType: TRecordTypeDesc)
+  procedure EmitInterface(AType: TInterfaceTypeDesc)
+  procedure EmitGlobalVar(AVarDecl: TVarDecl; const AVarName: string)
+  procedure EmitFunctionScope(AMethod: TMethodDecl; AScopeID: Cardinal)
+  procedure EmitLocalVars(ABlock: TBlock; AScopeID: Cardinal; ARBPOffset: Integer)
+  procedure EmitParameters(AMethod: TMethodDecl)
+  procedure EmitLineInfo(ABlock: TBlock; const AFuncLabel: string)
+  procedure EmitConstant(AConstDecl: TConstDecl)
+  function  GetOrAllocTypeID(const ACanonicalName: string): Cardinal
+  function  FuncLabel(AMethod: TMethodDecl): string
+  function  GlobalVarLabel(const AVarName: string): string
+----
+
+== Emission Order and Per-Record Implementation
+
+=== Emission Order
+
+Emit records in the following order to ensure that type references (TypeID
+fields) always point to already-emitted records:
+
+[source]
+----
+1. recUnitDirectory      (placeholder first; patch TotalRecords after all emit)
+2. For each primitive scalar type used in the program:
+     recPrimitive
+3. For each named type in dependency order (base types before derived):
+     recEnum, recSet, recPointer, recArray, recRecord, recClass, recInterface
+4. For each global variable:
+     recGlobalVar
+5. For each compile-time constant:
+     recConstant
+6. For each function/method:
+     recFunctionScope
+     recParameter (one per parameter, in declaration order)
+     recLocalVar  (one per local variable in the function body)
+     recLineInfo  (one per distinct source line in the function body)
+----
+
+=== recPrimitive
+
+[cols="2,3"]
+|===
+|OPDF Field |Blaise Source
+
+|`TypeID`      |`GetOrAllocTypeID('Integer')` etc.
+|`SizeInBytes` |`TypeDesc.RawSize()`
+|`IsSigned`    |`1` for Integer/Int64; `0` for Byte/Boolean/Char
+|`SubKind`     |`skInteger=0`, `skBoolean=1`, `skChar=2`, `skFloat=4` (from `TypeDesc.Kind`)
+|`Name`        |Canonical name string (e.g. `'Integer'`, `'Boolean'`)
+|===
+
+Emit one `recPrimitive` for each of: `Integer`, `Byte`, `Int64`, `Boolean`,
+`Char`. Only emit if actually referenced anywhere in the program (check
+`FEmittedTypes` dedup map).
+
+=== recEnum
+
+[cols="2,3"]
+|===
+|OPDF Field |Blaise Source
+
+|`TypeID`       |`GetOrAllocTypeID(EnumType.Name)`
+|`SizeInBytes`  |`EnumType.RawSize()` (typically 4)
+|`MemberCount`  |`EnumType.Members.Count`
+|`Name`         |`EnumType.Name`
+|Per member: `Value` |Loop index `i` (0-based ordinal)
+|Per member: `Name`  |`EnumType.Members[i]`
+|===
+
+=== recSet
+
+[cols="2,3"]
+|===
+|OPDF Field |Blaise Source
+
+|`TypeID`      |`GetOrAllocTypeID(SetType.Name)`
+|`BaseTypeID`  |`GetOrAllocTypeID(SetType.BaseType.Name)` (emit base enum first)
+|`SizeInBytes` |`(SetType.BitCount + 7) div 8` (1, 2, 4, or 32)
+|`LowerBound`  |`0` (Blaise enums are 0-indexed)
+|`Name`        |`SetType.Name`
+|===
+
+=== recPointer
+
+[cols="2,3"]
+|===
+|OPDF Field |Blaise Source
+
+|`TypeID`       |`GetOrAllocTypeID('^' + BaseType.Name)`
+|`TargetTypeID` |`GetOrAllocTypeID(PointerType.BaseType.Name)` (0 if untyped)
+|`Name`         |`'^' + BaseType.Name` or `'Pointer'` for untyped
+|===
+
+=== recArray (Static)
+
+[cols="2,3"]
+|===
+|OPDF Field |Blaise Source
+
+|`TypeID`        |`GetOrAllocTypeID(CanonicalArrayName)`
+|`ElementTypeID` |`GetOrAllocTypeID(ArrayType.ElementType.Name)`
+|`Dimensions`    |`1` (Blaise arrays are single-dimension for now)
+|`IsDynamic`     |`0`
+|`LowerBound`    |`ArrayType.LowBound`
+|`UpperBound`    |`ArrayType.HighBound`
+|`Name`          |`Format('array[%d..%d] of %s', [Low, High, ElemName])`
+|===
+
+=== recArray (Dynamic / Open Array)
+
+[cols="2,3"]
+|===
+|OPDF Field |Blaise Source
+
+|`TypeID`        |`GetOrAllocTypeID('array of ' + ElemName)`
+|`ElementTypeID` |`GetOrAllocTypeID(ArrayType.ElementType.Name)`
+|`Dimensions`    |`1`
+|`IsDynamic`     |`1`
+|`Name`          |`'array of ' + ElementType.Name`
+|===
+
+=== recRecord
+
+Emit the base type's `recRecord` before any derived type that uses it.
+
+[cols="2,3"]
+|===
+|OPDF Field |Blaise Source
+
+|`TypeID`     |`GetOrAllocTypeID(RecordType.Name)`
+|`FieldCount` |`RecordType.FFields.Count`
+|`TotalSize`  |`RecordType.TotalSize()`
+|`Name`       |`RecordType.Name`
+|Per field `FieldTypeID` |`GetOrAllocTypeID(FieldInfo.TypeDesc.Name)` (emit dep type first)
+|Per field `Offset`      |`FieldInfo.Offset`
+|Per field `Name`        |`FieldInfo.Name`
+|===
+
+=== recClass
+
+Classes include fields, properties, and a VMT address. The class layout in
+Blaise always starts with an 8-byte vptr at offset 0.
+
+[cols="2,3"]
+|===
+|OPDF Field |Blaise Source
+
+|`TypeID`       |`GetOrAllocTypeID(ClassType.Name)`
+|`ParentTypeID` |`GetOrAllocTypeID(ClassType.FParent.Name)` (0 if no parent)
+|`VMTAddress`   |`.quad $vtable_ClassName` (linker-resolved label in companion file)
+|`InstanceSize` |`ClassType.TotalSize()`
+|`FieldCount`   |`ClassType.FFields.Count`
+|`Name`         |`ClassType.Name`
+|Per field      |Same as `recRecord` above
+|===
+
+After emitting `recClass`, iterate `ClassType.FProperties` and emit one
+`recProperty` per property (see below). Then iterate any class-level constants
+and emit `recClassConst`.
+
+=== recProperty
+
+[cols="2,3"]
+|===
+|OPDF Field |Blaise Source
+
+|`ClassTypeID`      |TypeID of the owning class
+|`PropertyTypeID`   |`GetOrAllocTypeID(PropDecl.TypeName)`
+|`ReadType`         |`patField=0` if `ReadName` is a field; `patMethod=1` if getter; `patNone=2`
+|`WriteType`        |`patField=0` / `patMethod=1` / `patNone=2` for write accessor
+|`ReadAddr`         |For field: `FieldInfo.Offset`; for method: `.quad $ClassName_GetterName`
+|`WriteAddr`        |For field: `FieldInfo.Offset`; for method: `.quad $ClassName_SetterName`
+|`Name`             |`PropDecl.Name`
+|===
+
+To determine whether a property accessor is field-backed or method-backed:
+search `ClassType.FFields` for a field whose name matches `PropDecl.ReadName`.
+If found, it is field-backed; otherwise it is method-backed.
+
+=== recInterface
+
+[cols="2,3"]
+|===
+|OPDF Field |Blaise Source
+
+|`TypeID`    |`GetOrAllocTypeID(IntfType.Name)`
+|`Name`      |`IntfType.Name`
+|===
+
+Interface records in the current OPDF spec do not enumerate method signatures
+at the binary level (that is future work). Emit the `recInterface` with type
+identity information only for now.
+
+=== recGlobalVar
+
+Iterate `Program.Block.Decls` and for each `TVarDecl` where `IsGlobal=True`,
+emit one record per name in `TVarDecl.Names`:
+
+[cols="2,3"]
+|===
+|OPDF Field |Blaise Source
+
+|`TypeID`   |`GetOrAllocTypeID(VarDecl.ResolvedType.Name)`
+|`Address`  |`.quad $VarName` (linker-resolved label in companion file)
+|`Name`     |`VarName` (from `VarDecl.Names[i]`)
+|===
+
+The label in the companion file is `$VarName` exactly as the code generator
+emits it.
+
+=== recConstant
+
+Iterate `Program.Block.ConstDecls`. For each `TConstDecl`:
+
+[cols="2,3"]
+|===
+|OPDF Field |Blaise Source
+
+|`TypeID`    |`GetOrAllocTypeID(ConstDecl.ResolvedType.Name)` (0 if untyped)
+|`ConstKind` |`ckOrd=0` for integer/bool/char/enum; `ckReal=2` for float; `ckString=1` for string; `ckNil=3`
+|`Value`     |8-byte Int64 for ordinal; 8-byte Double for real; raw UTF-8 bytes for string
+|`Name`      |`ConstDecl.Name`
+|===
+
+=== recFunctionScope
+
+For each `TMethodDecl` in `Program.Block.ProcDecls` (and recursively in each
+class):
+
+[cols="2,3"]
+|===
+|OPDF Field |Blaise Source
+
+|`ScopeID`   |Sequential counter (see <<address-resolution>>)
+|`LowPC`     |`.quad FuncLabel` (entry point label in companion file)
+|`HighPC`    |`.quad NextFuncLabel` (approximation; see above)
+|`DeclIndex` |Declaration order index within the parent scope
+|`Name`      |`Method.Name` (unqualified; class name conveyed by `OwnerTypeName`)
+|===
+
+The function label in the companion assembly file matches QBE's convention:
+
+* Standalone function `Foo`: label is `Foo` (QBE emits `$Foo` → assembles to `Foo`)
+* Method `TDog.Speak`: label is `TDog_Speak` (QBE emits `$TDog_Speak`)
+
+=== recParameter
+
+For each `TMethodParam` in `TMethodDecl.Params`, emit in declaration order:
+
+[cols="2,3"]
+|===
+|OPDF Field |Blaise Source
+
+|`TypeID`   |`GetOrAllocTypeID(Param.ResolvedType.Name)`
+|`IsVar`    |`Ord(Param.IsVarParam)`
+|`IsConst`  |`Ord(Param.IsConstParam)`
+|`IsOut`    |`0` (Blaise does not yet have `out` params; use 0)
+|`Name`     |`Param.ParamName`
+|===
+
+=== recLocalVar
+
+Walk each statement block within a `TMethodDecl.Body`. For each `TVarDecl`
+found in `TBlock.Decls`:
+
+[cols="2,3"]
+|===
+|OPDF Field |Blaise Source
+
+|`TypeID`       |`GetOrAllocTypeID(VarDecl.ResolvedType.Name)`
+|`ScopeID`      |Sequential scope ID of the enclosing function
+|`LocationExpr` |`1` (RBP-relative for all locals in Blaise)
+|`DeclIndex`    |Declaration order within the block
+|`LocationData` |Signed 16-bit RBP offset (see below)
+|`Name`         |First name from `VarDecl.Names` (emit one record per name)
+|===
+
+==== Calculating RBP Offsets
+
+Blaise allocates local variables with QBE `alloc4`/`alloc8` directives. The
+actual stack offsets are determined by QBE and GCC, not by the Blaise compiler
+directly. There are two practical approaches:
+
+**Option A — Estimated offsets (Phase 4 initial implementation)**:
+Assign notional RBP offsets based on declaration order and type sizes. Walk
+the block's `Decls` list in order and accumulate a running offset:
+
+[source,pascal]
+----
+var RBPOffset: Integer := 0;
+for each VarDecl in Block.Decls do
+begin
+  RBPOffset := RBPOffset - AlignUp(VarDecl.ResolvedType.RawSize(), 8);
+  Emit recLocalVar with LocationData = RBPOffset;
+end;
+----
+
+This is approximate but sufficient for the debugger to locate variables in
+most cases. The QBE backend is unlikely to differ dramatically from this layout
+for simple functions.
+
+**Option B — Parse QBE-generated assembly (Phase 4 future improvement)**:
+After `qbe` processes the IR, parse the `.s` output to extract actual stack
+offsets from `sub rsp, N` and `mov [rbp-N], ...` instructions. Patch the
+companion file's `recLocalVar` entries before the final link. This is more
+complex but gives exact offsets.
+
+Implement Option A first; Option B is an incremental improvement.
+
+=== recLineInfo
+
+For each statement in a function body that has a non-zero `Line` value, emit
+one `recLineInfo`. To avoid redundant records, track the last-emitted line
+number and skip duplicates:
+
+[cols="2,3"]
+|===
+|OPDF Field |Blaise Source
+
+|`Address`    |A label at the statement's code location (see below)
+|`LineNumber` |`ASTStmt.Line`
+|`Column`     |`ASTStmt.Col`
+|`FileName`   |Source file path (available in `Blaise.pas` as `SourceFile`)
+|===
+
+==== Statement Address Labels
+
+To get the address of each source statement, inject synthetic labels into the
+QBE IR immediately before emitting each statement's code. Add a method to
+`TCodeGenQBE`:
+
+[source,pascal]
+----
+function TCodeGenQBE.EmitLineLabel(ALine, ACol: Integer): string;
+begin
+  Result := Format('__line_%d_%d_%d', [FLabelCount, ALine, ACol]);
+  Inc(FLabelCount);
+  EmitLine(Format('@%s', [Result]));  // QBE block label
+end;
+----
+
+Call this at the start of each statement emission in `EmitStmt()`. Collect
+`(LabelName, LineNumber, ColumnNumber, FileName)` tuples in a list maintained
+by the code generator. The OPDF emitter reads this list after `Generate()`
+returns and emits the corresponding `recLineInfo` records.
+
+The companion file references these labels directly:
+
+[source,asm]
+----
+.quad __line_42_3_1    # Address for line 42, col 3 in MyFunc
+.int  42               # LineNumber
+.word 3                # ColumnNumber
+.word 14               # FileNameLen
+.ascii "myprogram.pas" # FileName
+----
+
+== String Type Handling
+
+Blaise uses `tyString` to represent `AnsiString`. The debugger needs to know
+the header layout to extract the length and character data from a live
+`AnsiString` heap allocation. Emit one `recAnsiStr` record for `AnsiString`
+using Blaise's actual RTL string header layout.
+
+Inspect the RTL source (`/data/devel/new-pascal-compiler/rtl/`) for the
+`AnsiString` structure definition. The FPC layout (which Blaise likely mirrors)
+is:
+
+[source]
+----
+[heap pointer points here]
+  -12: RefCount (Int32)
+  -8:  Length   (Int32)
+  -4:  Capacity (Int32)
+  0:   char data (null-terminated)
+----
+
+If Blaise uses the same layout:
+
+[source,pascal]
+----
+// Emit recAnsiStr with:
+LengthOffset    = -8    // SmallInt
+RefCountOffset  = -12   // SmallInt
+CodePageOffset  = 0     // SmallInt (0 = not tracked)
+ElementSizeOffset = 0   // SmallInt (0 = not tracked)
+----
+
+Verify against `rtl/src/main/pascal/System.pas` before hardcoding these values.
+If the layout differs from FPC's, adjust accordingly.
+
+== Command-Line Flag Integration
+
+Add a `--debug-opdf` flag (or honour the existing `-g` / `-gl` FPC-compat
+flags) to trigger OPDF emission. Update `ParseArgs()` and
+`ParseFPCArgs()` in `Blaise.pas`:
+
+[source,pascal]
+----
+// In ParseFPCArgs:
+'-g':  OPDFEnabled := True;
+'-gl': OPDFEnabled := True;
+
+// In Blaise.pas main pipeline, after CG.GetOutput():
+if OPDFEnabled then
+begin
+  OPDFWriter := TOPDFEmitter.Create(Program, CG);
+  try
+    OPDFWriter.EmitToFile(ChangeFileExt(OutputFile, '.opdf.s'));
+  finally
+    OPDFWriter.Free;
+  end;
+end;
+----
+
+Then pass the companion file to the GCC link step:
+
+[source,pascal]
+----
+// In CompileToNative, append OPDFAsmFile to the gcc command when it exists:
+if FileExists(OPDFAsmFile) then
+  GCCArgs := GCCArgs + ' ' + OPDFAsmFile;
+----
+
+== Integration Testing
+
+=== Use the Existing Test Infrastructure
+
+The PDR debugger already has 29 integration tests under
+`/data/devel/opdebugger/tests/integration/`. Once Blaise emits valid OPDF
+sections, these tests should be adaptable to validate Blaise-compiled binaries.
+
+The test runner (`run_tests.sh`) compiles a test program, feeds commands via
+stdin, and diffs stdout against a `.expected` file. To add Blaise-compiled
+variants:
+
+. Compile a test program with Blaise + OPDF: `blaise --source test_01.pas -g`
+. Run the PDR debugger against the resulting binary
+. Compare output with the existing `.expected` files
+
+=== Incremental Validation Steps
+
+Follow this order to verify the implementation progressively:
+
+. **Step 1**: Run `opdf_dump` (`/data/devel/opdebugger/tools/target/opdf_dump`)
+  against a Blaise-compiled binary. Verify the header is valid, record counts
+  match, and all record types parse without errors.
+
+. **Step 2**: Run `opdf_dump -v` to decode every record. Verify type names,
+  sizes, and field offsets against the Pascal source.
+
+. **Step 3**: Attach the `pdr` debugger to a Blaise-compiled binary. Run
+  `locals` at a breakpoint. Verify variable names and types appear.
+
+. **Step 4**: Run `print <var>` for each type category (primitive, record,
+  class, array, enum). Verify values are correct.
+
+. **Step 5**: Run the full integration test suite against Blaise-compiled
+  binaries.
+
+=== opdf_dump Build Reminder
+
+When adding new record types to the format, `opdf_dump` must be updated before
+testing:
+
+. Update `MAX_REC_TYPE` in `tools/opdf_dump.pas`
+. Add a `DumpXxx` procedure and a `case` arm
+. Rebuild: `pasbuild compile -m tools`
+
+Failure to do this causes `opdf_dump` to abort at the first unknown record type
+and silently truncate all subsequent output.
+
+== Summary: Minimum Viable Implementation
+
+To get a working OPDF section that the existing `pdr` debugger can consume,
+implement the following records in priority order:
+
+[cols="1,2,2"]
+|===
+|Priority |Record Types |Enables
+
+|1 (required)
+|`recPrimitive`, `recClass`, `recRecord`, `recEnum`, `recGlobalVar`
+|Type resolution; global variable display
+
+|2 (required)
+|`recFunctionScope`, `recParameter`, `recLocalVar`
+|`locals` command; local variable display
+
+|3 (required)
+|`recLineInfo`
+|Breakpoints by source line; `next` / `step` commands
+
+|4 (important)
+|`recArray`, `recPointer`, `recSet`
+|Array, pointer, and set display
+
+|5 (complete)
+|`recProperty`, `recInterface`, `recConstant`, `recClassVar`, `recClassConst`, `recUnitDirectory`
+|`inspect` command; class statics; multi-unit support
+
+|===
+
+== Reference: Key File Locations
+
+[cols="2,3"]
+|===
+|File |Purpose
+
+|`/data/devel/opdebugger/docs/opdf-specification.adoc`
+|Authoritative binary format spec (read this first)
+
+|`/data/devel/opdebugger/opdf-lib/src/main/pascal/opdf_types.pas`
+|All `REC_*` constants and packed record definitions
+
+|`/data/devel/opdebugger/opdf-lib/src/main/pascal/opdf_io.pas`
+|Reference reader implementation
+
+|`/data/devel/opdebugger/pdr-adapters/src/main/pascal/pdr_opdf_adapter.pas`
+|How the debugger consumes location expressions and scope IDs
+
+|`/data/devel/fpc-3.3.1/src/compiler/dbgopdf.pas`
+|FPC emit code — reference implementation (do not port directly)
+
+|`/data/devel/fpc-3.3.1/src/compiler/dbgopdf_typemap.pas`
+|FNV-1a TypeID allocation reference
+
+|`/data/devel/new-pascal-compiler/compiler/src/main/pascal/Blaise.pas`
+|Compile pipeline; hook point for OPDF emission
+
+|`/data/devel/new-pascal-compiler/compiler/src/main/pascal/uCodeGenQBE.pas`
+|QBE IR emitter; label naming conventions
+
+|`/data/devel/new-pascal-compiler/compiler/src/main/pascal/uSymbolTable.pas`
+|Type system; `TTypeDesc` hierarchy; field layout
+
+|`/data/devel/new-pascal-compiler/compiler/src/main/pascal/uAST.pas`
+|AST node definitions; `TASTNode.Line`/`Col` fields
+
+|`/data/devel/opdebugger/tools/target/opdf_dump`
+|Validation tool; run against compiled binary to inspect OPDF section
+|===
