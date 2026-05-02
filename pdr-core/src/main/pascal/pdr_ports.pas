@@ -57,6 +57,7 @@ type
     tcAnsiString,     // AnsiString
     tcUnicodeString,  // UnicodeString
     tcWideString,     // WideString (COM-compatible, UTF-16)
+    tcUtf8String,     // Blaise UTF-8 string (data-pointer, no code-page)
     tcPointer,        // Pointer type
     tcArray,          // Array type
     tcRecord,         // Record/Structure
@@ -167,6 +168,8 @@ type
     StrRefCountOffset: SmallInt;
     StrCodePageOffset: SmallInt;
     StrElementSizeOffset: SmallInt;
+    // Utf8String: capacity offset (not present in recAnsiStr)
+    StrCapacityOffset: SmallInt;
     // Pointer-specific
     PointerTo: TTypeID; // For pointers: the type ID of the pointed-to type
     // Class-specific

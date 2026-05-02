@@ -532,6 +532,7 @@ var
   DefShortString: TDefShortString;
   DefAnsiString: TDefAnsiString;
   DefUnicodeString: TDefUnicodeString;
+  DefUtf8String: TDefUtf8String;
   DefGlobalVar: TDefGlobalVar;
   DefArray: TDefArray;
   DefLineInfo: TDefLineInfo;
@@ -767,6 +768,29 @@ begin
               PType^.StrCodePageOffset := DefUnicodeString.CodePageOffset;
               PType^.StrElementSizeOffset := DefUnicodeString.ElementSizeOffset;
 
+              FTypes.Add(GlobalTypeID, PType);
+            end;
+          end;
+        end;
+
+      recUtf8Str:
+        begin
+          if FReader.ReadUtf8String(DefUtf8String, TypeName) then
+          begin
+            Resolution := ResolveTypeCollision(DefUtf8String.TypeID, TypeName, GlobalTypeID);
+            if Resolution <> TR_DUPLICATE then
+            begin
+              New(PType);
+              FillChar(PType^, SizeOf(TTypeInfo), 0);
+              PType^.TypeID            := GlobalTypeID;
+              PType^.Name              := TypeName;
+              PType^.Size              := FHeader.PointerSize;
+              PType^.IsSigned          := False;
+              PType^.Category          := tcUtf8String;
+              PType^.MaxLength         := 0;
+              PType^.StrRefCountOffset := DefUtf8String.RefCountOffset;
+              PType^.StrLengthOffset   := DefUtf8String.LengthOffset;
+              PType^.StrCapacityOffset := DefUtf8String.CapacityOffset;
               FTypes.Add(GlobalTypeID, PType);
             end;
           end;

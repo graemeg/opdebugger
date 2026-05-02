@@ -304,7 +304,10 @@ end;
 
 function TAnsiStringEvaluator.CanHandle(const TypeInfo: TTypeInfo): Boolean;
 begin
-  Result := (TypeInfo.Category = tcAnsiString);
+  { Also handles tcUtf8String: same data-pointer evaluation logic, different
+    (compiler-supplied) StrLengthOffset value. }
+  Result := (TypeInfo.Category = tcAnsiString) or
+            (TypeInfo.Category = tcUtf8String);
 end;
 
 function TAnsiStringEvaluator.Evaluate(const VarInfo: TVariableInfo;

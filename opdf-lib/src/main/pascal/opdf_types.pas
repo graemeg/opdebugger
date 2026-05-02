@@ -73,7 +73,8 @@ type
     recUnitDirectory = 19, // Unit directory (index of per-unit data offsets)
     recConstant      = 20, // Compile-time constant (value embedded in record)
     recClassVar      = 21, // Class variable (static field) — owner class TypeID + global address
-    recClassConst    = 22  // Class constant — owner class TypeID + embedded value
+    recClassConst    = 22, // Class constant — owner class TypeID + embedded value
+    recUtf8Str       = 23  // UTF-8 string — data-pointer layout, no code-page or element-size fields
   );
 
   { Constant value kind }
@@ -162,6 +163,21 @@ type
     NameLen: TNameLen;          // 2 bytes
     // Followed by Name (NameLen bytes)
   end;
+
+  { UTF-8 String Type Definition (Blaise-specific, recUtf8Str = 23)
+    Encodes the data-pointer convention: the variable slot holds a pointer to
+    the first character byte.  The 12-byte header (RefCount, Length, Capacity)
+    lives immediately before it at negative offsets.
+    Encoding is always UTF-8; there is no code-page or element-size field. }
+  TDefUtf8String = packed record
+    TypeID:         TTypeID;   // 4 bytes
+    RefCountOffset: SmallInt;  // 2 bytes — signed offset from data_ptr to RefCount (e.g. -12)
+    LengthOffset:   SmallInt;  // 2 bytes — signed offset from data_ptr to Length  (e.g. -8)
+    CapacityOffset: SmallInt;  // 2 bytes — signed offset from data_ptr to Capacity (e.g. -4)
+    NameLen:        TNameLen;  // 2 bytes
+    // Followed by: Name (NameLen bytes)
+  end;
+  // Fixed part: 12 bytes
 
   { Pointer Type Definition }
   TDefPointer = packed record
@@ -426,6 +442,7 @@ begin
     recGlobalVar:  Result := 'GlobalVar';
     recShortStr:   Result := 'ShortString';
     recAnsiStr:    Result := 'AnsiString';
+    recUtf8Str:    Result := 'Utf8String';
     recUnicodeStr: Result := 'UnicodeString';
     recPointer:    Result := 'Pointer';
     recArray:      Result := 'Array';

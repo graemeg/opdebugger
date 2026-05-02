@@ -52,6 +52,8 @@ type
       LengthOffset, RefCountOffset, CodePageOffset, ElementSizeOffset: SmallInt);
     procedure WriteUnicodeString(TypeID: TTypeID; const Name: String;
       LengthOffset, RefCountOffset, CodePageOffset, ElementSizeOffset: SmallInt);
+    procedure WriteUtf8String(TypeID: TTypeID; const Name: String;
+      RefCountOffset, LengthOffset, CapacityOffset: SmallInt);
     procedure WritePointer(TypeID: TTypeID; TargetTypeID: TTypeID;
                           const Name: String);
 
@@ -150,6 +152,7 @@ type
     function ReadShortString(out Def: TDefShortString; out Name: String): Boolean;
     function ReadAnsiString(out Def: TDefAnsiString; out Name: String): Boolean;
     function ReadUnicodeString(out Def: TDefUnicodeString; out Name: String): Boolean;
+    function ReadUtf8String(out Def: TDefUtf8String; out Name: String): Boolean;
     function ReadPointer(out Def: TDefPointer; out Name: String): Boolean;
     function ReadArray(out Def: TDefArray; out Name: String): Boolean;
     function ReadLineInfo(out Def: TDefLineInfo; out FileName: String): Boolean;
@@ -327,6 +330,31 @@ begin
 
   RecHeader.RecType := Ord(recUnicodeStr);
   RecHeader.RecSize := SizeOf(TDefUnicodeString) + Length(Name);
+
+  FStream.Write(RecHeader, SizeOf(RecHeader));
+  FStream.Write(Payload, SizeOf(Payload));
+  WriteString(Name);
+
+  Inc(FRecordCount);
+end;
+
+procedure TOPDFWriter.WriteUtf8String(TypeID: TTypeID; const Name: String;
+  RefCountOffset, LengthOffset, CapacityOffset: SmallInt);
+var
+  RecHeader: TOPDFRecordHeader;
+  Payload: TDefUtf8String;
+begin
+  if not FHeaderWritten then
+    WriteHeader;
+
+  Payload.TypeID         := TypeID;
+  Payload.RefCountOffset := RefCountOffset;
+  Payload.LengthOffset   := LengthOffset;
+  Payload.CapacityOffset := CapacityOffset;
+  Payload.NameLen        := Length(Name);
+
+  RecHeader.RecType := Ord(recUtf8Str);
+  RecHeader.RecSize := SizeOf(TDefUtf8String) + Length(Name);
 
   FStream.Write(RecHeader, SizeOf(RecHeader));
   FStream.Write(Payload, SizeOf(Payload));
@@ -939,6 +967,25 @@ begin
   Result := False;
 
   if FStream.Position + SizeOf(TDefUnicodeString) > FStream.Size then
+    Exit;
+
+  FStream.Read(Def, SizeOf(Def));
+
+  if FStream.Position + Def.NameLen > FStream.Size then
+    Exit;
+
+  SetLength(Name, Def.NameLen);
+  if Def.NameLen > 0 then
+    FStream.Read(Name[1], Def.NameLen);
+
+  Result := True;
+end;
+
+function TOPDFReader.ReadUtf8String(out Def: TDefUtf8String; out Name: String): Boolean;
+begin
+  Result := False;
+
+  if FStream.Position + SizeOf(TDefUtf8String) > FStream.Size then
     Exit;
 
   FStream.Read(Def, SizeOf(Def));
