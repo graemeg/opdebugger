@@ -38,7 +38,8 @@ PDR currently covers a solid core debugging workflow on Linux x86_64:
 * Call stack display
 * Compile-time constant display
 * Batch/script mode (`--batch`, `-ex`, `--source`, `source`, `--quiet`)
-* 33 passing integration tests
+* `return` command (force immediate return with optional value)
+* 34 passing integration tests
 
 === What Is Missing for Daily Use
 
@@ -247,7 +248,7 @@ Files affected::
 * `pdr_main.pas` -- parse new CLI flags; add `ExecuteScript(Filename)`;
   refactor `ProcessCommand` to return a result status for batch abort
 
-=== `return` Command
+=== ✅ `return` Command
 
 **Priority: Low** +
 **Effort: Medium (2 days)**

@@ -1,0 +1,8 @@
+run
+break test_34_return.pas:10
+continue
+print LocalA
+return
+print MainVal
+continue
+quit

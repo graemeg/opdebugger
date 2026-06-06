@@ -116,6 +116,7 @@ begin
   WriteLn('  info watchpoints - List active watchpoints');
   WriteLn('  catch          - Enable break on exception raise (default: on)');
   WriteLn('  nocatch        - Disable break on exception raise');
+  WriteLn('  return [value] - Force return from current function');
   WriteLn('  source <file>  - Execute commands from a script file');
   WriteLn('  verbose [on|off] - Enable/disable diagnostic output (default: off)');
   WriteLn('  help, h        - Show this help');
@@ -901,6 +902,19 @@ begin
         CallStack := HandleListCommand(Parts);
         for I := 0 to High(CallStack) do
           WriteLn(CallStack[I]);
+      end;
+
+    'return':
+      begin
+        if Length(Parts) >= 2 then
+        begin
+          if TryStrToInt64(Parts[1], SliceLow) then
+            FEngine.ForceReturn(SliceLow, True)
+          else
+            WriteLn('[ERROR] Invalid return value: ', Parts[1]);
+        end
+        else
+          FEngine.ForceReturn(0, False);
       end;
 
     'source':

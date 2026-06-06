@@ -96,6 +96,7 @@ type
     function StepOver: Boolean;
     function StepOut: Boolean;
     function Pause: Boolean;
+    function ForceReturn(ReturnValue: Int64; HasValue: Boolean): Boolean;
 
     { ICommandHandler - Breakpoints }
     function SetBreakpoint(const Location: String): TBreakpointHandle;
@@ -865,6 +866,87 @@ begin
     Exit;
   end;
   Result := FProcessController.SendInterrupt;
+end;
+
+function TDebuggerEngine.ForceReturn(ReturnValue: Int64; HasValue: Boolean): Boolean;
+var
+  Regs: TRegisters;
+  SavedRBP, ReturnAddr: QWord;
+  CurrentLine: TLineInfo;
+begin
+  Result := False;
+  FLastException.IsValid := False;
+  ResetSelectedFrame;
+
+  if FState <> dsPaused then
+  begin
+    WriteLn('[ERROR] Process is not paused');
+    Exit;
+  end;
+
+  if not FProcessController.GetRegisters(Regs) then
+  begin
+    WriteLn('[ERROR] Failed to read registers');
+    Exit;
+  end;
+
+  {$IFDEF CPUX86_64}
+  if not FProcessController.ReadMemory(Regs.RBP, 8, SavedRBP) then
+  begin
+    WriteLn('[ERROR] Failed to read saved RBP from stack');
+    Exit;
+  end;
+
+  if not FProcessController.ReadMemory(Regs.RBP + 8, 8, ReturnAddr) then
+  begin
+    WriteLn('[ERROR] Failed to read return address from stack');
+    Exit;
+  end;
+
+  Regs.RSP := Regs.RBP + 16;
+  Regs.RBP := SavedRBP;
+  Regs.RIP := ReturnAddr;
+
+  if HasValue then
+    Regs.RAX := QWord(ReturnValue);
+  {$ENDIF}
+  {$IFDEF CPUI386}
+  if not FProcessController.ReadMemory(Regs.EBP, 4, SavedRBP) then
+  begin
+    WriteLn('[ERROR] Failed to read saved EBP from stack');
+    Exit;
+  end;
+
+  if not FProcessController.ReadMemory(Regs.EBP + 4, 4, ReturnAddr) then
+  begin
+    WriteLn('[ERROR] Failed to read return address from stack');
+    Exit;
+  end;
+
+  Regs.ESP := Regs.EBP + 8;
+  Regs.EBP := Cardinal(SavedRBP);
+  Regs.EIP := Cardinal(ReturnAddr);
+
+  if HasValue then
+    Regs.EAX := Cardinal(ReturnValue);
+  {$ENDIF}
+
+  if not FProcessController.SetRegisters(Regs) then
+  begin
+    WriteLn('[ERROR] Failed to set registers');
+    Exit;
+  end;
+
+  if gVerbose then
+    WriteLn('[DEBUG] ForceReturn: RIP=0x', IntToHex(ReturnAddr, 1),
+            ' RBP=0x', IntToHex(SavedRBP, 1));
+
+  if FDebugInfoReader.FindLineByAddress(ReturnAddr, CurrentLine) then
+    WriteLn('[INFO] Returned to: ', CurrentLine.FileName, ':', CurrentLine.LineNumber)
+  else
+    WriteLn('[INFO] Returned to: 0x', IntToHex(ReturnAddr, 1));
+
+  Result := True;
 end;
 
 { Breakpoint helper methods }
