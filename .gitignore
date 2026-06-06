@@ -31,6 +31,7 @@ tests/integration/test_*
 !tests/integration/test_*.pas
 !tests/integration/test_*.commands
 !tests/integration/test_*.expected
+!tests/integration/test_*.script
 
 # Editor/IDE files
 *.lps

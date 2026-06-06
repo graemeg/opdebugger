@@ -1,0 +1,5 @@
+# Script file for batch/source test
+break test_33_batch_script.pas:12
+continue
+print ValX
+print ValY

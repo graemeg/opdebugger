@@ -37,7 +37,8 @@ PDR currently covers a solid core debugging workflow on Linux x86_64:
 * Display list (auto-print on every stop)
 * Call stack display
 * Compile-time constant display
-* 32 passing integration tests
+* Batch/script mode (`--batch`, `-ex`, `--source`, `source`, `--quiet`)
+* 33 passing integration tests
 
 === What Is Missing for Daily Use
 
@@ -45,8 +46,6 @@ Real-world debugging sessions -- particularly debugging the Blaise compiler --
 reveal critical gaps compared to GDB:
 
 * No expression evaluator -- `print A + B` or `print Arr[I]` not possible
-* No `info registers` -- CPU state invisible to the user
-* No batch/script mode -- cannot automate debugging workflows
 * No thread support -- multi-threaded programs behave unpredictably
 * No PIE/ASLR support -- debug builds require `-no-pie`
 * Platform locked to Linux x86_64
@@ -225,7 +224,7 @@ Continue until a specified line is reached (implemented as `tbreak` + `continue`
 Particularly useful for skipping past a loop: `until` with no argument continues
 until past the current line.
 
-=== Batch/Script Mode
+=== ✅ Batch/Script Mode
 
 **Priority: High** +
 **Effort: Medium (2-3 days)**

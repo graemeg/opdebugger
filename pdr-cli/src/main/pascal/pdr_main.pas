@@ -34,16 +34,21 @@ type
     FRunning: Boolean;
     FCommandLineArgs: array of String;
 
+    FQuiet: Boolean;
+    FBatch: Boolean;
+
     procedure PrintHelp;
     procedure PrintDisplayList;
     procedure PrintExceptionInfo;
     function HandleListCommand(const Parts: TStringArray): TStringArray;
-    procedure ProcessCommand(const CmdLine: String);
+    function ProcessCommand(const CmdLine: String): Boolean;
+    function ExecuteScript(const Filename: String): Boolean;
   public
     constructor Create;
     destructor Destroy; override;
 
-    procedure Run(const BinaryPath: String; const Args: array of String);
+    procedure Run(const BinaryPath: String; const Args: array of String;
+      const ExCommands: array of String; const SourceFiles: array of String);
   end;
 
 { TCLIDebugger }
@@ -111,6 +116,7 @@ begin
   WriteLn('  info watchpoints - List active watchpoints');
   WriteLn('  catch          - Enable break on exception raise (default: on)');
   WriteLn('  nocatch        - Disable break on exception raise');
+  WriteLn('  source <file>  - Execute commands from a script file');
   WriteLn('  verbose [on|off] - Enable/disable diagnostic output (default: off)');
   WriteLn('  help, h        - Show this help');
   WriteLn('  quit, q        - Exit debugger');
@@ -238,7 +244,41 @@ begin
   Result := True;
 end;
 
-procedure TCLIDebugger.ProcessCommand(const CmdLine: String);
+function TCLIDebugger.ExecuteScript(const Filename: String): Boolean;
+var
+  ScriptFile: TextFile;
+  Line: String;
+begin
+  Result := True;
+  if not FileExists(Filename) then
+  begin
+    WriteLn('[ERROR] Script file not found: ', Filename);
+    Result := False;
+    Exit;
+  end;
+
+  AssignFile(ScriptFile, Filename);
+  Reset(ScriptFile);
+  try
+    while not EOF(ScriptFile) do
+    begin
+      ReadLn(ScriptFile, Line);
+      Line := Trim(Line);
+      if (Line = '') or (Line[1] = '#') then
+        Continue;
+      WriteLn('(pdr) ', Line);
+      if not ProcessCommand(Line) then
+      begin
+        Result := False;
+        Exit;
+      end;
+    end;
+  finally
+    CloseFile(ScriptFile);
+  end;
+end;
+
+function TCLIDebugger.ProcessCommand(const CmdLine: String): Boolean;
 var
   Parts: TStringArray;
   Cmd: String;
@@ -259,6 +299,8 @@ var
   FoundNextLine: Boolean;
   I: Integer;
 begin
+  Result := True;
+
   if Trim(CmdLine) = '' then
     Exit;
 
@@ -276,6 +318,7 @@ begin
       begin
         WriteLn('Exiting...');
         FRunning := False;
+        Result := False;
       end;
 
     'run', 'r':
@@ -860,19 +903,35 @@ begin
           WriteLn(CallStack[I]);
       end;
 
+    'source':
+      begin
+        if Length(Parts) < 2 then
+        begin
+          WriteLn('[ERROR] Usage: source <filename>');
+          Exit;
+        end;
+        if not ExecuteScript(Parts[1]) then
+          Result := False;
+      end;
+
   else
     WriteLn('[ERROR] Unknown command: ', Cmd);
     WriteLn('Type "help" for available commands');
   end;
 end;
 
-procedure TCLIDebugger.Run(const BinaryPath: String; const Args: array of String);
+procedure TCLIDebugger.Run(const BinaryPath: String; const Args: array of String;
+  const ExCommands: array of String; const SourceFiles: array of String);
 var
   CmdLine: String;
+  I: Integer;
 begin
-  WriteLn('PDR (Pascal Debug Reference) ', PDR_VERSION);
-  WriteLn('Copyright (c) 2025-2026 Graeme Geldenhuys');
-  WriteLn;
+  if not FQuiet then
+  begin
+    WriteLn('PDR (Pascal Debug Reference) ', PDR_VERSION);
+    WriteLn('Copyright (c) 2025-2026 Graeme Geldenhuys');
+    WriteLn;
+  end;
 
   // Store command-line arguments
   SetLength(FCommandLineArgs, Length(Args));
@@ -909,16 +968,19 @@ begin
   if Length(FCommandLineArgs) > 0 then
   begin
     FEngine.SetCommandLineArgs(FCommandLineArgs);
-    WriteLn('[INFO] Command-line arguments set: ', String.Join(' ', FCommandLineArgs));
+    if not FQuiet then
+      WriteLn('[INFO] Command-line arguments set: ', String.Join(' ', FCommandLineArgs));
   end;
 
-  WriteLn;
+  if not FQuiet then
+    WriteLn;
 
   // Only auto-run if arguments were provided at CLI startup
   // Otherwise, let user set them via 'args' command before 'run'
   if Length(FCommandLineArgs) > 0 then
   begin
-    WriteLn('[INFO] Starting program...');
+    if not FQuiet then
+      WriteLn('[INFO] Starting program...');
     if not FEngine.Run then
     begin
       WriteLn('[ERROR] Failed to start program');
@@ -927,12 +989,41 @@ begin
   end
   else
   begin
-    WriteLn('[INFO] No arguments provided. Use "args" command to set them, then "run"');
+    if not FQuiet then
+      WriteLn('[INFO] No arguments provided. Use "args" command to set them, then "run"');
   end;
 
-  WriteLn;
-  WriteLn('Type "help" for available commands');
-  WriteLn;
+  // Execute source files (--source)
+  for I := 0 to High(SourceFiles) do
+  begin
+    if not ExecuteScript(SourceFiles[I]) then
+    begin
+      if FBatch then
+        Exit;
+    end;
+  end;
+
+  // Execute -ex commands
+  for I := 0 to High(ExCommands) do
+  begin
+    WriteLn('(pdr) ', ExCommands[I]);
+    if not ProcessCommand(ExCommands[I]) then
+    begin
+      if FBatch then
+        Exit;
+    end;
+  end;
+
+  // In batch mode, quit after executing commands
+  if FBatch then
+    Exit;
+
+  if not FQuiet then
+  begin
+    WriteLn;
+    WriteLn('Type "help" for available commands');
+    WriteLn;
+  end;
 
   // REPL loop
   while FRunning do
@@ -947,13 +1038,18 @@ end;
 var
   BinaryPath: String;
   CLI: TCLIDebugger;
-  I: Integer;
+  I, BinaryArgIdx: Integer;
   Args: array of String;
-  FirstArg: Integer;
+  ExCommands: array of String;
+  SourceFiles: array of String;
+  Quiet, Batch: Boolean;
 begin
-  { Scan for --version and --verbose / -v flags (may appear before the binary path) }
-  FirstArg := 1;
-  for I := 1 to ParamCount do
+  Quiet := False;
+  Batch := False;
+
+  { Parse options — consume flags until we hit the first non-flag argument (binary path) }
+  I := 1;
+  while I <= ParamCount do
   begin
     if ParamStr(I) = '--version' then
     begin
@@ -962,36 +1058,93 @@ begin
       WriteLn('Copyright (c) 2025-2026 Graeme Geldenhuys');
       Halt(0);
     end;
+
     if (ParamStr(I) = '--verbose') or (ParamStr(I) = '-v') then
     begin
       gVerbose := True;
-      if I = FirstArg then
-        Inc(FirstArg);
+      Inc(I);
+      Continue;
     end;
+
+    if (ParamStr(I) = '--quiet') or (ParamStr(I) = '-q') then
+    begin
+      Quiet := True;
+      Inc(I);
+      Continue;
+    end;
+
+    if ParamStr(I) = '--batch' then
+    begin
+      Batch := True;
+      Inc(I);
+      Continue;
+    end;
+
+    if ParamStr(I) = '-ex' then
+    begin
+      if I + 1 <= ParamCount then
+      begin
+        SetLength(ExCommands, Length(ExCommands) + 1);
+        ExCommands[High(ExCommands)] := ParamStr(I + 1);
+        Inc(I, 2);
+      end
+      else
+      begin
+        WriteLn('[ERROR] -ex requires a command argument');
+        Halt(1);
+      end;
+      Continue;
+    end;
+
+    if ParamStr(I) = '--source' then
+    begin
+      if I + 1 <= ParamCount then
+      begin
+        SetLength(SourceFiles, Length(SourceFiles) + 1);
+        SourceFiles[High(SourceFiles)] := ParamStr(I + 1);
+        Inc(I, 2);
+      end
+      else
+      begin
+        WriteLn('[ERROR] --source requires a filename argument');
+        Halt(1);
+      end;
+      Continue;
+    end;
+
+    Break;
   end;
 
-  if ParamCount < FirstArg then
+  { I now points at the binary path (or past ParamCount if no binary given) }
+  if I > ParamCount then
   begin
-    WriteLn('Usage: pdr [--verbose] [--version] <binary> [<argument> ...]');
+    WriteLn('Usage: pdr [options] <binary> [<argument> ...]');
     WriteLn;
     WriteLn('Debug an Object Pascal program using OPDF debug information.');
     WriteLn;
     WriteLn('Options:');
-    WriteLn('  --version      - Show version information and exit');
-    WriteLn('  --verbose, -v  - Enable diagnostic output at startup');
+    WriteLn('  --version          - Show version information and exit');
+    WriteLn('  --verbose, -v      - Enable diagnostic output at startup');
+    WriteLn('  --quiet, -q        - Suppress the startup banner');
+    WriteLn('  --batch            - Execute -ex commands and quit');
+    WriteLn('  -ex <command>      - Execute command (may be repeated)');
+    WriteLn('  --source <file>    - Execute commands from file');
     WriteLn;
     WriteLn('Arguments:');
-    WriteLn('  <binary>       - Path to the binary to debug');
-    WriteLn('  <argument>     - Command-line arguments to pass to the program');
+    WriteLn('  <binary>           - Path to the binary to debug');
+    WriteLn('  <argument>         - Command-line arguments to pass to the program');
     WriteLn;
     WriteLn('Examples:');
     WriteLn('  pdr ./myprogram');
     WriteLn('  pdr --verbose ./myprogram');
     WriteLn('  pdr ./myprogram arg1 arg2 arg3');
+    WriteLn('  pdr --batch -ex "break main.pas:10" -ex "run" -ex "print x" ./myprogram');
+    WriteLn('  pdr --source debug_script.pdr ./myprogram');
     Halt(1);
   end;
 
-  BinaryPath := ParamStr(FirstArg);
+  BinaryArgIdx := I;
+  BinaryPath := ParamStr(BinaryArgIdx);
 
   if not FileExists(BinaryPath) then
   begin
@@ -1000,16 +1153,18 @@ begin
   end;
 
   { Collect command-line arguments (all parameters after the binary path) }
-  if ParamCount > FirstArg then
+  if ParamCount > BinaryArgIdx then
   begin
-    SetLength(Args, ParamCount - FirstArg);
-    for I := FirstArg + 1 to ParamCount do
-      Args[I - FirstArg - 1] := ParamStr(I);
+    SetLength(Args, ParamCount - BinaryArgIdx);
+    for I := BinaryArgIdx + 1 to ParamCount do
+      Args[I - BinaryArgIdx - 1] := ParamStr(I);
   end;
 
   CLI := TCLIDebugger.Create;
   try
-    CLI.Run(BinaryPath, Args);
+    CLI.FQuiet := Quiet;
+    CLI.FBatch := Batch;
+    CLI.Run(BinaryPath, Args, ExCommands, SourceFiles);
   finally
     CLI.Free;
   end;
