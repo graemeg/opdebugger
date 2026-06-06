@@ -1,0 +1,1066 @@
+= OPDF + PDR Debugger Roadmap
+:author: Graeme Geldenhuys
+:revdate: 2026-06-06
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+
+== Context
+
+OPDF (Object Pascal Debug Format) and PDR (Pascal Debug Reference) were originally
+designed alongside FPC compiler integration. FPC upstream adoption is realistically
+years away, and the project's strategic focus has shifted to the Blaise compiler
+(`/data/devel/new-pascal-compiler`), which is self-hosting, actively developed, and
+already has a working OPDF emitter (`uDebugOPDF.pas`) with 37 unit tests and 4
+end-to-end debugger integration tests.
+
+This roadmap replaces the FPC-centric planning in `progress.adoc` with a
+Blaise-first, multi-platform roadmap aimed at making PDR a practical daily-use
+debugger -- one that could be used to debug the Blaise compiler itself.
+
+=== What Works Today
+
+PDR currently covers a solid core debugging workflow on Linux x86_64:
+
+* Breakpoints (file:line, address, variable name, hit-count conditional)
+* Stepping (over, into)
+* Variable inspection for all Pascal types (primitives, all string types, classes
+  with inheritance, records, arrays, sets, enums, pointers, interfaces)
+* Property evaluation (field-backed inline, method-backed via call injection)
+* Hardware watchpoints (4 slots, write and read/write)
+* Exception break (catch/nocatch with class name and message)
+* Structured inspection (`inspect` command with fields, properties, methods,
+  class vars, class consts)
+* Display list (auto-print on every stop)
+* Call stack display
+* Compile-time constant display
+* 29 passing integration tests
+
+=== What Is Missing for Daily Use
+
+Real-world debugging sessions -- particularly debugging the Blaise compiler --
+reveal critical gaps compared to GDB:
+
+* No `finish` (step out) -- trapped inside a function requires manual breakpointing
+* No `list` (source view) -- must cross-reference source files externally
+* No frame navigation (`up`/`down`/`frame N`) -- cannot inspect variables in
+  caller frames
+* No expression evaluator -- `print A + B` or `print Arr[I]` not possible
+* No `info registers` -- CPU state invisible to the user
+* No batch/script mode -- cannot automate debugging workflows
+* No thread support -- multi-threaded programs behave unpredictably
+* No PIE/ASLR support -- debug builds require `-no-pie`
+* Platform locked to Linux x86_64
+
+---
+
+== Phase 1: Daily-Use Debugger (Target: Q3 2026)
+
+Goal: Make PDR usable as the primary debugger for Blaise compiler development.
+Every item in this phase addresses a gap that a developer hits within the first
+hour of a real debugging session.
+
+=== `finish` / Step Out Command
+
+**Priority: Critical** +
+**Effort: Small (1-2 days)**
+
+Run until the current function returns, then stop. The most commonly needed
+command after `next` and `step`.
+
+Implementation approach::
+Set a temporary breakpoint at the return address (read from `[RBP+8]`), then
+continue. When the breakpoint fires, remove it and report the return value if
+available (RAX for integer/pointer types).
+
+Files affected::
+* `pdr_ports.pas` -- add `StepOut` to `ICommandHandler`
+* `pdr_engine.pas` -- implement `StepOut`: read return address from stack,
+  set temporary breakpoint, continue
+* `pdr_main.pas` -- register `finish`/`fin` command
+* Integration test: `test_30_step_out.pas`
+
+=== Source Listing (`list` Command)
+
+**Priority: Critical** +
+**Effort: Small (1-2 days)**
+
+Display source code around the current stop location, with the current line
+highlighted. Essential for understanding context without leaving the debugger.
+
+Implementation approach::
+Read the source file using the filename from line info. Cache opened files to
+avoid repeated disk I/O. Display a configurable window (default: 5 lines before,
+10 lines after). Show line numbers and mark the current line with `=>`.
+
+----
+(pdr) list
+   23   var
+   24     Token: TToken;
+   25     Expr: TExpr;
+   26   begin
+=> 27     Token := Lexer.NextToken;
+   28     if Token.Kind = tkIdentifier then
+   29       Expr := ParseIdentExpr(Token)
+   30     else
+   31       Error('Expected identifier');
+   32   end;
+----
+
+Files affected::
+* `pdr_engine.pas` -- add `GetSourceLines(Filename, Line, Before, After)` with
+  file caching (a simple `TFPHashList` of `TStringList` instances)
+* `pdr_main.pas` -- register `list`/`l` command; `list` with no argument uses
+  current stop location; `list file.pas:N` shows a specific location
+
+=== Frame Navigation (`up`, `down`, `frame`)
+
+**Priority: Critical** +
+**Effort: Medium (3-4 days)**
+
+Navigate the call stack and inspect variables in any frame, not just the current
+one. Essential for understanding how a function was called and what state the
+caller was in.
+
+Implementation approach::
+Add a "selected frame" concept to the engine. The selected frame consists of an
+RBP value and an RIP value. `up`/`down` walk the RBP chain. All variable
+resolution and source display use the selected frame's RBP/RIP, not the actual
+stopped frame.
+
+----
+(pdr) callstack
+  #0  TParser.ParseExpr at parser.pas:127
+  #1  TParser.ParseStatement at parser.pas:89
+  #2  TParser.ParseBlock at parser.pas:45
+(pdr) up
+  #1  TParser.ParseStatement at parser.pas:89
+(pdr) print Stmt
+  Stmt = TAssignStmt ($0x7fff1234)
+(pdr) frame 0
+  #0  TParser.ParseExpr at parser.pas:127
+----
+
+Files affected::
+* `pdr_engine.pas` -- add `FSelectedFrameIndex`, `FSelectedRBP`, `FSelectedRIP`;
+  modify `EvaluateExpression`, `GetLocalVariables`, `GetInspectLines` to use
+  selected frame; add `SelectFrame(N)`, `FrameUp`, `FrameDown`; auto-reset to
+  frame 0 on continue/step
+* `pdr_main.pas` -- register `up`, `down`, `frame N` commands
+* Integration test: `test_31_frame_navigation.pas`
+
+=== `Pause` (Interrupt Running Program)
+
+**Priority: High** +
+**Effort: Small (1 day)**
+
+Ctrl+C currently sends SIGSTOP to the tracee via the existing signal handler in
+`pdr_linux_ptrace.pas`, but the engine's `Pause` method is stubbed. Wire it
+through properly so the debugger returns to the prompt with the program stopped
+at whatever instruction it was executing.
+
+Files affected::
+* `pdr_engine.pas` -- implement `Pause` (send SIGSTOP via `IProcessController`)
+* `pdr_linux_ptrace.pas` -- verify SIGSTOP handling returns correct stop state
+
+=== Breakpoint Enable/Disable
+
+**Priority: Medium** +
+**Effort: Small (1 day)**
+
+Allow temporarily disabling breakpoints without deleting them.
+
+----
+(pdr) disable 3
+(pdr) enable 3
+----
+
+Files affected::
+* `pdr_ports.pas` -- add `Enabled` field to `TBreakpointEntry`
+* `pdr_engine.pas` -- check `Enabled` in `Continue`; add `EnableBreakpoint`,
+  `DisableBreakpoint`
+* `pdr_main.pas` -- register `enable N`, `disable N` commands
+
+=== Register Display
+
+**Priority: Medium** +
+**Effort: Small (1 day)**
+
+Expose CPU register state to the user. Useful for low-level debugging,
+particularly when investigating code generation issues in the Blaise compiler's
+native backend.
+
+----
+(pdr) info registers
+  RAX = 0x000000000000002A    RBX = 0x00007FFFFFFFE100
+  RCX = 0x0000000000000000    RDX = 0x00000000004012F0
+  RSI = 0x00007FFFFFFFE0D0    RDI = 0x00007FFFFFFFE140
+  RBP = 0x00007FFFFFFFDFE0    RSP = 0x00007FFFFFFFDF90
+  R8  = 0x0000000000000000    R9  = 0x0000000000000001
+  RIP = 0x0000000000401156    RFLAGS = 0x0000000000000206
+----
+
+Files affected::
+* `pdr_main.pas` -- register `info registers`/`info reg` command; format
+  `TRegisters` fields
+
+=== Temporary Breakpoints (`tbreak`)
+
+**Priority: Medium** +
+**Effort: Small (< 1 day)**
+
+Set a breakpoint that automatically removes itself after the first hit. Useful
+for "run until this line" workflows.
+
+Files affected::
+* `pdr_ports.pas` -- add `Temporary: Boolean` to `TBreakpointEntry`
+* `pdr_engine.pas` -- auto-remove in `Continue` after hit
+* `pdr_main.pas` -- register `tbreak` command
+
+=== `until` Command
+
+**Priority: Medium** +
+**Effort: Small (1 day)**
+
+Continue until a specified line is reached (implemented as `tbreak` + `continue`).
+Particularly useful for skipping past a loop: `until` with no argument continues
+until past the current line.
+
+=== Batch/Script Mode
+
+**Priority: High** +
+**Effort: Medium (2-3 days)**
+
+Enable automated debugging workflows. This is how Claude Code and other AI tools
+use debuggers -- command batching with programmatic output capture.
+
+----
+pdr --batch -ex "break parser.pas:127" -ex "run" -ex "print Token" myapp
+pdr --source debug_script.pdr myapp
+----
+
+Implementation approach::
+* `--batch` flag: execute commands from `-ex` arguments, then quit
+* `--source <file>` flag: execute commands from a file
+* `source <file>` interactive command: load and execute commands mid-session
+* Add `--quiet` / `-q` to suppress the banner
+
+Files affected::
+* `pdr_main.pas` -- parse new CLI flags; add `ExecuteScript(Filename)`;
+  refactor `ProcessCommand` to return a result status for batch abort
+
+=== `return` Command
+
+**Priority: Low** +
+**Effort: Medium (2 days)**
+
+Force immediate return from the current function with an optional value. Useful
+for testing different code paths without recompilation.
+
+Implementation approach::
+Restore the caller's frame (RBP := `[RBP]`, RSP := `RBP + 16`, RIP :=
+`[RBP+8]`), optionally set RAX to the specified return value. Must restore the
+original INT3 at any breakpoint at the return address.
+
+---
+
+== Phase 2: Expression Evaluator and Smart Breakpoints (Target: Q4 2026)
+
+Goal: Evaluate arbitrary expressions, enabling conditional breakpoints, computed
+`print` expressions, and richer `display` entries.
+
+=== Expression Evaluator
+
+**Priority: Critical** +
+**Effort: Large (2-3 weeks)**
+
+Support compound expressions in `print`, `display`, `watch`, and conditional
+breakpoints.
+
+----
+(pdr) print Length(Items) - 1
+(pdr) print Items[I * 2 + 1]
+(pdr) print (Token.Kind = tkIdentifier) and (Token.Value = 'begin')
+(pdr) break parser.pas:127 if Token.Kind = tkEOF
+----
+
+The original plan (Feature 9 in `feature-specs.adoc`) proposed integrating FPC's
+`fpexprpars` unit as the arithmetic evaluation core. With the shift to Blaise,
+a custom recursive-descent evaluator is more appropriate -- it avoids FPC library
+dependencies and can be tailored to Pascal semantics.
+
+==== Architecture
+
+Two-stage evaluation:
+
+. **Tokeniser/parser** (`pdr_expr.pas`) -- recursive-descent parser producing a
+  simple AST. Supports:
+  * Arithmetic: `+`, `-`, `*`, `/`, `div`, `mod`, `shl`, `shr`
+  * Comparison: `=`, `<>`, `<`, `>`, `<=`, `>=`
+  * Logical: `and`, `or`, `xor`, `not`
+  * Grouping: `()`
+  * Identifiers with dot notation: `Obj.Field.SubField`
+  * Array indexing: `Arr[Expr]`
+  * Type casting: `Integer(Ptr)`
+  * Literals: integers, hex (`$`/`0x`), floats, strings, `True`/`False`, `nil`
+  * String functions: `Length()`, `Ord()`, `Chr()`, `Pos()`
+  * Size functions: `SizeOf()`, `High()`, `Low()`
+
+. **Evaluator** (`pdr_expr_eval.pas`) -- walks the AST, resolves identifiers
+  through the existing `TTypeSystem.EvaluateVariable` path, performs arithmetic
+  on the result values. All arithmetic is done on `Int64` / `Double` / `string`
+  intermediate values.
+
+==== Variables to resolve
+
+The evaluator calls into the existing type system for variable resolution. The
+result is a typed value (integer, float, string, boolean, pointer, or opaque
+struct). Arithmetic operators work on the numeric/boolean subset.
+
+Files affected::
+* New file: `pdr_expr.pas` (tokeniser + recursive-descent parser)
+* New file: `pdr_expr_eval.pas` (AST evaluator)
+* `pdr_engine.pas` -- replace bare variable lookup in `EvaluateExpression` with
+  expression evaluator call
+* `pdr_main.pas` -- no change (already passes expression string to engine)
+* Integration test: `test_32_expression_eval.pas`
+
+=== Expression-Form Conditional Breakpoints
+
+**Priority: High** +
+**Effort: Small (1-2 days, after 2.1)**
+
+With the expression evaluator in place, support:
+
+----
+(pdr) break parser.pas:127 if Token.Kind = tkEOF
+(pdr) break codegen.pas:500 if Depth > 10
+----
+
+Files affected::
+* `pdr_engine.pas` -- add `ConditionExpr: string` to `TBreakpointEntry`;
+  evaluate in `HandleBreakpointHit`
+* `pdr_main.pas` -- parse `if <expr>` syntax
+
+=== Breakpoint Commands
+
+**Priority: Medium** +
+**Effort: Small (1-2 days)**
+
+Attach a sequence of debugger commands to a breakpoint that execute automatically
+when the breakpoint fires.
+
+----
+(pdr) break parser.pas:127
+Breakpoint 1 at parser.pas:127
+(pdr) commands 1
+  > print Token
+  > print Token.Kind
+  > continue
+  > end
+----
+
+Particularly useful in batch mode for automated data collection.
+
+Files affected::
+* `pdr_ports.pas` -- add `Commands: array of string` to `TBreakpointEntry`
+* `pdr_engine.pas` -- execute command list after breakpoint hit
+* `pdr_main.pas` -- parse `commands N` multi-line input
+
+=== Nested Field Access
+
+**Priority: Medium** +
+**Effort: Small (1-2 days)**
+
+`print Obj.Field1.Field2.Field3` currently does not work beyond one level of
+dot notation. The evaluator (2.1) handles this naturally in its AST, but the
+type system's `ResolveFieldAccess` must also support chained resolution.
+
+Files affected::
+* `pdr_typesys.pas` -- extend `ResolveFieldAccess` to loop through dot chain
+  rather than returning "not yet supported"
+
+---
+
+== Phase 3: Multi-Platform Foundation (Target: Q1 2027)
+
+Goal: Support the platform matrix Blaise targets. This phase builds the
+infrastructure; Phase 4 wires it to specific platforms.
+
+=== Binary Format Abstraction
+
+**Priority: Critical** +
+**Effort: Medium (1 week)**
+
+Replace direct ELF64 dependency with a binary format abstraction layer.
+
+==== Design
+
+[source,pascal]
+----
+IBinaryReader = interface
+  function ExtractSection(const Name: string): TMemoryStream;
+  function FindSymbolAddress(const Name: string): QWord;
+  function GetPointerSize: Byte;
+  function GetArchitecture: TTargetArch;
+end;
+----
+
+Implementations::
+* `TELFReader` -- existing `elf_reader.pas`, extended for ELF32
+* `TPEReader` -- new, for Windows PE/COFF (`.opdf` stored as a named PE section)
+* `TMachOReader` -- new, for macOS Mach-O (`__DATA,__opdf` segment/section)
+
+Detection::
+Factory function reads the first 4 bytes of the binary to determine format:
+`\x7fELF` = ELF, `MZ` = PE, `\xfe\xed\xfa\xce`/`\xcf` = Mach-O.
+
+Files affected::
+* New file: `pdr_binary.pas` -- `IBinaryReader` interface and factory
+* `elf_reader.pas` -- add ELF32 support (TElf32Header, TElf32SectionHeader, etc.)
+* New file: `pe_reader.pas` -- PE/COFF section extraction
+* New file: `macho_reader.pas` -- Mach-O section extraction
+* `pdr_opdf_adapter.pas` -- use `IBinaryReader` instead of direct `elf_reader` calls
+
+=== Process Controller Abstraction
+
+**Priority: Critical** +
+**Effort: Large (2-3 weeks per platform)**
+
+Each target OS needs its own `IProcessController` implementation.
+
+[cols="1,2,2",options="header"]
+|===
+| Platform | API | Key differences from Linux ptrace
+
+| Linux
+| `ptrace(2)` (existing)
+| Baseline implementation
+
+| FreeBSD
+| `ptrace(2)` (similar to Linux)
+| Different constants, `struct reg` instead of `user_regs_struct`,
+  `PT_GETREGS`/`PT_SETREGS` instead of `PTRACE_GETREGS`/`PTRACE_SETREGS`
+
+| Windows
+| Windows Debug API
+| `CreateProcess` with `DEBUG_PROCESS`, `WaitForDebugEvent`,
+  `ReadProcessMemory`/`WriteProcessMemory`, `GetThreadContext`/`SetThreadContext`,
+  hardware breakpoints via `CONTEXT.Dr0-Dr3`
+
+| macOS
+| Mach exception ports
+| `task_for_pid`, `mach_vm_read`/`mach_vm_write`,
+  `thread_get_state`/`thread_set_state`; requires code-signing entitlement
+  (`com.apple.security.get-task-allow`)
+|===
+
+Suggested implementation order::
+. FreeBSD (closest to Linux; shared System V ABI; reuses ELF reader)
+. Windows (largest user base outside Linux; uses PE reader)
+. macOS (requires code-signing infrastructure; uses Mach-O reader)
+
+=== Architecture Adapter Expansion
+
+**Priority: High** +
+**Effort: Small per architecture (1-2 days each)**
+
+Extend `TRegisters` and `IArchAdapter` for each CPU target.
+
+[cols="1,2,2,1",options="header"]
+|===
+| Architecture | Register set | Calling convention | Pointer size
+
+| x86_64
+| RAX-R15, RIP, RFLAGS (existing)
+| System V AMD64 ABI
+| 8
+
+| i386
+| EAX-EDI, EIP, EFLAGS (existing)
+| cdecl
+| 4
+
+| AArch64
+| X0-X30, SP, PC, NZCV
+| AAPCS64
+| 8
+
+| ARM32
+| R0-R15, CPSR
+| AAPCS
+| 4
+|===
+
+Floating-point registers (XMM/NEON) are needed for:
+
+* Method-backed properties returning `Single`/`Double` (return value in XMM0/D0)
+* Future: `info float` command
+
+Files affected::
+* `pdr_ports.pas` -- extend `TRegisters` with `{$IFDEF CPUAARCH64}` and
+  `{$IFDEF CPUARM}` branches; add `TFPRegisters` for floating-point state
+* `pdr_arch_adapters.pas` -- add `TArchAArch64Adapter`, `TArchARMAdapter`
+
+=== PIE/ASLR Support
+
+**Priority: High** +
+**Effort: Small-Medium (2-3 days)**
+
+OPDF addresses are currently absolute, requiring `-no-pie` builds. This is
+the single most impactful portability fix: every modern OS defaults to PIE,
+and some (macOS) require it.
+
+Implementation approach::
+At program start (after the first `waitpid` returns the initial stop), read
+the load base address and compute the ASLR slide:
+
+[cols="1,3",options="header"]
+|===
+| Platform | Method
+
+| Linux
+| Parse `/proc/<pid>/maps`; find entry matching binary path
+
+| FreeBSD
+| `sysctl(KERN_PROC_VMMAP, pid)` or `procstat_getprocs`
+
+| Windows
+| `EnumProcessModules` + `GetModuleInformation` for base address
+
+| macOS
+| `task_info(TASK_DYLD_INFO)` or parse Mach-O load commands
+|===
+
+All OPDF addresses are then adjusted: `RuntimeAddr = OPDFAddr + LoadBase`.
+
+Files affected::
+* `pdr_linux_ptrace.pas` (and future platform controllers) -- read load base
+  after initial stop
+* `pdr_opdf_adapter.pas` -- apply slide offset in all address comparisons
+* `pdr_engine.pas` -- pass load base to adapter at program start
+* Blaise compiler: remove `-no-pie` guard in `CompileToNative`
+
+=== Fix Hardcoded Pointer Sizes
+
+**Priority: High** +
+**Effort: Medium (2-3 days)**
+
+Multiple type evaluators in `pdr_typesys.pas` hardcode 8-byte pointer reads.
+These break on 32-bit targets (i386, ARM32) even though `TOPDFHeader.PointerSize`
+carries the correct value.
+
+Affected evaluators::
+* `TPointerEvaluator` -- `ReadMemory(addr, 8, ...)`
+* `TClassEvaluator` -- pointer dereference for VMT, parent class, fields
+* `TAnsiStringEvaluator` -- string pointer read
+* `TUnicodeStringEvaluator` -- string pointer read
+* `TDynamicArrayEvaluator` -- array base pointer read
+* `TInterfaceEvaluator` -- interface pointer read
+
+Fix: thread `GetPointerSize` through all evaluators (it is already available on
+`TTypeSystem` via the `IArchAdapter`).
+
+=== `recUnwindInfo` (Record Type 24)
+
+**Priority: Medium** +
+**Effort: Small-Medium (3-4 days)**
+
+Per-function unwind rules for stack walking without frame pointers. Fully
+designed in `docs/profiler-design.adoc`. This is a prerequisite for:
+
+* Correct stack walking in optimised code
+* The Blaise sampling profiler
+* Debugging through system library frames (libc, etc.)
+* ARM32 targets (no guaranteed frame pointers)
+
+Implementation order::
+. Add `TDefUnwindInfo` to `opdf_types.pas` and `ReadUnwindInfo`/`WriteUnwindInfo`
+  to `opdf_io.pas`
+. Add dump handler to `opdf_dump.pas` (update `MAX_REC_TYPE`)
+. Add `FindUnwindRuleByAddress` to `pdr_opdf_adapter.pas`
+. Emit from Blaise compiler in `uDebugOPDF.pas`
+. Use in stack walker (replace direct `[RBP]`/`[RBP+8]` with rule-based resolution)
+
+---
+
+== Phase 4: Real-World Robustness (Target: Q2 2027)
+
+Goal: Handle the messy realities of debugging real programs -- threads, signals,
+shared libraries, and mixed-language stacks.
+
+=== Thread Support
+
+**Priority: High** +
+**Effort: Large (2-3 weeks)**
+
+The Blaise compiler is currently single-threaded, but any non-trivial application
+(and eventually the compiler itself, for parallel compilation) will use threads.
+GDB-level thread support is not needed immediately, but the foundation must be in
+place.
+
+Minimum viable thread support::
+* List all threads (`info threads`)
+* Switch between threads for inspection (`thread N`)
+* Break on thread creation/exit events
+* All-stop mode (when any thread hits a breakpoint, all threads stop)
+
+Implementation approach::
+* Linux: `PTRACE_SETOPTIONS` with `PTRACE_O_TRACECLONE` to track new threads
+* Maintain a thread list in the engine with per-thread register state
+* Selected thread concept (analogous to selected frame)
+
+Files affected::
+* `pdr_ports.pas` -- add `TThreadInfo`, `GetThreadList`, `SwitchThread` to
+  `IProcessController`
+* `pdr_linux_ptrace.pas` -- handle `PTRACE_EVENT_CLONE`, maintain thread list,
+  coordinate all-stop mode
+* `pdr_engine.pas` -- add `FSelectedThread`; thread-aware variable resolution
+* `pdr_main.pas` -- register `info threads`, `thread N` commands
+
+=== Signal/Exception Handling Framework
+
+**Priority: Medium** +
+**Effort: Medium (1 week)**
+
+Provide GDB-style signal handling configuration:
+
+----
+(pdr) handle SIGSEGV stop print
+(pdr) handle SIGPIPE nostop noprint pass
+(pdr) info signals
+----
+
+Currently, `pdr_linux_ptrace.pas` has a hardcoded list of "benign" vs "fatal"
+signals. This should be user-configurable, with sensible defaults.
+
+=== Memory Examination
+
+**Priority: Medium** +
+**Effort: Small (2 days)**
+
+Raw memory examination for low-level debugging:
+
+----
+(pdr) x/16xb 0x7fff1234      -- 16 bytes in hex
+(pdr) x/4xw 0x7fff1234       -- 4 words in hex
+(pdr) x/s 0x7fff1234         -- null-terminated string
+(pdr) x/i 0x401000           -- disassemble instructions
+----
+
+This is essential for debugging code generation issues in the native backend.
+
+=== Disassembly
+
+**Priority: Medium** +
+**Effort: Medium (1 week)**
+
+Display disassembled instructions around the current stop location or at a
+specified address. For debugging the Blaise native backend, this is as
+important as source listing.
+
+Implementation approach::
+Integrate a minimal x86_64 disassembler (or use an external library). Show
+interleaved source and assembly when debug info is available.
+
+----
+(pdr) disassemble
+  0x401150  push   %rbp
+  0x401151  mov    %rsp,%rbp
+  0x401154  sub    $0x20,%rsp
+  0x401158  mov    %rdi,-0x8(%rbp)      ; Self
+=>0x40115c  mov    -0x8(%rbp),%rax
+  0x401160  mov    0x10(%rax),%rax      ; Self.FLexer
+  0x401164  mov    %rax,%rdi
+  0x401167  call   0x401200             ; TLexer.NextToken
+----
+
+=== `whatis` / `ptype` Commands
+
+**Priority: Low** +
+**Effort: Small (1 day)**
+
+Show type information without evaluating:
+
+----
+(pdr) whatis Token
+  Token: TToken (record, 24 bytes)
+(pdr) ptype TToken
+  TToken = record
+    Kind: TTokenKind (enum, 4 bytes)
+    Value: string
+    Line: Integer
+    Col: Integer
+  end;
+----
+
+Files affected::
+* `pdr_engine.pas` -- add `GetTypeDescription(TypeID)` using existing
+  `IDebugInfoReader.FindTypeByID`
+* `pdr_main.pas` -- register `whatis <var>` and `ptype <type>` commands
+
+=== Shared Library Debug Info
+
+**Priority: Low** +
+**Effort: Medium (1 week)**
+
+When a debugged program loads shared libraries (`.so` on Linux, `.dll` on
+Windows, `.dylib` on macOS), load their OPDF sections if present.
+
+Implementation approach::
+* Monitor `dlopen` events (Linux: set breakpoint on `_dl_debug_state`)
+* Read library load address from `r_debug` structure
+* Load OPDF section from each new library
+* Apply per-library address base offset
+
+=== Core Dump Analysis
+
+**Priority: Low** +
+**Effort: Medium (1 week)**
+
+Load core dumps for post-mortem debugging:
+
+----
+pdr myapp core.12345
+----
+
+Read register state and memory from the core file's ELF `PT_NOTE` and
+`PT_LOAD` segments. No process control needed -- all inspection is read-only.
+
+---
+
+== Phase 5: OPDF Format Extensions (Ongoing)
+
+These are additions to the OPDF binary format specification (`opdf-specification.adoc`)
+that expand the debugger's capabilities. Each extension requires changes to both
+the format library (`opdf_types.pas`, `opdf_io.pas`) and the Blaise compiler's
+emitter (`uDebugOPDF.pas`).
+
+=== `recUnwindInfo` (Type 24) -- Covered in Phase 3
+
+=== Variant Record Support
+
+**Priority: Medium** +
+**Effort: Medium (1 week)**
+
+Extend `recRecord` (type 8) with variant group descriptors, or define a new
+`recVariantPart` record type. The debugger needs to know which variant is
+currently active (by reading the tag/discriminant field value) to display only
+the relevant fields.
+
+This is relevant for Blaise once variant records are implemented in the
+language.
+
+=== Object Type Support (Old-Style)
+
+**Priority: Low** +
+**Effort: Small (2-3 days)**
+
+FPC's old-style `object` type (stack-allocated, with VMT) uses a different
+layout from `class`. If Blaise adopts or encounters old-style objects (e.g.
+FreeVision TUI), OPDF needs a way to distinguish them.
+
+Option A: extend `recClass` with a flag indicating "object vs class". +
+Option B: define `recObject` (type 25) with its own layout description.
+
+=== Generic Type Representation
+
+**Priority: Low** +
+**Effort: Medium (1-2 weeks)**
+
+Generics are monomorphised in both FPC and Blaise, producing concrete types like
+`TList$1$TTOKEN`. The debugger should display these as `TList<TToken>`.
+
+Approach A (demangling)::
+Add generic demangling rules to `opdf_demangle.pas`. This requires no format
+change -- just smarter name parsing.
+
+Approach B (format extension)::
+Add a `recGenericInst` record that carries the template name and type parameter
+TypeIDs, allowing the debugger to render `TList<TToken>` with clickable type
+navigation in a future GUI.
+
+Recommendation: start with Approach A (demangling only). It solves the display
+problem without format changes.
+
+=== Thread-Local Variable Support
+
+**Priority: Low** +
+**Effort: Small (2-3 days)**
+
+When Blaise gains threading, thread-local variables (`threadvar`) need a
+location expression that uses the thread-local storage (TLS) base address
+rather than a fixed global address.
+
+Add `LocationExpr = 4` for TLS variables. The debugger reads the TLS base
+from the appropriate platform mechanism (`fs` segment on Linux x86_64,
+`__tls_get_addr`, etc.).
+
+=== Register-Allocated Variables
+
+**Priority: Low (becomes High with optimised builds)** +
+**Effort: Medium (1 week)**
+
+When the compiler allocates a variable to a register (no stack spill), OPDF
+needs to express this. Currently specified as `LocationExpr = 3` with a
+register number.
+
+This is primarily relevant for the Blaise native backend, which may allocate
+variables to registers. The QBE backend always spills to the stack (QBE
+handles register allocation opaquely), but the native backend's register
+allocator would benefit from this.
+
+=== Inline Function Scope Markers
+
+**Priority: Low** +
+**Effort: Small (2-3 days)**
+
+When a function is inlined, its `recFunctionScope` address range is embedded
+within the caller. The debugger should know that the inlined scope is logically
+a different function (for call stack display and variable scoping).
+
+Add an `Inlined: Boolean` flag to `recFunctionScope`, or define a
+`recInlinedScope` record type that references the original function scope.
+
+=== Debug Info Compression
+
+**Priority: Low** +
+**Effort: Medium (1 week)**
+
+For large projects (10,000+ types), the `.opdf` section can reach several
+megabytes. A simple compression scheme (e.g. LZ4 on the payload, with a
+compressed-section header) would reduce binary size without significantly
+impacting load time.
+
+Not urgent -- the 104-unit FPC test project is 6.4 MB, which is acceptable.
+Revisit when Blaise projects routinely exceed 20 MB of debug info.
+
+---
+
+== Phase 6: Developer Experience (Target: Q3 2027)
+
+Goal: Quality-of-life features that make PDR pleasant to use daily.
+
+=== Command History and Line Editing
+
+**Priority: High** +
+**Effort: Medium (1 week)**
+
+Use GNU Readline (or a Pascal equivalent like `linenoise`) for:
+
+* Command history (up/down arrows)
+* Line editing (cursor movement, delete, insert)
+* History search (Ctrl+R)
+* Tab completion for commands, filenames, and variable names
+
+=== Machine Interface (MI) Protocol
+
+**Priority: Medium** +
+**Effort: Large (3-4 weeks)**
+
+A structured output protocol for IDE integration. Without this, IDE debugger
+integration requires screen-scraping PDR's human-readable output.
+
+Options::
+* **GDB/MI compatible**: Maximum ecosystem reuse -- VS Code, CLion, Emacs, and
+  every other IDE already speaks GDB/MI. Implementing a compatible subset
+  (`-exec-run`, `-exec-next`, `-exec-step`, `-exec-continue`, `-break-insert`,
+  `-data-evaluate-expression`, `-stack-list-frames`, `-var-create`) gives
+  instant IDE support.
+* **DAP (Debug Adapter Protocol)**: Microsoft's standard for VS Code debugger
+  extensions. More modern but requires a DAP adapter layer.
+* **Custom JSON**: Simplest to implement but requires per-IDE adapter code.
+
+Recommendation: GDB/MI compatible subset. It provides the widest IDE
+compatibility with the least integration work.
+
+=== TUI Mode
+
+**Priority: Low** +
+**Effort: Large (3-4 weeks)**
+
+Terminal UI with split panes showing source, registers, and debugger output
+simultaneously:
+
+----
++-- source -------- parser.pas:127 -----------+
+|   25   begin                                 |
+|   26     Token := Lexer.NextToken;           |
+|=> 27     if Token.Kind = tkIdentifier then   |
+|   28       Expr := ParseIdentExpr(Token)     |
+|   29     else                                |
++-- locals -------- TParser.ParseExpr ---------+
+| Token = TToken (record)                      |
+| Expr  = nil                                  |
++-- command -------(pdr) ----------------------+
+| (pdr) _                                      |
++----------------------------------------------+
+----
+
+Uses ncurses or a pure-Pascal terminal library. Deferred until the command
+set is stable.
+
+=== Configuration File
+
+**Priority: Low** +
+**Effort: Small (2 days)**
+
+Load user preferences from `~/.pdrrc` or `.pdrrc` in the project directory:
+
+----
+set list-lines 15
+set prompt (debug)
+handle SIGPIPE nostop noprint pass
+alias ll = locals
+alias bt = callstack
+----
+
+=== Pretty Printers
+
+**Priority: Low** +
+**Effort: Medium (1-2 weeks)**
+
+User-defined display formatters for custom types. When the built-in evaluators
+produce unhelpful output for complex data structures, a pretty-printer can
+transform it.
+
+The simplest approach: a `.pdr-printers` file with pattern-matching rules:
+
+----
+type TFPList
+  display "TFPList (Count=%d)" [print Self.FCount]
+  children Self.FList[0..Self.FCount-1]
+end
+----
+
+---
+
+== Phase 7: Language Completeness and Edge Cases (Ongoing)
+
+These are language-specific features that improve Pascal debugging fidelity.
+They are lower priority than the daily-workflow features in Phases 1-2 but
+are needed for complete language coverage.
+
+=== Variant Type (`Variant`) Support
+
+Add `recVariant` record type to OPDF. The debugger decodes the `TVarType`
+discriminant and displays the active variant value.
+
+=== Array Element Assignment
+
+Extend `set` to support `set Arr[N] = value`. Parse `VarName[Index]` syntax,
+compute element address, write value. Partially specified in `progress.adoc`
+as Feature 4b.
+
+=== Enum-Keyed Array Bounds
+
+Display `array[TDay] of Integer` bounds as `[Mon..Sun]` instead of `[0..6]`.
+Requires resolving the array's index type to its enum definition and using
+enum member names.
+
+=== WideChar Display
+
+Implement `skWideChar` handling in `TPrimitiveEvaluator` -- currently falls
+through to unsigned integer display.
+
+=== Extended Float Portability
+
+`TFloatEvaluator` assumes 10-byte `Extended` (x86-specific). On AArch64,
+`Extended` is 8 bytes (same as `Double`). Add architecture-conditional
+sizing.
+
+=== Class Inherited Field Display
+
+`TClassEvaluator` only shows the declared class's own fields. Walk the parent
+chain and display inherited fields in separate sections:
+
+----
+(pdr) print MyObj
+  TMyClass:
+    FMyField = 42
+  inherited TParent:
+    FParentField = 'hello'
+  inherited TObject:
+    (no fields)
+----
+
+=== Remaining Constant Kinds
+
+Extend `appendsym_const` / OPDF emitter for: `constset`, `constguid`,
+`constpointer`, `constresourcestring`, `constwresourcestring`.
+
+=== Array Constants in OPDF
+
+Emit array-typed constants (e.g. `const Days: array[0..6] of string = (...)`)
+as a new `ConstKind` (`ckArray`). Requires encoding the element list in the
+OPDF constant record. See `TODO.txt` for the motivating example.
+
+---
+
+== Cross-Cutting Concerns
+
+=== Blaise Compiler OPDF Parity
+
+As the Blaise language evolves, its OPDF emitter (`uDebugOPDF.pas`) must keep
+pace. The Blaise `CLAUDE.md` already mandates reviewing the emitter when new
+types or declarations are added. Key areas to watch:
+
+* Per-statement line information (currently function-start only; needs QBE
+  label support or native backend statement-level granularity)
+* Parameter records (emitted but currently skipped by the PDR adapter)
+* Native backend OPDF emission (not yet implemented)
+
+=== Performance
+
+Two known O(n) bottlenecks in `pdr_opdf_adapter.pas`:
+
+* **Line info lookup** (`FindAddressByLine`, `FindLineByAddress`) -- unsorted
+  linear scan. Sort at load time and use binary search.
+* **Function scope lookup** (`FindFunctionByAddress`) -- linear scan for every
+  RIP query. Build an interval tree or sorted array at load time.
+
+Both become noticeable with the 70K+ line entries from a 104-unit project.
+
+=== Test Infrastructure
+
+Maintain integration test parity between FPC-compiled and Blaise-compiled test
+programs. The Blaise compiler already has 4 e2e debugger tests; these should
+grow to match the 29 tests in the PDR test suite as Blaise language coverage
+expands.
+
+---
+
+== Summary: Priority Order
+
+[cols="1,3,2,1",options="header"]
+|===
+| # | Feature | Phase | Effort
+
+| 1  | `finish` (step out)                     | Phase 1 | S
+| 2  | Source listing (`list`)                  | Phase 1 | S
+| 3  | Frame navigation (`up`/`down`/`frame`)  | Phase 1 | M
+| 4  | Batch/script mode                       | Phase 1 | M
+| 5  | `Pause` implementation                  | Phase 1 | S
+| 6  | Breakpoint enable/disable               | Phase 1 | S
+| 7  | Register display                        | Phase 1 | S
+| 8  | Expression evaluator                    | Phase 2 | L
+| 9  | Expression-form conditionals            | Phase 2 | S
+| 10 | PIE/ASLR support                        | Phase 3 | M
+| 11 | Fix hardcoded pointer sizes             | Phase 3 | M
+| 12 | Binary format abstraction (ELF32/PE/Mach-O) | Phase 3 | M
+| 13 | `recUnwindInfo` (type 24)               | Phase 3 | M
+| 14 | FreeBSD process controller              | Phase 3 | L
+| 15 | Windows process controller              | Phase 3 | L
+| 16 | Thread support (basic)                  | Phase 4 | L
+| 17 | Memory examination / disassembly        | Phase 4 | M
+| 18 | Command history / readline              | Phase 6 | M
+| 19 | GDB/MI protocol subset                  | Phase 6 | L
+| 20 | macOS process controller                | Phase 3 | L
+|===
+
+Effort key: S = 1-2 days, M = 3-7 days, L = 2+ weeks.
+
+Items 1-7 form the minimum set for a usable daily debugger. Items 8-9 unlock
+the most-requested debugging capability. Items 10-13 are the multi-platform
+foundation. The remainder builds out the full feature set over time.
