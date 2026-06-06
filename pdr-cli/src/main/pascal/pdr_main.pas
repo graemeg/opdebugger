@@ -72,6 +72,7 @@ begin
   WriteLn('  continue, c    - Continue execution');
   WriteLn('  next, n        - Step over: next source line, skipping into calls');
   WriteLn('  step, s        - Step into: next source line, descending into calls');
+  WriteLn('  finish, fin    - Step out: run until current function returns');
   WriteLn('  break <loc>    - Set breakpoint at location');
   WriteLn('  break <loc> if count=N - Set breakpoint that fires on Nth hit');
   WriteLn('    Location formats:');
@@ -264,6 +265,13 @@ begin
     'step', 's':
       begin
         FEngine.StepInto;
+        PrintExceptionInfo;
+        PrintDisplayList;
+      end;
+
+    'finish', 'fin':
+      begin
+        FEngine.StepOut;
         PrintExceptionInfo;
         PrintDisplayList;
       end;

@@ -83,6 +83,7 @@ type
     function StepLine: Boolean;
     function StepInto: Boolean;
     function StepOver: Boolean;
+    function StepOut: Boolean;
     function Pause: Boolean;
 
     { ICommandHandler - Breakpoints }
@@ -699,6 +700,115 @@ function TDebuggerEngine.StepOver: Boolean;
 begin
   { StepOver is an alias for StepLine (step to next source line, skipping over calls) }
   Result := StepLine;
+end;
+
+function TDebuggerEngine.StepOut: Boolean;
+var
+  Regs: TRegisters;
+  ReturnAddr: QWord;
+  TempBp: TBreakpointHandle;
+  CurrentAddr: QWord;
+  CurrentLine: TLineInfo;
+  FuncInfo: TFunctionInfo;
+  AtEntry: Boolean;
+begin
+  Result := False;
+  FLastException.IsValid := False;
+
+  if FState <> dsPaused then
+  begin
+    WriteLn('[ERROR] Process is not paused');
+    Exit;
+  end;
+
+  if not FProcessController.GetRegisters(Regs) then
+  begin
+    WriteLn('[ERROR] Failed to read registers');
+    Exit;
+  end;
+
+  {$IFDEF CPUX86_64}
+  AtEntry := False;
+  if FDebugInfoReader.FindFunctionByAddress(Regs.RIP, FuncInfo) then
+    AtEntry := (Regs.RIP = FuncInfo.LowPC);
+
+  if AtEntry then
+  begin
+    if not FProcessController.ReadMemory(Regs.RSP, 8, ReturnAddr) then
+    begin
+      WriteLn('[ERROR] Failed to read return address from stack');
+      Exit;
+    end;
+  end
+  else
+  begin
+    if not FProcessController.ReadMemory(Regs.RBP + 8, 8, ReturnAddr) then
+    begin
+      WriteLn('[ERROR] Failed to read return address from stack');
+      Exit;
+    end;
+  end;
+  {$ENDIF}
+  {$IFDEF CPUI386}
+  AtEntry := False;
+  if FDebugInfoReader.FindFunctionByAddress(Regs.EIP, FuncInfo) then
+    AtEntry := (Regs.EIP = FuncInfo.LowPC);
+
+  if AtEntry then
+  begin
+    if not FProcessController.ReadMemory(Regs.ESP, 4, ReturnAddr) then
+    begin
+      WriteLn('[ERROR] Failed to read return address from stack');
+      Exit;
+    end;
+  end
+  else
+  begin
+    if not FProcessController.ReadMemory(Regs.EBP + 4, 4, ReturnAddr) then
+    begin
+      WriteLn('[ERROR] Failed to read return address from stack');
+      Exit;
+    end;
+  end;
+  {$ENDIF}
+
+  if gVerbose then
+    WriteLn('[DEBUG] StepOut: return address = 0x', IntToHex(ReturnAddr, 1));
+
+  TempBp := SetBreakpoint('0x' + IntToHex(ReturnAddr, 1));
+  if TempBp = -1 then
+  begin
+    WriteLn('[ERROR] Failed to set breakpoint at return address');
+    Exit;
+  end;
+
+  if not FProcessController.Continue then
+  begin
+    WriteLn('[ERROR] Failed to continue');
+    if FState = dsPaused then
+      RemoveBreakpoint(TempBp);
+    Exit;
+  end;
+
+  if FProcessController.GetCurrentAddress = 0 then
+  begin
+    WriteLn('[INFO] Process terminated during step-out');
+    FState := dsTerminated;
+    Result := True;
+    Exit;
+  end;
+
+  CurrentAddr := FProcessController.GetLastBreakpointAddress;
+  if CurrentAddr = 0 then
+    CurrentAddr := FProcessController.GetCurrentAddress;
+
+  if FDebugInfoReader.FindLineByAddress(CurrentAddr, CurrentLine) then
+    WriteLn('[INFO] Stepped to line: ', CurrentLine.FileName, ':', CurrentLine.LineNumber)
+  else
+    WriteLn('[INFO] Stepped out to: 0x', IntToHex(CurrentAddr, 1));
+
+  RemoveBreakpoint(TempBp);
+  Result := True;
 end;
 
 function TDebuggerEngine.Pause: Boolean;

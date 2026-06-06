@@ -422,6 +422,7 @@ type
     function StepLine: Boolean;
     function StepInto: Boolean;
     function StepOver: Boolean;
+    function StepOut: Boolean;
     function Pause: Boolean;
 
     { Breakpoints }
