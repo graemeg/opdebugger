@@ -1,0 +1,5 @@
+run
+break test_31_list.pas:9
+continue
+list
+quit

@@ -37,6 +37,7 @@ type
     procedure PrintHelp;
     procedure PrintDisplayList;
     procedure PrintExceptionInfo;
+    function HandleListCommand(const Parts: TStringArray): TStringArray;
     procedure ProcessCommand(const CmdLine: String);
   public
     constructor Create;
@@ -73,6 +74,8 @@ begin
   WriteLn('  next, n        - Step over: next source line, skipping into calls');
   WriteLn('  step, s        - Step into: next source line, descending into calls');
   WriteLn('  finish, fin    - Step out: run until current function returns');
+  WriteLn('  list, l        - Show source around current stop location');
+  WriteLn('  list file:N    - Show source around line N of file');
   WriteLn('  break <loc>    - Set breakpoint at location');
   WriteLn('  break <loc> if count=N - Set breakpoint that fires on Nth hit');
   WriteLn('    Location formats:');
@@ -130,6 +133,75 @@ begin
     WriteLn('  raised at ', Exc.SourceFile, ':', Exc.SourceLine)
   else if Exc.RaiseAddr <> 0 then
     WriteLn('  raised at $', HexStr(Exc.RaiseAddr, 16));
+end;
+
+function TCLIDebugger.HandleListCommand(const Parts: TStringArray): TStringArray;
+var
+  Regs: TRegisters;
+  LineInfo: TLineInfo;
+  ColonPos: Integer;
+  FileName: String;
+  LineNum: Integer;
+  CurrentAddr: QWord;
+begin
+  SetLength(Result, 0);
+  if Length(Parts) > 1 then
+  begin
+    ColonPos := Pos(':', Parts[1]);
+    if ColonPos > 0 then
+    begin
+      FileName := Copy(Parts[1], 1, ColonPos - 1);
+      if not TryStrToInt(Copy(Parts[1], ColonPos + 1, Length(Parts[1])), LineNum) then
+      begin
+        SetLength(Result, 1);
+        Result[0] := '[ERROR] Invalid line number: ' + Copy(Parts[1], ColonPos + 1, Length(Parts[1]));
+        Exit;
+      end;
+    end
+    else
+    begin
+      SetLength(Result, 1);
+      Result[0] := '[ERROR] Usage: list [file.pas:line]';
+      Exit;
+    end;
+  end
+  else
+  begin
+    if FEngine.State <> dsPaused then
+    begin
+      SetLength(Result, 1);
+      Result[0] := '[ERROR] Process is not paused (use: list file.pas:line)';
+      Exit;
+    end;
+
+    {$IFDEF CPUX86_64}
+    CurrentAddr := 0;
+    if FProcessController.GetRegisters(Regs) then
+      CurrentAddr := Regs.RIP;
+    {$ENDIF}
+    {$IFDEF CPUI386}
+    CurrentAddr := 0;
+    if FProcessController.GetRegisters(Regs) then
+      CurrentAddr := Regs.EIP;
+    {$ENDIF}
+    if CurrentAddr = 0 then
+    begin
+      SetLength(Result, 1);
+      Result[0] := '[ERROR] Cannot determine current address';
+      Exit;
+    end;
+
+    if not FDebugInfoReader.FindLineByAddress(CurrentAddr, LineInfo) then
+    begin
+      SetLength(Result, 1);
+      Result[0] := '[ERROR] No source information for current address';
+      Exit;
+    end;
+    FileName := LineInfo.FileName;
+    LineNum := LineInfo.LineNumber;
+  end;
+
+  Result := FEngine.GetSourceLines(FileName, LineNum);
 end;
 
 { Parse "VarName[N..M]" slice notation from a print expression.
@@ -632,6 +704,13 @@ begin
         else
           WriteLn('[INFO] Verbose mode is ', BoolToStr(gVerbose, 'on', 'off'),
                   '. Use: verbose on|off');
+      end;
+
+    'list', 'l':
+      begin
+        CallStack := HandleListCommand(Parts);
+        for I := 0 to High(CallStack) do
+          WriteLn(CallStack[I]);
       end;
 
   else

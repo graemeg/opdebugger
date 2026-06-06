@@ -58,12 +58,14 @@ type
     FRaiseBreakpointAddr: QWord;     // Address of fpc_raiseexception (0 = not set)
     FCatchExceptions: Boolean;        // Break on raise (default: True)
     FLastException: TExceptionInfo;  // Cleared on each Run/Continue/Step; set in HandleExceptionBreakpoint
+    FSourceCache: TStringList;       // File cache: Name=filepath, Objects[]=TStringList of lines
 
     { Helper methods for breakpoint management }
     function ParseLocation(const Location: String; out Address: QWord): Boolean;
     function FindBreakpointByHandle(Handle: TBreakpointHandle): Integer;
     function FindBreakpointByAddress(Address: QWord): Integer;
     procedure HandleExceptionBreakpoint;
+    function LoadSourceFile(const FileName: String): TStringList;
   public
     constructor Create(AProcessController: IProcessController;
                       ADebugInfoReader: IDebugInfoReader;
@@ -118,6 +120,10 @@ type
     function SetVariable(const VarName, Value: String): Boolean;
     function GetCallStack(Limit: Integer = 0): TStringArray;
 
+    { Source listing }
+    function GetSourceLines(const FileName: String; Line: Integer;
+      Before: Integer = 5; After: Integer = 10): TStringArray;
+
     { ICommandHandler - State query }
     function GetState: TDebuggerState;
 
@@ -149,6 +155,10 @@ begin
   SetLength(FBreakpoints, 0);
   FRaiseBreakpointAddr := 0;
   FCatchExceptions := True;
+  FSourceCache := TStringList.Create;
+  FSourceCache.OwnsObjects := True;
+  FSourceCache.Sorted := True;
+  FSourceCache.Duplicates := dupIgnore;
 
   // Create type system and register evaluators
   FTypeSystem := TTypeSystem.Create(FProcessController, FDebugInfoReader);
@@ -172,6 +182,7 @@ begin
   if FState <> dsIdle then
     Detach;
 
+  FSourceCache.Free;
   FTypeSystem.Free;
   inherited Destroy;
 end;
@@ -2204,6 +2215,82 @@ begin
     RetAddr := Cardinal(FrameBuffer[1]);
   end;
   {$ENDIF}
+end;
+
+{ Source listing }
+
+function TDebuggerEngine.LoadSourceFile(const FileName: String): TStringList;
+var
+  Idx: Integer;
+  Lines: TStringList;
+begin
+  Idx := FSourceCache.IndexOf(FileName);
+  if Idx >= 0 then
+  begin
+    Result := TStringList(FSourceCache.Objects[Idx]);
+    Exit;
+  end;
+
+  Lines := TStringList.Create;
+  try
+    Lines.LoadFromFile(FileName);
+  except
+    on E: Exception do
+    begin
+      Lines.Free;
+      Result := nil;
+      Exit;
+    end;
+  end;
+  FSourceCache.AddObject(FileName, Lines);
+  Result := Lines;
+end;
+
+function TDebuggerEngine.GetSourceLines(const FileName: String; Line: Integer;
+  Before: Integer = 5; After: Integer = 10): TStringArray;
+var
+  Lines: TStringList;
+  StartLine, EndLine, I: Integer;
+  LineNum: Integer;
+  Marker: String;
+begin
+  SetLength(Result, 0);
+  Lines := LoadSourceFile(FileName);
+  if Lines = nil then
+  begin
+    SetLength(Result, 1);
+    Result[0] := '[ERROR] Cannot read source file: ' + FileName;
+    Exit;
+  end;
+
+  if (Line < 1) or (Line > Lines.Count) then
+  begin
+    SetLength(Result, 1);
+    Result[0] := '[ERROR] Line ' + IntToStr(Line) + ' out of range (file has '
+               + IntToStr(Lines.Count) + ' lines)';
+    Exit;
+  end;
+
+  StartLine := Line - Before;
+  if StartLine < 1 then
+    StartLine := 1;
+  EndLine := Line + After;
+  if EndLine > Lines.Count then
+    EndLine := Lines.Count;
+
+  SetLength(Result, EndLine - StartLine + 1);
+  for I := StartLine to EndLine do
+  begin
+    LineNum := I;
+    if LineNum = Line then
+      Marker := '=>'
+    else
+      Marker := '  ';
+    if Lines[LineNum - 1] = '' then
+      Result[I - StartLine] := Format('%s %4d', [Marker, LineNum])
+    else
+      Result[I - StartLine] := Format('%s %4d  %s', [Marker, LineNum, Lines[LineNum - 1]]);
+  end;
 end;
 
 { State query }
