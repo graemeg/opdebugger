@@ -19,7 +19,7 @@ uses
 
 type
   { Breakpoint condition type }
-  TBreakpointConditionType = (bctNone, bctHitCount);
+  TBreakpointConditionType = (bctNone, bctHitCount, bctExpression);
 
   { Breakpoint tracking record }
   TBreakpointEntry = record
@@ -32,6 +32,7 @@ type
     ConditionType: TBreakpointConditionType;
     HitCount: Integer;         // Target hit count (fire on Nth hit)
     CurrentHitCount: Integer;  // Running counter
+    ConditionExpr: String;     // Expression for bctExpression conditions
   end;
 
   { Watchpoint tracking record }
@@ -76,6 +77,7 @@ type
     procedure BuildFrameCache;
     procedure ResetSelectedFrame;
     procedure ApplyFrameOverrides;
+    function EvaluateConditionExpr(const Expr: String): Boolean;
   public
     constructor Create(AProcessController: IProcessController;
                       ADebugInfoReader: IDebugInfoReader;
@@ -106,6 +108,8 @@ type
     { Conditional breakpoint support }
     function SetBreakpointCondition(Handle: TBreakpointHandle;
       CondType: TBreakpointConditionType; Count: Integer): Boolean;
+    function SetBreakpointExprCondition(Handle: TBreakpointHandle;
+      const Expr: String): Boolean;
     function EnableBreakpoint(Handle: TBreakpointHandle): Boolean;
     function DisableBreakpoint(Handle: TBreakpointHandle): Boolean;
     procedure SetTemporary(Handle: TBreakpointHandle);
@@ -436,22 +440,45 @@ begin
     if ConditionMet and (BpAddr <> 0) then
     begin
       Idx := FindBreakpointByAddress(BpAddr);
-      if (Idx >= 0) and (FBreakpoints[Idx].ConditionType = bctHitCount) then
+      if Idx >= 0 then
       begin
-        Inc(FBreakpoints[Idx].CurrentHitCount);
-        if FBreakpoints[Idx].CurrentHitCount <> FBreakpoints[Idx].HitCount then
-        begin
-          ConditionMet := False;
-          if gVerbose then
-            WriteLn('[DEBUG] Breakpoint #', FBreakpoints[Idx].Handle,
-                    ' hit count: ', FBreakpoints[Idx].CurrentHitCount,
-                    '/', FBreakpoints[Idx].HitCount, ' - continuing');
-        end
-        else
-        begin
-          if gVerbose then
-            WriteLn('[DEBUG] Breakpoint #', FBreakpoints[Idx].Handle,
-                    ' hit count reached: ', FBreakpoints[Idx].CurrentHitCount);
+        case FBreakpoints[Idx].ConditionType of
+          bctHitCount:
+          begin
+            Inc(FBreakpoints[Idx].CurrentHitCount);
+            if FBreakpoints[Idx].CurrentHitCount <> FBreakpoints[Idx].HitCount then
+            begin
+              ConditionMet := False;
+              if gVerbose then
+                WriteLn('[DEBUG] Breakpoint #', FBreakpoints[Idx].Handle,
+                        ' hit count: ', FBreakpoints[Idx].CurrentHitCount,
+                        '/', FBreakpoints[Idx].HitCount, ' - continuing');
+            end
+            else
+            begin
+              if gVerbose then
+                WriteLn('[DEBUG] Breakpoint #', FBreakpoints[Idx].Handle,
+                        ' hit count reached: ', FBreakpoints[Idx].CurrentHitCount);
+            end;
+          end;
+          bctExpression:
+          begin
+            Inc(FBreakpoints[Idx].CurrentHitCount);
+            ConditionMet := EvaluateConditionExpr(FBreakpoints[Idx].ConditionExpr);
+            if not ConditionMet then
+            begin
+              if gVerbose then
+                WriteLn('[DEBUG] Breakpoint #', FBreakpoints[Idx].Handle,
+                        ' condition false (hits: ', FBreakpoints[Idx].CurrentHitCount,
+                        ') - continuing');
+            end
+            else
+            begin
+              if gVerbose then
+                WriteLn('[DEBUG] Breakpoint #', FBreakpoints[Idx].Handle,
+                        ' condition true (hits: ', FBreakpoints[Idx].CurrentHitCount, ')');
+            end;
+          end;
         end;
       end;
     end;
@@ -1358,6 +1385,45 @@ begin
   Result := True;
 end;
 
+function TDebuggerEngine.SetBreakpointExprCondition(Handle: TBreakpointHandle;
+  const Expr: String): Boolean;
+var
+  Idx: Integer;
+  Parser: TExprParser;
+  AST: TExprNode;
+begin
+  Result := False;
+
+  Idx := FindBreakpointByHandle(Handle);
+  if Idx < 0 then
+  begin
+    WriteLn('[ERROR] Breakpoint #', Handle, ' not found');
+    Exit;
+  end;
+
+  Parser := TExprParser.Create(Expr);
+  try
+    try
+      AST := Parser.Parse;
+      AST.Free;
+    except
+      on E: EExprParseError do
+      begin
+        WriteLn('[ERROR] Invalid condition expression: ', E.Message);
+        Exit;
+      end;
+    end;
+  finally
+    Parser.Free;
+  end;
+
+  FBreakpoints[Idx].ConditionType := bctExpression;
+  FBreakpoints[Idx].ConditionExpr := Expr;
+  FBreakpoints[Idx].CurrentHitCount := 0;
+  WriteLn('[INFO] Breakpoint #', Handle, ' condition set: if ', Expr);
+  Result := True;
+end;
+
 function TDebuggerEngine.EnableBreakpoint(Handle: TBreakpointHandle): Boolean;
 var
   Idx: Integer;
@@ -1452,11 +1518,18 @@ begin
     if FBreakpoints[I].Temporary then
       S := S + '   (temporary)';
 
-    if FBreakpoints[I].ConditionType = bctHitCount then
-      S := S + Format('   count=%d (hits: %d)', [
-        FBreakpoints[I].HitCount,
-        FBreakpoints[I].CurrentHitCount
-      ]);
+    case FBreakpoints[I].ConditionType of
+      bctHitCount:
+        S := S + Format('   count=%d (hits: %d)', [
+          FBreakpoints[I].HitCount,
+          FBreakpoints[I].CurrentHitCount
+        ]);
+      bctExpression:
+        S := S + Format('   if %s (hits: %d)', [
+          FBreakpoints[I].ConditionExpr,
+          FBreakpoints[I].CurrentHitCount
+        ]);
+    end;
 
     SetLength(Result, Length(Result) + 1);
     Result[High(Result)] := S;
@@ -2656,6 +2729,22 @@ begin
   FFrameCacheValid := False;
   FTypeSystem.OverrideRBP := 0;
   FTypeSystem.OverrideRIP := 0;
+end;
+
+function TDebuggerEngine.EvaluateConditionExpr(const Expr: String): Boolean;
+var
+  Val: TVariableValue;
+  LVal: String;
+begin
+  Val := EvaluateExpression(Expr);
+  if not Val.IsValid then
+  begin
+    WriteLn('[WARNING] Condition evaluation failed: ', Val.Value, ' — stopping');
+    Result := True;
+    Exit;
+  end;
+  LVal := LowerCase(Trim(Val.Value));
+  Result := (LVal <> '0') and (LVal <> 'false') and (LVal <> 'nil') and (LVal <> '');
 end;
 
 procedure TDebuggerEngine.ApplyFrameOverrides;

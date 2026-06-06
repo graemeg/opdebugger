@@ -40,7 +40,8 @@ PDR currently covers a solid core debugging workflow on Linux x86_64:
 * Batch/script mode (`--batch`, `-ex`, `--source`, `source`, `--quiet`)
 * `return` command (force immediate return with optional value)
 * Expression evaluator (arithmetic, comparison, logic, function calls, type casts)
-* 35 passing integration tests
+* Expression-form conditional breakpoints (`break file:N if <expr>`, `condition N <expr>`)
+* 36 passing integration tests
 
 === What Is Missing for Daily Use
 
@@ -324,7 +325,7 @@ Files affected::
 * `pdr_main.pas` -- no change (already passes expression string to engine)
 * Integration test: `test_32_expression_eval.pas`
 
-=== Expression-Form Conditional Breakpoints
+=== ✅ Expression-Form Conditional Breakpoints
 
 **Priority: High** +
 **Effort: Small (1-2 days, after 2.1)**

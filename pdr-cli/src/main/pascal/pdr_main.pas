@@ -517,14 +517,14 @@ begin
       begin
         if Length(Parts) < 2 then
         begin
-          WriteLn('[ERROR] Usage: break <location> [if count=N]');
+          WriteLn('[ERROR] Usage: break <location> [if <expr>]');
           WriteLn('[INFO] Location can be: hex address (0xNNNN), decimal address, or variable name');
           Exit;
         end;
 
         BpHandle := FEngine.SetBreakpoint(Parts[1]);
 
-        { Check for 'if count=N' condition }
+        { Check for 'if ...' condition }
         if (BpHandle >= 0) and (Length(Parts) >= 4) and
            (LowerCase(Parts[2]) = 'if') then
         begin
@@ -538,8 +538,13 @@ begin
               WriteLn('[ERROR] Invalid hit count: ', Copy(Parts[3], 7, Length(Parts[3])));
           end
           else
-            WriteLn('[ERROR] Unsupported condition: ', Parts[3],
-                    '. Use: count=N');
+          begin
+            { Expression condition: extract everything after 'if' from CmdLine }
+            I := Pos(' if ', LowerCase(CmdLine));
+            if I > 0 then
+              FEngine.SetBreakpointExprCondition(BpHandle,
+                Trim(Copy(CmdLine, I + 4, Length(CmdLine))));
+          end;
         end;
       end;
 
@@ -595,7 +600,7 @@ begin
       begin
         if Length(Parts) < 2 then
         begin
-          WriteLn('[ERROR] Usage: condition <bp-num> [count=N]');
+          WriteLn('[ERROR] Usage: condition <bp-num> [count=N | <expr>]');
           Exit;
         end;
 
@@ -607,7 +612,6 @@ begin
 
         if Length(Parts) >= 3 then
         begin
-          { Set condition: condition N count=K }
           if (Length(Parts[2]) > 6) and
              (LowerCase(Copy(Parts[2], 1, 6)) = 'count=') then
           begin
@@ -618,8 +622,16 @@ begin
               WriteLn('[ERROR] Invalid hit count: ', Copy(Parts[2], 7, Length(Parts[2])));
           end
           else
-            WriteLn('[ERROR] Unsupported condition: ', Parts[2],
-                    '. Use: count=N');
+          begin
+            { Expression condition: everything after bp-num }
+            I := Pos(Parts[1], CmdLine);
+            if I > 0 then
+            begin
+              I := I + Length(Parts[1]);
+              FEngine.SetBreakpointExprCondition(BpNum,
+                Trim(Copy(CmdLine, I, Length(CmdLine))));
+            end;
+          end;
         end
         else
         begin
