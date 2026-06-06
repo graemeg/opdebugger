@@ -26,6 +26,7 @@ type
     Address: QWord;
     Location: String;  // Original location string (for display)
     Active: Boolean;
+    Enabled: Boolean;
     ConditionType: TBreakpointConditionType;
     HitCount: Integer;         // Target hit count (fire on Nth hit)
     CurrentHitCount: Integer;  // Running counter
@@ -102,6 +103,8 @@ type
     { Conditional breakpoint support }
     function SetBreakpointCondition(Handle: TBreakpointHandle;
       CondType: TBreakpointConditionType; Count: Integer): Boolean;
+    function EnableBreakpoint(Handle: TBreakpointHandle): Boolean;
+    function DisableBreakpoint(Handle: TBreakpointHandle): Boolean;
     function GetBreakpointList: TStringArray;
 
     { Display list (auto-print on every stop) }
@@ -1154,6 +1157,7 @@ begin
       if FProcessController.SetBreakpoint(Address) then
       begin
         FBreakpoints[Idx].Active := True;
+        FBreakpoints[Idx].Enabled := True;
         Result := FBreakpoints[Idx].Handle;
         if gVerbose then WriteLn('[INFO] Breakpoint #', Result, ' reactivated at 0x', IntToHex(Address, 16));
       end;
@@ -1173,6 +1177,7 @@ begin
   Entry.Address := Address;
   Entry.Location := Location;
   Entry.Active := True;
+  Entry.Enabled := True;
   Entry.ConditionType := bctNone;
   Entry.HitCount := 0;
   Entry.CurrentHitCount := 0;
@@ -1259,6 +1264,67 @@ begin
   Result := True;
 end;
 
+function TDebuggerEngine.EnableBreakpoint(Handle: TBreakpointHandle): Boolean;
+var
+  Idx: Integer;
+begin
+  Result := False;
+  Idx := FindBreakpointByHandle(Handle);
+  if Idx < 0 then
+  begin
+    WriteLn('[ERROR] Breakpoint #', Handle, ' not found');
+    Exit;
+  end;
+
+  if FBreakpoints[Idx].Enabled then
+  begin
+    WriteLn('[INFO] Breakpoint #', Handle, ' already enabled');
+    Result := True;
+    Exit;
+  end;
+
+  if FBreakpoints[Idx].Active then
+  begin
+    if not FProcessController.SetBreakpoint(FBreakpoints[Idx].Address) then
+    begin
+      WriteLn('[ERROR] Failed to re-insert breakpoint at 0x',
+              IntToHex(FBreakpoints[Idx].Address, 16));
+      Exit;
+    end;
+  end;
+
+  FBreakpoints[Idx].Enabled := True;
+  WriteLn('[INFO] Breakpoint #', Handle, ' enabled');
+  Result := True;
+end;
+
+function TDebuggerEngine.DisableBreakpoint(Handle: TBreakpointHandle): Boolean;
+var
+  Idx: Integer;
+begin
+  Result := False;
+  Idx := FindBreakpointByHandle(Handle);
+  if Idx < 0 then
+  begin
+    WriteLn('[ERROR] Breakpoint #', Handle, ' not found');
+    Exit;
+  end;
+
+  if not FBreakpoints[Idx].Enabled then
+  begin
+    WriteLn('[INFO] Breakpoint #', Handle, ' already disabled');
+    Result := True;
+    Exit;
+  end;
+
+  if FBreakpoints[Idx].Active then
+    FProcessController.RemoveBreakpoint(FBreakpoints[Idx].Address);
+
+  FBreakpoints[Idx].Enabled := False;
+  WriteLn('[INFO] Breakpoint #', Handle, ' disabled');
+  Result := True;
+end;
+
 function TDebuggerEngine.GetBreakpointList: TStringArray;
 var
   I: Integer;
@@ -1267,12 +1333,18 @@ begin
   SetLength(Result, 0);
   for I := 0 to High(FBreakpoints) do
   begin
-    S := Format('#%-3d 0x%016X  %-30s %s', [
-      FBreakpoints[I].Handle,
-      FBreakpoints[I].Address,
-      FBreakpoints[I].Location,
-      BoolToStr(FBreakpoints[I].Active, 'active', 'inactive')
-    ]);
+    if not FBreakpoints[I].Enabled then
+      S := Format('#%-3d 0x%016X  %-30s disabled', [
+        FBreakpoints[I].Handle,
+        FBreakpoints[I].Address,
+        FBreakpoints[I].Location])
+    else
+      S := Format('#%-3d 0x%016X  %-30s %s', [
+        FBreakpoints[I].Handle,
+        FBreakpoints[I].Address,
+        FBreakpoints[I].Location,
+        BoolToStr(FBreakpoints[I].Active, 'active', 'inactive')
+      ]);
 
     if FBreakpoints[I].ConditionType = bctHitCount then
       S := S + Format('   count=%d (hits: %d)', [

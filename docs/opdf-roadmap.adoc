@@ -162,7 +162,7 @@ Files affected::
 * `pdr_engine.pas` -- implement `Pause` (send SIGSTOP via `IProcessController`)
 * `pdr_linux_ptrace.pas` -- verify SIGSTOP handling returns correct stop state
 
-=== Breakpoint Enable/Disable
+=== ✅ Breakpoint Enable/Disable
 
 **Priority: Medium** +
 **Effort: Small (1 day)**

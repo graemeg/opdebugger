@@ -87,6 +87,8 @@ begin
   WriteLn('      MyGlobalInt        - Variable name');
   WriteLn('  condition <num> count=N - Set/change hit-count condition');
   WriteLn('  condition <num>  - Remove condition (make unconditional)');
+  WriteLn('  enable <num>   - Enable a disabled breakpoint');
+  WriteLn('  disable <num>  - Disable breakpoint without deleting');
   WriteLn('  delete <num>   - Remove breakpoint by number');
   WriteLn('  info breakpoints - List all breakpoints with conditions');
   WriteLn('  locals         - List local variables in current function');
@@ -421,6 +423,36 @@ begin
             WriteLn('[ERROR] Unsupported condition: ', Parts[3],
                     '. Use: count=N');
         end;
+      end;
+
+    'enable':
+      begin
+        if Length(Parts) < 2 then
+        begin
+          WriteLn('[ERROR] Usage: enable <breakpoint_number>');
+          Exit;
+        end;
+        if not TryStrToInt(Parts[1], BpNum) then
+        begin
+          WriteLn('[ERROR] Invalid breakpoint number: ', Parts[1]);
+          Exit;
+        end;
+        FEngine.EnableBreakpoint(BpNum);
+      end;
+
+    'disable':
+      begin
+        if Length(Parts) < 2 then
+        begin
+          WriteLn('[ERROR] Usage: disable <breakpoint_number>');
+          Exit;
+        end;
+        if not TryStrToInt(Parts[1], BpNum) then
+        begin
+          WriteLn('[ERROR] Invalid breakpoint number: ', Parts[1]);
+          Exit;
+        end;
+        FEngine.DisableBreakpoint(BpNum);
       end;
 
     'delete', 'd':
