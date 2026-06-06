@@ -42,7 +42,8 @@ PDR currently covers a solid core debugging workflow on Linux x86_64:
 * Expression evaluator (arithmetic, comparison, logic, function calls, type casts)
 * Expression-form conditional breakpoints (`break file:N if <expr>`, `condition N <expr>`)
 * Breakpoint commands (`commands N` to auto-execute on hit, including auto-continue)
-* 37 passing integration tests
+* Multi-level nested field access (`Obj.Inner.Value`, `Rect.TopLeft.XPos`)
+* 38 passing integration tests
 
 === What Is Missing for Daily Use
 
@@ -368,7 +369,7 @@ Files affected::
 * `pdr_engine.pas` -- execute command list after breakpoint hit
 * `pdr_main.pas` -- parse `commands N` multi-line input
 
-=== Nested Field Access
+=== ✅ Nested Field Access
 
 **Priority: Medium** +
 **Effort: Small (1-2 days)**

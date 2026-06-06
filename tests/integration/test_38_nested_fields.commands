@@ -1,0 +1,10 @@
+run
+break test_38_nested_fields.pas:50
+continue
+print Rect.TopLeft.XPos
+print Rect.TopLeft.YPos
+print Rect.BottomRight.XPos
+print Rect.BottomRight.YPos
+print Obj.Name
+print Obj.Inner.Value
+quit

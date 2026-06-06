@@ -1484,114 +1484,109 @@ begin
     Exit;
   end;
 
-  { Split field path for potential nested access }
-  DotPos := Pos('.', FieldPath);
-  if DotPos > 0 then
+  { Iteratively resolve field chain: Obj.Field1.Field2.Field3 }
+  RemainingPath := FieldPath;
+  while True do
   begin
-    FieldName := Copy(FieldPath, 1, DotPos - 1);
-    RemainingPath := Copy(FieldPath, DotPos + 1, Length(FieldPath));
-  end
-  else
-  begin
-    FieldName := FieldPath;
-    RemainingPath := '';
-  end;
-
-  { Handle class types — dereference instance pointer first }
-  if (TypeInfo.Category = tcClass) and (TypeInfo.ClassInfo <> nil) then
-  begin
-    { Read instance pointer }
-    FillChar(PointerBuf, SizeOf(PointerBuf), 0);
-    if not FProcessController.ReadMemory(VarInfo.Address, 8, PointerBuf) then
+    DotPos := Pos('.', RemainingPath);
+    if DotPos > 0 then
     begin
-      Result.Value := '<error: failed to read instance pointer>';
-      Exit;
-    end;
-    InstancePtr := PQWord(@PointerBuf)^;
-    if InstancePtr = 0 then
+      FieldName := Copy(RemainingPath, 1, DotPos - 1);
+      RemainingPath := Copy(RemainingPath, DotPos + 1, Length(RemainingPath));
+    end
+    else
     begin
-      Result.Value := 'nil';
-      Result.IsValid := True;
-      Exit;
+      FieldName := RemainingPath;
+      RemainingPath := '';
     end;
 
-    Fields := TypeInfo.ClassInfo^.Fields;
-
-    { Find the matching field (case-insensitive) }
-    Found := False;
-    for I := 0 to High(Fields) do
+    if (TypeInfo.Category = tcClass) and (TypeInfo.ClassInfo <> nil) then
     begin
-      if CompareText(Fields[I].Name, FieldName) = 0 then
+      FillChar(PointerBuf, SizeOf(PointerBuf), 0);
+      if not FProcessController.ReadMemory(VarInfo.Address, 8, PointerBuf) then
       begin
-        FieldVarInfo.Name := Fields[I].Name;
-        FieldVarInfo.TypeID := Fields[I].TypeID;
-        FieldVarInfo.Address := InstancePtr + Fields[I].Offset;
-        FieldVarInfo.LocationExpr := 0;
-        FieldVarInfo.LocationData := 0;
-        Found := True;
-        Break;
+        Result.Value := '<error: failed to read instance pointer>';
+        Exit;
       end;
-    end;
-
-    if not Found then
-    begin
-      { Not a direct field — check properties, walking up the inheritance chain }
-      Result := ResolveClassProperty(TypeInfo, InstancePtr, FieldName);
-      if Result.IsValid then
-        Result.Name := BaseName + '.' + FieldName
-      else
-        Result.Value := '<error: field or property "' + FieldName + '" not found>';
-      Exit;
-    end;
-
-    if RemainingPath <> '' then
-    begin
-      { TODO: nested field access }
-      Result.Value := '<error: nested field access not yet supported>';
-      Exit;
-    end;
-
-    Result := EvaluateVariableInfo(FieldVarInfo);
-    Result.Name := BaseName + '.' + FieldName;
-  end
-  { Handle record types — direct memory access }
-  else if (TypeInfo.Category = tcRecord) and (TypeInfo.RecordInfo <> nil) then
-  begin
-    Fields := TypeInfo.RecordInfo^.Fields;
-
-    Found := False;
-    for I := 0 to High(Fields) do
-    begin
-      if CompareText(Fields[I].Name, FieldName) = 0 then
+      InstancePtr := PQWord(@PointerBuf)^;
+      if InstancePtr = 0 then
       begin
-        FieldVarInfo.Name := Fields[I].Name;
-        FieldVarInfo.TypeID := Fields[I].TypeID;
-        FieldVarInfo.Address := VarInfo.Address + Fields[I].Offset;
-        FieldVarInfo.LocationExpr := 0;
-        FieldVarInfo.LocationData := 0;
-        Found := True;
-        Break;
+        Result.Value := 'nil';
+        Result.IsValid := True;
+        Exit;
       end;
-    end;
 
-    if not Found then
+      Fields := TypeInfo.ClassInfo^.Fields;
+
+      Found := False;
+      for I := 0 to High(Fields) do
+      begin
+        if CompareText(Fields[I].Name, FieldName) = 0 then
+        begin
+          FieldVarInfo.Name := Fields[I].Name;
+          FieldVarInfo.TypeID := Fields[I].TypeID;
+          FieldVarInfo.Address := InstancePtr + Fields[I].Offset;
+          FieldVarInfo.LocationExpr := 0;
+          FieldVarInfo.LocationData := 0;
+          Found := True;
+          Break;
+        end;
+      end;
+
+      if not Found then
+      begin
+        Result := ResolveClassProperty(TypeInfo, InstancePtr, FieldName);
+        if Result.IsValid then
+          Result.Name := BaseName + '.' + FieldPath
+        else
+          Result.Value := '<error: field or property "' + FieldName + '" not found>';
+        Exit;
+      end;
+    end
+    else if (TypeInfo.Category = tcRecord) and (TypeInfo.RecordInfo <> nil) then
     begin
-      Result.Value := '<error: field "' + FieldName + '" not found>';
+      Fields := TypeInfo.RecordInfo^.Fields;
+
+      Found := False;
+      for I := 0 to High(Fields) do
+      begin
+        if CompareText(Fields[I].Name, FieldName) = 0 then
+        begin
+          FieldVarInfo.Name := Fields[I].Name;
+          FieldVarInfo.TypeID := Fields[I].TypeID;
+          FieldVarInfo.Address := VarInfo.Address + Fields[I].Offset;
+          FieldVarInfo.LocationExpr := 0;
+          FieldVarInfo.LocationData := 0;
+          Found := True;
+          Break;
+        end;
+      end;
+
+      if not Found then
+      begin
+        Result.Value := '<error: field "' + FieldName + '" not found>';
+        Exit;
+      end;
+    end
+    else
+    begin
+      Result.Value := '<error: type does not support field access>';
       Exit;
     end;
 
-    if RemainingPath <> '' then
+    if RemainingPath = '' then
     begin
-      Result.Value := '<error: nested field access not yet supported>';
+      Result := EvaluateVariableInfo(FieldVarInfo);
+      Result.Name := BaseName + '.' + FieldPath;
       Exit;
     end;
 
-    Result := EvaluateVariableInfo(FieldVarInfo);
-    Result.Name := BaseName + '.' + FieldName;
-  end
-  else
-  begin
-    Result.Value := '<error: type does not support field access>';
+    if not FDebugInfoReader.FindType(FieldVarInfo.TypeID, TypeInfo) then
+    begin
+      Result.Value := '<error: type not found for nested access>';
+      Exit;
+    end;
+    VarInfo := FieldVarInfo;
   end;
 end;
 
