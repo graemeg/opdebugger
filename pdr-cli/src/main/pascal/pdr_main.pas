@@ -80,6 +80,7 @@ begin
   WriteLn('  down           - Select callee frame (move down the call stack)');
   WriteLn('  frame <N>      - Select frame N (0 = innermost/current)');
   WriteLn('  break <loc>    - Set breakpoint at location');
+  WriteLn('  tbreak <loc>   - Set temporary breakpoint (auto-removed after first hit)');
   WriteLn('  break <loc> if count=N - Set breakpoint that fires on Nth hit');
   WriteLn('    Location formats:');
   WriteLn('      file.pas:22        - Source file and line number');
@@ -395,6 +396,18 @@ begin
           else
             WriteLn('[ERROR] ', VarValue.Value);
         end;
+      end;
+
+    'tbreak', 'tb':
+      begin
+        if Length(Parts) < 2 then
+        begin
+          WriteLn('[ERROR] Usage: tbreak <location>');
+          Exit;
+        end;
+        BpHandle := FEngine.SetBreakpoint(Parts[1]);
+        if BpHandle >= 0 then
+          FEngine.SetTemporary(BpHandle);
       end;
 
     'break', 'b':

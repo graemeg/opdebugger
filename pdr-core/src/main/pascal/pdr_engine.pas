@@ -27,6 +27,7 @@ type
     Location: String;  // Original location string (for display)
     Active: Boolean;
     Enabled: Boolean;
+    Temporary: Boolean;
     ConditionType: TBreakpointConditionType;
     HitCount: Integer;         // Target hit count (fire on Nth hit)
     CurrentHitCount: Integer;  // Running counter
@@ -105,6 +106,7 @@ type
       CondType: TBreakpointConditionType; Count: Integer): Boolean;
     function EnableBreakpoint(Handle: TBreakpointHandle): Boolean;
     function DisableBreakpoint(Handle: TBreakpointHandle): Boolean;
+    procedure SetTemporary(Handle: TBreakpointHandle);
     function GetBreakpointList: TStringArray;
 
     { Display list (auto-print on every stop) }
@@ -452,6 +454,14 @@ begin
       end;
     end;
   until ConditionMet;
+
+  { Auto-remove temporary breakpoints after they fire }
+  if BpAddr <> 0 then
+  begin
+    Idx := FindBreakpointByAddress(BpAddr);
+    if (Idx >= 0) and FBreakpoints[Idx].Temporary then
+      RemoveBreakpoint(FBreakpoints[Idx].Handle);
+  end;
 
   if gVerbose then
     WriteLn('[INFO] Process stopped and ready for commands');
@@ -1178,6 +1188,7 @@ begin
   Entry.Location := Location;
   Entry.Active := True;
   Entry.Enabled := True;
+  Entry.Temporary := False;
   Entry.ConditionType := bctNone;
   Entry.HitCount := 0;
   Entry.CurrentHitCount := 0;
@@ -1325,6 +1336,15 @@ begin
   Result := True;
 end;
 
+procedure TDebuggerEngine.SetTemporary(Handle: TBreakpointHandle);
+var
+  Idx: Integer;
+begin
+  Idx := FindBreakpointByHandle(Handle);
+  if Idx >= 0 then
+    FBreakpoints[Idx].Temporary := True;
+end;
+
 function TDebuggerEngine.GetBreakpointList: TStringArray;
 var
   I: Integer;
@@ -1345,6 +1365,9 @@ begin
         FBreakpoints[I].Location,
         BoolToStr(FBreakpoints[I].Active, 'active', 'inactive')
       ]);
+
+    if FBreakpoints[I].Temporary then
+      S := S + '   (temporary)';
 
     if FBreakpoints[I].ConditionType = bctHitCount then
       S := S + Format('   count=%d (hits: %d)', [

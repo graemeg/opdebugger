@@ -203,7 +203,7 @@ Files affected::
 * `pdr_main.pas` -- register `info registers`/`info reg` command; format
   `TRegisters` fields
 
-=== Temporary Breakpoints (`tbreak`)
+=== ✅ Temporary Breakpoints (`tbreak`)
 
 **Priority: Medium** +
 **Effort: Small (< 1 day)**
