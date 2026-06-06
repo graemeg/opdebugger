@@ -14,7 +14,8 @@ unit pdr_engine;
 interface
 
 uses
-  Classes, SysUtils, Math, pdr_ports, pdr_typesys, opdf_types, elf_reader;
+  Classes, SysUtils, Math, pdr_ports, pdr_typesys, pdr_expr, pdr_expr_eval,
+  opdf_types, elf_reader;
 
 type
   { Breakpoint condition type }
@@ -1670,6 +1671,11 @@ end;
 { Inspection }
 
 function TDebuggerEngine.EvaluateExpression(const Expr: String): TVariableValue;
+var
+  Parser: TExprParser;
+  AST: TExprNode;
+  Evaluator: TExprEvaluator;
+  ExprVal: TExprValue;
 begin
   Result.Name := Expr;
   Result.IsValid := False;
@@ -1681,9 +1687,50 @@ begin
     Exit;
   end;
 
-  // For MVP, we only support simple variable names
-  // TODO: Support complex expressions (e.g., MyVar.Field, MyArray[5])
-  Result := FTypeSystem.EvaluateVariable(Expr);
+  Parser := TExprParser.Create(Expr);
+  try
+    try
+      AST := Parser.Parse;
+    except
+      on E: EExprParseError do
+      begin
+        Result.Value := E.Message;
+        Exit;
+      end;
+    end;
+
+    try
+      if (AST.Kind = enkIdent) and (Pos('.', Expr) = 0) then
+      begin
+        Result := FTypeSystem.EvaluateVariable(Expr);
+        Exit;
+      end;
+
+      Evaluator := TExprEvaluator.Create(FTypeSystem, FDebugInfoReader,
+        @EvaluateArraySlice);
+      try
+        try
+          ExprVal := Evaluator.Evaluate(AST);
+          Result.Name := Expr;
+          Result.Value := Evaluator.FormatValue(ExprVal);
+          Result.TypeName := ExprVal.TypeName;
+          Result.IsValid := True;
+        except
+          on E: EExprEvalError do
+          begin
+            Result.Value := E.Message;
+            Exit;
+          end;
+        end;
+      finally
+        Evaluator.Free;
+      end;
+    finally
+      AST.Free;
+    end;
+  finally
+    Parser.Free;
+  end;
 end;
 
 function TDebuggerEngine.GetLocalVariables: TVariableValueArray;

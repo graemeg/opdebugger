@@ -1,0 +1,16 @@
+IntA + IntB = 13
+IntA * IntB = 30
+IntA - IntB = 7
+IntA div IntB = 3
+IntA mod IntB = 1
+IntA + IntB * 2 = 16
+(IntA + IntB) * 2 = 26
+-IntA = -10
+IntA > IntB = True
+IntA = IntB = False
+IntA <> IntB = True
+BoolFlag and True = True
+not BoolFlag = False
+IntA shl 2 = 40
+Arr[2] = 300
+Length(MyStr) = 5

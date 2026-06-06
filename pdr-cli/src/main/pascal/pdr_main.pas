@@ -468,12 +468,18 @@ begin
       begin
         if Length(Parts) < 2 then
         begin
-          WriteLn('[ERROR] Usage: print <variable>');
+          WriteLn('[ERROR] Usage: print <expression>');
           Exit;
         end;
 
+        { Reconstruct full expression: everything after the command word }
+        I := Length(Parts[0]) + 1;
+        while (I <= Length(CmdLine)) and (CmdLine[I] in [' ', #9]) do
+          Inc(I);
+        VarValue.Name := Copy(CmdLine, I, Length(CmdLine) - I + 1);
+
         { Check for array slice notation: VarName[N..M] }
-        if TryParseSlice(Parts[1], SliceVarName, SliceLow, SliceHigh) then
+        if TryParseSlice(VarValue.Name, SliceVarName, SliceLow, SliceHigh) then
         begin
           SliceResult := FEngine.EvaluateArraySlice(SliceVarName, SliceLow, SliceHigh);
           for I := 0 to High(SliceResult) do
@@ -486,7 +492,7 @@ begin
         end
         else
         begin
-          VarValue := FEngine.EvaluateExpression(Parts[1]);
+          VarValue := FEngine.EvaluateExpression(VarValue.Name);
 
           if VarValue.IsValid then
             WriteLn(VarValue.Name, ' = ', VarValue.Value)
