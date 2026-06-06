@@ -41,7 +41,8 @@ PDR currently covers a solid core debugging workflow on Linux x86_64:
 * `return` command (force immediate return with optional value)
 * Expression evaluator (arithmetic, comparison, logic, function calls, type casts)
 * Expression-form conditional breakpoints (`break file:N if <expr>`, `condition N <expr>`)
-* 36 passing integration tests
+* Breakpoint commands (`commands N` to auto-execute on hit, including auto-continue)
+* 37 passing integration tests
 
 === What Is Missing for Daily Use
 
@@ -342,7 +343,7 @@ Files affected::
   evaluate in `HandleBreakpointHit`
 * `pdr_main.pas` -- parse `if <expr>` syntax
 
-=== Breakpoint Commands
+=== ✅ Breakpoint Commands
 
 **Priority: Medium** +
 **Effort: Small (1-2 days)**

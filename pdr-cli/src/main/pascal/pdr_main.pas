@@ -40,6 +40,7 @@ type
     procedure PrintHelp;
     procedure PrintDisplayList;
     procedure PrintExceptionInfo;
+    procedure RunBreakpointCommands;
     function HandleListCommand(const Parts: TStringArray): TStringArray;
     function ProcessCommand(const CmdLine: String): Boolean;
     function ExecuteScript(const Filename: String): Boolean;
@@ -149,6 +150,22 @@ begin
     WriteLn('  raised at ', Exc.SourceFile, ':', Exc.SourceLine)
   else if Exc.RaiseAddr <> 0 then
     WriteLn('  raised at $', HexStr(Exc.RaiseAddr, 16));
+end;
+
+procedure TCLIDebugger.RunBreakpointCommands;
+var
+  Cmds: TStringArray;
+  I: Integer;
+begin
+  if FEngine.GetState <> dsPaused then
+    Exit;
+  Cmds := FEngine.GetHitBreakpointCommands;
+  for I := 0 to High(Cmds) do
+  begin
+    if FEngine.GetState <> dsPaused then
+      Break;
+    ProcessCommand(Cmds[I]);
+  end;
 end;
 
 function TCLIDebugger.HandleListCommand(const Parts: TStringArray): TStringArray;
@@ -299,6 +316,8 @@ var
   CurrentAddr: QWord;
   FoundNextLine: Boolean;
   I: Integer;
+  CmdList: TStringArray;
+  Line: String;
 begin
   Result := True;
 
@@ -373,6 +392,7 @@ begin
         FEngine.Continue;
         PrintExceptionInfo;
         PrintDisplayList;
+        RunBreakpointCommands;
       end;
 
     'next', 'n':
@@ -407,6 +427,7 @@ begin
             FEngine.Continue;
             PrintExceptionInfo;
             PrintDisplayList;
+            RunBreakpointCommands;
           end;
         end
         else
@@ -430,6 +451,7 @@ begin
                   FEngine.Continue;
                   PrintExceptionInfo;
                   PrintDisplayList;
+                  RunBreakpointCommands;
                   FoundNextLine := True;
                 end;
                 Break;
@@ -638,6 +660,36 @@ begin
           { Remove condition: condition N }
           FEngine.SetBreakpointCondition(BpNum, bctNone, 0);
         end;
+      end;
+
+    'commands':
+      begin
+        if Length(Parts) < 2 then
+        begin
+          WriteLn('[ERROR] Usage: commands <bp-num>');
+          Exit;
+        end;
+
+        if not TryStrToInt(Parts[1], BpNum) then
+        begin
+          WriteLn('[ERROR] Invalid breakpoint number: ', Parts[1]);
+          Exit;
+        end;
+
+        { Read command lines until 'end' }
+        SetLength(CmdList, 0);
+        Write('  > ');
+        while not EOF do
+        begin
+          ReadLn(Line);
+          Line := Trim(Line);
+          if LowerCase(Line) = 'end' then
+            Break;
+          SetLength(CmdList, Length(CmdList) + 1);
+          CmdList[High(CmdList)] := Line;
+          Write('  > ');
+        end;
+        FEngine.SetBreakpointCommands(BpNum, CmdList);
       end;
 
     'info':

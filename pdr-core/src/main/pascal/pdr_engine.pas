@@ -33,6 +33,7 @@ type
     HitCount: Integer;         // Target hit count (fire on Nth hit)
     CurrentHitCount: Integer;  // Running counter
     ConditionExpr: String;     // Expression for bctExpression conditions
+    Commands: array of String; // Commands to execute when breakpoint fires
   end;
 
   { Watchpoint tracking record }
@@ -110,6 +111,9 @@ type
       CondType: TBreakpointConditionType; Count: Integer): Boolean;
     function SetBreakpointExprCondition(Handle: TBreakpointHandle;
       const Expr: String): Boolean;
+    procedure SetBreakpointCommands(Handle: TBreakpointHandle;
+      const Cmds: array of String);
+    function GetHitBreakpointCommands: TStringArray;
     function EnableBreakpoint(Handle: TBreakpointHandle): Boolean;
     function DisableBreakpoint(Handle: TBreakpointHandle): Boolean;
     procedure SetTemporary(Handle: TBreakpointHandle);
@@ -1424,6 +1428,42 @@ begin
   Result := True;
 end;
 
+procedure TDebuggerEngine.SetBreakpointCommands(Handle: TBreakpointHandle;
+  const Cmds: array of String);
+var
+  Idx, I: Integer;
+begin
+  Idx := FindBreakpointByHandle(Handle);
+  if Idx < 0 then
+  begin
+    WriteLn('[ERROR] Breakpoint #', Handle, ' not found');
+    Exit;
+  end;
+
+  SetLength(FBreakpoints[Idx].Commands, Length(Cmds));
+  for I := 0 to High(Cmds) do
+    FBreakpoints[Idx].Commands[I] := Cmds[I];
+
+  if Length(Cmds) = 0 then
+    WriteLn('[INFO] Breakpoint #', Handle, ' commands cleared')
+  else
+    WriteLn('[INFO] Breakpoint #', Handle, ': ', Length(Cmds), ' command(s) attached');
+end;
+
+function TDebuggerEngine.GetHitBreakpointCommands: TStringArray;
+var
+  BpAddr: QWord;
+  Idx: Integer;
+begin
+  SetLength(Result, 0);
+  BpAddr := FProcessController.GetLastBreakpointAddress;
+  if BpAddr = 0 then
+    Exit;
+  Idx := FindBreakpointByAddress(BpAddr);
+  if (Idx >= 0) and (Length(FBreakpoints[Idx].Commands) > 0) then
+    Result := Copy(FBreakpoints[Idx].Commands);
+end;
+
 function TDebuggerEngine.EnableBreakpoint(Handle: TBreakpointHandle): Boolean;
 var
   Idx: Integer;
@@ -1530,6 +1570,9 @@ begin
           FBreakpoints[I].CurrentHitCount
         ]);
     end;
+
+    if Length(FBreakpoints[I].Commands) > 0 then
+      S := S + Format('   [%d cmd(s)]', [Length(FBreakpoints[I].Commands)]);
 
     SetLength(Result, Length(Result) + 1);
     Result[High(Result)] := S;

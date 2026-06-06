@@ -1,0 +1,9 @@
+run
+break test_37_bp_commands.pas:11
+commands 1
+print Idx
+print Total
+continue
+end
+continue
+quit
