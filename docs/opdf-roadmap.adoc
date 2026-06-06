@@ -148,7 +148,7 @@ Files affected::
 * `pdr_main.pas` -- register `up`, `down`, `frame N` commands
 * Integration test: `test_31_frame_navigation.pas`
 
-=== `Pause` (Interrupt Running Program)
+=== ✅ `Pause` (Interrupt Running Program)
 
 **Priority: High** +
 **Effort: Small (1 day)**

@@ -846,8 +846,12 @@ end;
 function TDebuggerEngine.Pause: Boolean;
 begin
   Result := False;
-  WriteLn('[WARNING] Pause not implemented yet');
-  // TODO: Send SIGSTOP to process
+  if FState <> dsRunning then
+  begin
+    WriteLn('[ERROR] Process is not running');
+    Exit;
+  end;
+  Result := FProcessController.SendInterrupt;
 end;
 
 { Breakpoint helper methods }

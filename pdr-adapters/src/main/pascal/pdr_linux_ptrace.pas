@@ -94,6 +94,8 @@ type
     function InjectCall(MethodAddr, SelfPtr: QWord;
       ManagedReturn: Boolean; out RetValue: QWord): Boolean;
 
+    function SendInterrupt: Boolean;
+
     property PID: Integer read FPID;
     property IsAttached: Boolean read FAttached;
   end;
@@ -1650,5 +1652,14 @@ begin
   WriteLn('[ERROR] InjectCall: only supported on x86_64');
 end;
 {$ENDIF}
+
+function TLinuxPtraceAdapter.SendInterrupt: Boolean;
+begin
+  Result := False;
+  if (FPID <= 0) or (not FAttached) then
+    Exit;
+  FpKill(FPID, SIGSTOP);
+  Result := True;
+end;
 
 end.

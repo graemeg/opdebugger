@@ -326,6 +326,9 @@ type
       Returns True on success, False on timeout or error }
     function InjectCall(MethodAddr, SelfPtr: QWord;
       ManagedReturn: Boolean; out RetValue: QWord): Boolean;
+
+    { Send interrupt signal to stop a running process }
+    function SendInterrupt: Boolean;
   end;
 
   { Debug Info Reader Port - Format-specific debug info reading }
