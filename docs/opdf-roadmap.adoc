@@ -61,7 +61,7 @@ Goal: Make PDR usable as the primary debugger for Blaise compiler development.
 Every item in this phase addresses a gap that a developer hits within the first
 hour of a real debugging session.
 
-=== `finish` / Step Out Command
+=== ✅ `finish` / Step Out Command
 
 **Priority: Critical** +
 **Effort: Small (1-2 days)**
