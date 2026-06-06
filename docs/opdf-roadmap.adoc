@@ -216,7 +216,7 @@ Files affected::
 * `pdr_engine.pas` -- auto-remove in `Continue` after hit
 * `pdr_main.pas` -- register `tbreak` command
 
-=== `until` Command
+=== ✅ `until` Command
 
 **Priority: Medium** +
 **Effort: Small (1 day)**

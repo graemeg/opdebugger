@@ -74,6 +74,8 @@ begin
   WriteLn('  next, n        - Step over: next source line, skipping into calls');
   WriteLn('  step, s        - Step into: next source line, descending into calls');
   WriteLn('  finish, fin    - Step out: run until current function returns');
+  WriteLn('  until, u       - Continue until past current line');
+  WriteLn('  until <loc>    - Continue until location (tbreak + continue)');
   WriteLn('  list, l        - Show source around current stop location');
   WriteLn('  list file:N    - Show source around line N of file');
   WriteLn('  up             - Select caller frame (move up the call stack)');
@@ -251,6 +253,10 @@ var
   SliceVarName: String;
   SliceLow, SliceHigh: Int64;
   Regs: TRegisters;
+  LineInfo: TLineInfo;
+  LineEntries: TLineInfoArray;
+  CurrentAddr: QWord;
+  FoundNextLine: Boolean;
   I: Integer;
 begin
   if Trim(CmdLine) = '' then
@@ -344,6 +350,53 @@ begin
         FEngine.StepOut;
         PrintExceptionInfo;
         PrintDisplayList;
+      end;
+
+    'until', 'u':
+      begin
+        if Length(Parts) >= 2 then
+        begin
+          BpHandle := FEngine.SetBreakpoint(Parts[1]);
+          if BpHandle >= 0 then
+          begin
+            FEngine.SetTemporary(BpHandle);
+            FEngine.Continue;
+            PrintExceptionInfo;
+            PrintDisplayList;
+          end;
+        end
+        else
+        begin
+          { No argument: continue until past current line }
+          CurrentAddr := FEngine.GetSelectedFrameRIP;
+          if (CurrentAddr <> 0) and
+             FDebugInfoReader.FindLineByAddress(CurrentAddr, LineInfo) then
+          begin
+            { Find the next line after current in the same file }
+            LineEntries := FDebugInfoReader.GetFileLineEntries(LineInfo.FileName);
+            FoundNextLine := False;
+            for I := 0 to High(LineEntries) do
+            begin
+              if LineEntries[I].LineNumber > LineInfo.LineNumber then
+              begin
+                BpHandle := FEngine.SetBreakpoint('0x' + IntToHex(LineEntries[I].Address, 1));
+                if BpHandle >= 0 then
+                begin
+                  FEngine.SetTemporary(BpHandle);
+                  FEngine.Continue;
+                  PrintExceptionInfo;
+                  PrintDisplayList;
+                  FoundNextLine := True;
+                end;
+                Break;
+              end;
+            end;
+            if not FoundNextLine then
+              WriteLn('[ERROR] No subsequent line found');
+          end
+          else
+            WriteLn('[ERROR] Cannot determine current line');
+        end;
       end;
 
     'up':
