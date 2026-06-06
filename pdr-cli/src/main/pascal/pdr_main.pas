@@ -91,6 +91,7 @@ begin
   WriteLn('  disable <num>  - Disable breakpoint without deleting');
   WriteLn('  delete <num>   - Remove breakpoint by number');
   WriteLn('  info breakpoints - List all breakpoints with conditions');
+  WriteLn('  info registers - Show CPU register values');
   WriteLn('  locals         - List local variables in current function');
   WriteLn('  locals scoped  - Include variables from enclosing scopes');
   WriteLn('  globals (gl)   - List global (program-level) variables');
@@ -248,6 +249,7 @@ var
   SliceResult: TVariableValueArray;
   SliceVarName: String;
   SliceLow, SliceHigh: Int64;
+  Regs: TRegisters;
   I: Integer;
 begin
   if Trim(CmdLine) = '' then
@@ -555,8 +557,41 @@ begin
               WriteLn('  ', CallStack[I]);
           end;
         end
+        else if (Length(Parts) >= 2) and
+                ((LowerCase(Parts[1]) = 'registers') or
+                 (LowerCase(Parts[1]) = 'reg')) then
+        begin
+          if FEngine.State <> dsPaused then
+            WriteLn('[ERROR] Process is not paused')
+          else
+          begin
+            if FProcessController.GetRegisters(Regs) then
+            begin
+              {$IFDEF CPUX86_64}
+              WriteLn('  RAX = 0x', IntToHex(Regs.RAX, 16), '    RBX = 0x', IntToHex(Regs.RBX, 16));
+              WriteLn('  RCX = 0x', IntToHex(Regs.RCX, 16), '    RDX = 0x', IntToHex(Regs.RDX, 16));
+              WriteLn('  RSI = 0x', IntToHex(Regs.RSI, 16), '    RDI = 0x', IntToHex(Regs.RDI, 16));
+              WriteLn('  RBP = 0x', IntToHex(Regs.RBP, 16), '    RSP = 0x', IntToHex(Regs.RSP, 16));
+              WriteLn('  R8  = 0x', IntToHex(Regs.R8, 16),  '    R9  = 0x', IntToHex(Regs.R9, 16));
+              WriteLn('  R10 = 0x', IntToHex(Regs.R10, 16), '    R11 = 0x', IntToHex(Regs.R11, 16));
+              WriteLn('  R12 = 0x', IntToHex(Regs.R12, 16), '    R13 = 0x', IntToHex(Regs.R13, 16));
+              WriteLn('  R14 = 0x', IntToHex(Regs.R14, 16), '    R15 = 0x', IntToHex(Regs.R15, 16));
+              WriteLn('  RIP = 0x', IntToHex(Regs.RIP, 16), '    RFLAGS = 0x', IntToHex(Regs.RFLAGS, 16));
+              {$ENDIF}
+              {$IFDEF CPUI386}
+              WriteLn('  EAX = 0x', IntToHex(Regs.EAX, 8), '    EBX = 0x', IntToHex(Regs.EBX, 8));
+              WriteLn('  ECX = 0x', IntToHex(Regs.ECX, 8), '    EDX = 0x', IntToHex(Regs.EDX, 8));
+              WriteLn('  ESI = 0x', IntToHex(Regs.ESI, 8), '    EDI = 0x', IntToHex(Regs.EDI, 8));
+              WriteLn('  EBP = 0x', IntToHex(Regs.EBP, 8), '    ESP = 0x', IntToHex(Regs.ESP, 8));
+              WriteLn('  EIP = 0x', IntToHex(Regs.EIP, 8), '    EFLAGS = 0x', IntToHex(Regs.EFLAGS, 8));
+              {$ENDIF}
+            end
+            else
+              WriteLn('[ERROR] Failed to read registers');
+          end;
+        end
         else
-          WriteLn('[ERROR] Usage: info breakpoints | info display | info watchpoints');
+          WriteLn('[ERROR] Usage: info breakpoints | info display | info watchpoints | info registers');
       end;
 
     'callstack', 'cs':

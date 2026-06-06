@@ -180,7 +180,7 @@ Files affected::
   `DisableBreakpoint`
 * `pdr_main.pas` -- register `enable N`, `disable N` commands
 
-=== Register Display
+=== ✅ Register Display
 
 **Priority: Medium** +
 **Effort: Small (1 day)**
