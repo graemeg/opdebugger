@@ -76,6 +76,9 @@ begin
   WriteLn('  finish, fin    - Step out: run until current function returns');
   WriteLn('  list, l        - Show source around current stop location');
   WriteLn('  list file:N    - Show source around line N of file');
+  WriteLn('  up             - Select caller frame (move up the call stack)');
+  WriteLn('  down           - Select callee frame (move down the call stack)');
+  WriteLn('  frame <N>      - Select frame N (0 = innermost/current)');
   WriteLn('  break <loc>    - Set breakpoint at location');
   WriteLn('  break <loc> if count=N - Set breakpoint that fires on Nth hit');
   WriteLn('    Location formats:');
@@ -137,7 +140,6 @@ end;
 
 function TCLIDebugger.HandleListCommand(const Parts: TStringArray): TStringArray;
 var
-  Regs: TRegisters;
   LineInfo: TLineInfo;
   ColonPos: Integer;
   FileName: String;
@@ -174,16 +176,7 @@ begin
       Exit;
     end;
 
-    {$IFDEF CPUX86_64}
-    CurrentAddr := 0;
-    if FProcessController.GetRegisters(Regs) then
-      CurrentAddr := Regs.RIP;
-    {$ENDIF}
-    {$IFDEF CPUI386}
-    CurrentAddr := 0;
-    if FProcessController.GetRegisters(Regs) then
-      CurrentAddr := Regs.EIP;
-    {$ENDIF}
+    CurrentAddr := FEngine.GetSelectedFrameRIP;
     if CurrentAddr = 0 then
     begin
       SetLength(Result, 1);
@@ -346,6 +339,27 @@ begin
         FEngine.StepOut;
         PrintExceptionInfo;
         PrintDisplayList;
+      end;
+
+    'up':
+      FEngine.FrameUp;
+
+    'down':
+      FEngine.FrameDown;
+
+    'frame':
+      begin
+        if Length(Parts) < 2 then
+        begin
+          WriteLn('[ERROR] Usage: frame <number>');
+          Exit;
+        end;
+        if not TryStrToInt(Parts[1], BpNum) then
+        begin
+          WriteLn('[ERROR] Invalid frame number: ', Parts[1]);
+          Exit;
+        end;
+        FEngine.SelectFrame(BpNum);
       end;
 
     'print', 'p':

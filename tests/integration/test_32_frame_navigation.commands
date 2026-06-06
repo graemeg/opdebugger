@@ -1,0 +1,12 @@
+run
+break test_32_frame_navigation.pas:8
+continue
+print LocalInner
+up
+print LocalOuter
+up
+down
+print LocalOuter
+frame 0
+print LocalInner
+quit

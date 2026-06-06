@@ -144,6 +144,11 @@ type
     FProcessController: IProcessController;
     FDebugInfoReader: IDebugInfoReader;
     FEvalDepth: Integer;
+    FOverrideRBP: QWord;
+    FOverrideRIP: QWord;
+
+    function GetEffectiveRBP: QWord;
+    function GetEffectiveRIP: QWord;
 
     { Resolve dot-notation field access (e.g. MyShape.FName) }
     function ResolveFieldAccess(const BaseName, FieldPath: String): TVariableValue;
@@ -163,6 +168,9 @@ type
 
     { Evaluate a variable using provided info }
     function EvaluateVariableInfo(const VarInfo: TVariableInfo): TVariableValue;
+
+    property OverrideRBP: QWord read FOverrideRBP write FOverrideRBP;
+    property OverrideRIP: QWord read FOverrideRIP write FOverrideRIP;
   end;
 
 { Format a class constant value for display }
@@ -1260,6 +1268,32 @@ begin
   FDebugInfoReader := ADebugInfoReader;
   FEvaluators := TInterfaceList.Create;
   FEvalDepth := 0;
+  FOverrideRBP := 0;
+  FOverrideRIP := 0;
+end;
+
+function TTypeSystem.GetEffectiveRBP: QWord;
+begin
+  if FOverrideRBP <> 0 then
+    Result := FOverrideRBP
+  else
+  begin
+    Result := FProcessController.GetLastBreakpointRBP;
+    if Result = 0 then
+      Result := FProcessController.GetFrameBasePointer;
+  end;
+end;
+
+function TTypeSystem.GetEffectiveRIP: QWord;
+begin
+  if FOverrideRIP <> 0 then
+    Result := FOverrideRIP
+  else
+  begin
+    Result := FProcessController.GetLastBreakpointAddress;
+    if Result = 0 then
+      Result := FProcessController.GetCurrentAddress;
+  end;
 end;
 
 destructor TTypeSystem.Destroy;
@@ -1422,23 +1456,16 @@ begin
     Exit;
   end;
 
-  { Compute actual address for stack-based variables (same as EvaluateVariableInfo) }
   if VarInfo.LocationExpr = 1 then
   begin
-    RIP := FProcessController.GetLastBreakpointAddress;
-    if RIP = 0 then
-      RIP := FProcessController.GetCurrentAddress;
-    InstancePtr := FProcessController.GetLastBreakpointRBP;
-    if InstancePtr = 0 then
-      InstancePtr := FProcessController.GetFrameBasePointer;
+    RIP := GetEffectiveRIP;
+    InstancePtr := GetEffectiveRBP;
     if InstancePtr <> 0 then
       VarInfo.Address := InstancePtr + VarInfo.LocationData;
   end
   else if VarInfo.LocationExpr = 2 then
   begin
-    InstancePtr := FProcessController.GetLastBreakpointRBP;
-    if InstancePtr = 0 then
-      InstancePtr := FProcessController.GetFrameBasePointer;
+    InstancePtr := GetEffectiveRBP;
     if InstancePtr <> 0 then
     begin
       FillChar(PointerBuf, SizeOf(PointerBuf), 0);
@@ -1591,13 +1618,7 @@ begin
     Exit;
   end;
 
-  { Try scope-aware lookup using the last breakpoint address.
-    GetCurrentAddress() returns the RIP AFTER the single-step that reinserts the
-    breakpoint, which may be inside a called function (e.g. WriteLn). The last
-    breakpoint address is the original source line address and gives the correct scope. }
-  RIP := FProcessController.GetLastBreakpointAddress;
-  if RIP = 0 then
-    RIP := FProcessController.GetCurrentAddress;
+  RIP := GetEffectiveRIP;
   if RIP <> 0 then
   begin
     if FDebugInfoReader.FindVariableWithScope(VarName, RIP, VarInfo) then
@@ -1700,15 +1721,10 @@ begin
 
   Result.TypeName := TypeInfo.Name;
 
-  { Compute actual address for stack-based variables.
-    Use the RBP saved at the last breakpoint hit (before single-step), because after
-    the single-step the CPU may have entered a called function, changing the frame. }
   ComputedVarInfo := VarInfo;
   if (VarInfo.LocationExpr = 1) then { RBP-relative (current frame) }
   begin
-    RBP := FProcessController.GetLastBreakpointRBP;
-    if RBP = 0 then
-      RBP := FProcessController.GetFrameBasePointer;
+    RBP := GetEffectiveRBP;
     if RBP <> 0 then
     begin
       ComputedVarInfo.Address := RBP + VarInfo.LocationData;
@@ -1720,9 +1736,7 @@ begin
   end
   else if (VarInfo.LocationExpr = 2) then { Parent frame RBP-relative (nested procedure) }
   begin
-    RBP := FProcessController.GetLastBreakpointRBP;
-    if RBP = 0 then
-      RBP := FProcessController.GetFrameBasePointer;
+    RBP := GetEffectiveRBP;
     if RBP <> 0 then
     begin
       { Follow the saved RBP chain: the saved RBP at [RBP+0] is the caller's RBP }

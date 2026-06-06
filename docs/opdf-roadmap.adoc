@@ -26,6 +26,7 @@ PDR currently covers a solid core debugging workflow on Linux x86_64:
 * Breakpoints (file:line, address, variable name, hit-count conditional)
 * Stepping (over, into, out/finish)
 * Source listing (`list`/`l` with current-line marker and file caching)
+* Frame navigation (`up`/`down`/`frame N` with variable inspection in any frame)
 * Variable inspection for all Pascal types (primitives, all string types, classes
   with inheritance, records, arrays, sets, enums, pointers, interfaces)
 * Property evaluation (field-backed inline, method-backed via call injection)
@@ -36,15 +37,13 @@ PDR currently covers a solid core debugging workflow on Linux x86_64:
 * Display list (auto-print on every stop)
 * Call stack display
 * Compile-time constant display
-* 31 passing integration tests
+* 32 passing integration tests
 
 === What Is Missing for Daily Use
 
 Real-world debugging sessions -- particularly debugging the Blaise compiler --
 reveal critical gaps compared to GDB:
 
-* No frame navigation (`up`/`down`/`frame N`) -- cannot inspect variables in
-  caller frames
 * No expression evaluator -- `print A + B` or `print Arr[I]` not possible
 * No `info registers` -- CPU state invisible to the user
 * No batch/script mode -- cannot automate debugging workflows
@@ -113,7 +112,7 @@ Files affected::
 * `pdr_main.pas` -- register `list`/`l` command; `list` with no argument uses
   current stop location; `list file.pas:N` shows a specific location
 
-=== Frame Navigation (`up`, `down`, `frame`)
+=== ✅ Frame Navigation (`up`, `down`, `frame`)
 
 **Priority: Critical** +
 **Effort: Medium (3-4 days)**

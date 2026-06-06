@@ -59,6 +59,10 @@ type
     FCatchExceptions: Boolean;        // Break on raise (default: True)
     FLastException: TExceptionInfo;  // Cleared on each Run/Continue/Step; set in HandleExceptionBreakpoint
     FSourceCache: TStringList;       // File cache: Name=filepath, Objects[]=TStringList of lines
+    FSelectedFrameIndex: Integer;
+    FFrameRBPs: array of QWord;
+    FFrameRIPs: array of QWord;
+    FFrameCacheValid: Boolean;
 
     { Helper methods for breakpoint management }
     function ParseLocation(const Location: String; out Address: QWord): Boolean;
@@ -66,6 +70,9 @@ type
     function FindBreakpointByAddress(Address: QWord): Integer;
     procedure HandleExceptionBreakpoint;
     function LoadSourceFile(const FileName: String): TStringList;
+    procedure BuildFrameCache;
+    procedure ResetSelectedFrame;
+    procedure ApplyFrameOverrides;
   public
     constructor Create(AProcessController: IProcessController;
                       ADebugInfoReader: IDebugInfoReader;
@@ -124,11 +131,18 @@ type
     function GetSourceLines(const FileName: String; Line: Integer;
       Before: Integer = 5; After: Integer = 10): TStringArray;
 
+    { Frame navigation }
+    function SelectFrame(Index: Integer): Boolean;
+    function FrameUp: Boolean;
+    function FrameDown: Boolean;
+    function GetSelectedFrameRIP: QWord;
+
     { ICommandHandler - State query }
     function GetState: TDebuggerState;
 
     { Properties }
     property State: TDebuggerState read FState;
+    property SelectedFrameIndex: Integer read FSelectedFrameIndex;
     property BinaryPath: String read FBinaryPath;
     property AttachedPID: Integer read FAttachedPID;
     property CatchExceptions: Boolean read FCatchExceptions write FCatchExceptions;
@@ -159,6 +173,8 @@ begin
   FSourceCache.OwnsObjects := True;
   FSourceCache.Sorted := True;
   FSourceCache.Duplicates := dupIgnore;
+  FSelectedFrameIndex := 0;
+  FFrameCacheValid := False;
 
   // Create type system and register evaluators
   FTypeSystem := TTypeSystem.Create(FProcessController, FDebugInfoReader);
@@ -276,6 +292,7 @@ function TDebuggerEngine.Run: Boolean;
 begin
   Result := False;
   FLastException.IsValid := False;
+  ResetSelectedFrame;
 
   if FState <> dsIdle then
   begin
@@ -333,6 +350,7 @@ var
 begin
   Result := False;
   FLastException.IsValid := False;
+  ResetSelectedFrame;
 
   if FState <> dsPaused then
   begin
@@ -474,6 +492,7 @@ var
 begin
   Result := False;
   FLastException.IsValid := False;
+  ResetSelectedFrame;
 
   if FState <> dsPaused then
   begin
@@ -637,6 +656,7 @@ var
 begin
   Result := False;
   FLastException.IsValid := False;
+  ResetSelectedFrame;
 
   if FState <> dsPaused then
   begin
@@ -725,6 +745,7 @@ var
 begin
   Result := False;
   FLastException.IsValid := False;
+  ResetSelectedFrame;
 
   if FState <> dsPaused then
   begin
@@ -1495,9 +1516,14 @@ begin
   if FState = dsIdle then
     Exit;
 
-  RIP := FProcessController.GetLastBreakpointAddress;
-  if RIP = 0 then
-    RIP := FProcessController.GetCurrentAddress;
+  if FTypeSystem.OverrideRIP <> 0 then
+    RIP := FTypeSystem.OverrideRIP
+  else
+  begin
+    RIP := FProcessController.GetLastBreakpointAddress;
+    if RIP = 0 then
+      RIP := FProcessController.GetCurrentAddress;
+  end;
   if RIP = 0 then
     Exit;
 
@@ -1530,9 +1556,14 @@ begin
   if FState = dsIdle then
     Exit;
 
-  RIP := FProcessController.GetLastBreakpointAddress;
-  if RIP = 0 then
-    RIP := FProcessController.GetCurrentAddress;
+  if FTypeSystem.OverrideRIP <> 0 then
+    RIP := FTypeSystem.OverrideRIP
+  else
+  begin
+    RIP := FProcessController.GetLastBreakpointAddress;
+    if RIP = 0 then
+      RIP := FProcessController.GetCurrentAddress;
+  end;
   if RIP = 0 then
     Exit;
 
@@ -1617,9 +1648,14 @@ begin
     Exit;
   end;
 
-  RIP := FProcessController.GetLastBreakpointAddress;
-  if RIP = 0 then
-    RIP := FProcessController.GetCurrentAddress;
+  if FTypeSystem.OverrideRIP <> 0 then
+    RIP := FTypeSystem.OverrideRIP
+  else
+  begin
+    RIP := FProcessController.GetLastBreakpointAddress;
+    if RIP = 0 then
+      RIP := FProcessController.GetCurrentAddress;
+  end;
 
   { Find the variable }
   if not FDebugInfoReader.FindVariableWithScope(Expr, RIP, VarInfo) then
@@ -1633,9 +1669,14 @@ begin
          (SelfTypeInfo.Category = tcClass) and (SelfTypeInfo.ClassInfo <> nil) then
       begin
         { Resolve Self's stack address to get instance pointer }
-        RBP := FProcessController.GetLastBreakpointRBP;
-        if RBP = 0 then
-          RBP := FProcessController.GetFrameBasePointer;
+        if FTypeSystem.OverrideRBP <> 0 then
+          RBP := FTypeSystem.OverrideRBP
+        else
+        begin
+          RBP := FProcessController.GetLastBreakpointRBP;
+          if RBP = 0 then
+            RBP := FProcessController.GetFrameBasePointer;
+        end;
         if RBP <> 0 then
         begin
           SelfAddr := RBP + SelfVarInfo.LocationData;
@@ -1910,8 +1951,13 @@ begin
   SetLength(Result, 0);
   if FState = dsIdle then Exit;
 
-  RIP := FProcessController.GetLastBreakpointAddress;
-  if RIP = 0 then RIP := FProcessController.GetCurrentAddress;
+  if FTypeSystem.OverrideRIP <> 0 then
+    RIP := FTypeSystem.OverrideRIP
+  else
+  begin
+    RIP := FProcessController.GetLastBreakpointAddress;
+    if RIP = 0 then RIP := FProcessController.GetCurrentAddress;
+  end;
 
   if not FDebugInfoReader.FindVariableWithScope(VarName, RIP, VarInfo) then
   begin
@@ -1952,8 +1998,13 @@ begin
   { Compute actual base address }
   if VarInfo.LocationExpr = 1 then
   begin
-    RBP := FProcessController.GetLastBreakpointRBP;
-    if RBP = 0 then RBP := FProcessController.GetFrameBasePointer;
+    if FTypeSystem.OverrideRBP <> 0 then
+      RBP := FTypeSystem.OverrideRBP
+    else
+    begin
+      RBP := FProcessController.GetLastBreakpointRBP;
+      if RBP = 0 then RBP := FProcessController.GetFrameBasePointer;
+    end;
     BaseAddr := RBP + VarInfo.LocationData;
   end
   else
@@ -2007,8 +2058,13 @@ begin
     Exit;
   end;
 
-  RIP := FProcessController.GetLastBreakpointAddress;
-  if RIP = 0 then RIP := FProcessController.GetCurrentAddress;
+  if FTypeSystem.OverrideRIP <> 0 then
+    RIP := FTypeSystem.OverrideRIP
+  else
+  begin
+    RIP := FProcessController.GetLastBreakpointAddress;
+    if RIP = 0 then RIP := FProcessController.GetCurrentAddress;
+  end;
 
   if not FDebugInfoReader.FindVariableWithScope(VarName, RIP, VarInfo) then
   begin
@@ -2025,8 +2081,13 @@ begin
   { Compute actual address }
   if VarInfo.LocationExpr = 1 then
   begin
-    RBP := FProcessController.GetLastBreakpointRBP;
-    if RBP = 0 then RBP := FProcessController.GetFrameBasePointer;
+    if FTypeSystem.OverrideRBP <> 0 then
+      RBP := FTypeSystem.OverrideRBP
+    else
+    begin
+      RBP := FProcessController.GetLastBreakpointRBP;
+      if RBP = 0 then RBP := FProcessController.GetFrameBasePointer;
+    end;
     Addr := RBP + VarInfo.LocationData;
   end
   else
@@ -2291,6 +2352,171 @@ begin
     else
       Result[I - StartLine] := Format('%s %4d  %s', [Marker, LineNum, Lines[LineNum - 1]]);
   end;
+end;
+
+{ Frame navigation }
+
+procedure TDebuggerEngine.BuildFrameCache;
+var
+  Regs: TRegisters;
+  FramePtr, RetAddr: QWord;
+  FrameBuffer: array[0..15] of QWord;
+  Count: Integer;
+begin
+  if FFrameCacheValid then
+    Exit;
+
+  SetLength(FFrameRBPs, 0);
+  SetLength(FFrameRIPs, 0);
+  Count := 0;
+
+  if not FProcessController.GetRegisters(Regs) then
+    Exit;
+
+  {$IFDEF CPUX86_64}
+  FramePtr := FProcessController.GetLastBreakpointRBP;
+  if FramePtr = 0 then
+    FramePtr := Regs.RBP;
+  RetAddr := FProcessController.GetLastBreakpointAddress;
+  if RetAddr = 0 then
+    RetAddr := Regs.RIP;
+
+  while (FramePtr <> 0) and (Count < 256) do
+  begin
+    SetLength(FFrameRBPs, Count + 1);
+    SetLength(FFrameRIPs, Count + 1);
+    FFrameRBPs[Count] := FramePtr;
+    FFrameRIPs[Count] := RetAddr;
+    Inc(Count);
+
+    if not FProcessController.ReadMemory(FramePtr, 16, FrameBuffer) then
+      Break;
+    FramePtr := FrameBuffer[0];
+    RetAddr := FrameBuffer[1];
+  end;
+  {$ENDIF}
+
+  {$IFDEF CPUI386}
+  FramePtr := FProcessController.GetLastBreakpointRBP;
+  if FramePtr = 0 then
+    FramePtr := Regs.EBP;
+  RetAddr := FProcessController.GetLastBreakpointAddress;
+  if RetAddr = 0 then
+    RetAddr := Regs.EIP;
+
+  while (FramePtr <> 0) and (Count < 256) do
+  begin
+    SetLength(FFrameRBPs, Count + 1);
+    SetLength(FFrameRIPs, Count + 1);
+    FFrameRBPs[Count] := FramePtr;
+    FFrameRIPs[Count] := RetAddr;
+    Inc(Count);
+
+    if not FProcessController.ReadMemory(FramePtr, 8, FrameBuffer) then
+      Break;
+    FramePtr := Cardinal(FrameBuffer[0]);
+    RetAddr := Cardinal(FrameBuffer[1]);
+  end;
+  {$ENDIF}
+
+  FFrameCacheValid := True;
+end;
+
+procedure TDebuggerEngine.ResetSelectedFrame;
+begin
+  FSelectedFrameIndex := 0;
+  FFrameCacheValid := False;
+  FTypeSystem.OverrideRBP := 0;
+  FTypeSystem.OverrideRIP := 0;
+end;
+
+procedure TDebuggerEngine.ApplyFrameOverrides;
+begin
+  if FSelectedFrameIndex = 0 then
+  begin
+    FTypeSystem.OverrideRBP := 0;
+    FTypeSystem.OverrideRIP := 0;
+  end
+  else
+  begin
+    FTypeSystem.OverrideRBP := FFrameRBPs[FSelectedFrameIndex];
+    FTypeSystem.OverrideRIP := FFrameRIPs[FSelectedFrameIndex];
+  end;
+end;
+
+function TDebuggerEngine.SelectFrame(Index: Integer): Boolean;
+var
+  FuncInfo: TFunctionInfo;
+  LineInfo: TLineInfo;
+begin
+  Result := False;
+
+  if FState <> dsPaused then
+  begin
+    WriteLn('[ERROR] Process is not paused');
+    Exit;
+  end;
+
+  BuildFrameCache;
+
+  if (Index < 0) or (Index >= Length(FFrameRBPs)) then
+  begin
+    WriteLn('[ERROR] Frame ', Index, ' out of range (', Length(FFrameRBPs), ' frames available)');
+    Exit;
+  end;
+
+  FSelectedFrameIndex := Index;
+  ApplyFrameOverrides;
+
+  if FDebugInfoReader.FindFunctionByAddress(FFrameRIPs[Index], FuncInfo) then
+  begin
+    if FDebugInfoReader.FindLineByAddress(FFrameRIPs[Index], LineInfo) then
+      WriteLn('#', Index, '  ', FuncInfo.Name, ' at ',
+              ExtractFileName(LineInfo.FileName), ':', LineInfo.LineNumber)
+    else
+      WriteLn('#', Index, '  ', FuncInfo.Name);
+  end
+  else
+    WriteLn('#', Index, '  <unknown> (0x', IntToHex(FFrameRIPs[Index], 1), ')');
+
+  Result := True;
+end;
+
+function TDebuggerEngine.FrameUp: Boolean;
+begin
+  BuildFrameCache;
+  if FSelectedFrameIndex + 1 >= Length(FFrameRBPs) then
+  begin
+    WriteLn('[ERROR] Already at outermost frame');
+    Result := False;
+    Exit;
+  end;
+  Result := SelectFrame(FSelectedFrameIndex + 1);
+end;
+
+function TDebuggerEngine.FrameDown: Boolean;
+begin
+  if FSelectedFrameIndex <= 0 then
+  begin
+    WriteLn('[ERROR] Already at innermost frame');
+    Result := False;
+    Exit;
+  end;
+  Result := SelectFrame(FSelectedFrameIndex - 1);
+end;
+
+function TDebuggerEngine.GetSelectedFrameRIP: QWord;
+var
+  Regs: TRegisters;
+begin
+  if FTypeSystem.OverrideRIP <> 0 then
+  begin
+    Result := FTypeSystem.OverrideRIP;
+    Exit;
+  end;
+  Result := FProcessController.GetLastBreakpointAddress;
+  if Result = 0 then
+    Result := FProcessController.GetCurrentAddress;
 end;
 
 { State query }
