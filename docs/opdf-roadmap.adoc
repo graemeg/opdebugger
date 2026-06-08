@@ -543,7 +543,7 @@ Files affected::
 * `pdr_engine.pas` -- pass load base to adapter at program start
 * Blaise compiler: remove `-no-pie` guard in `CompileToNative`
 
-=== Fix Hardcoded Pointer Sizes
+=== Fix Hardcoded Pointer Sizes ✅
 
 **Priority: High** +
 **Effort: Medium (2-3 days)**

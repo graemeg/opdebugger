@@ -178,6 +178,23 @@ function FormatClassConst(const C: TDebuggerClassConst): String;
 
 implementation
 
+function ReadPointerValue(ProcessController: IProcessController;
+  Address: QWord; PtrSize: Byte; out Value: QWord): Boolean;
+var
+  Buf: array[0..7] of Byte;
+begin
+  Result := False;
+  Value := 0;
+  FillChar(Buf, SizeOf(Buf), 0);
+  if not ProcessController.ReadMemory(Address, PtrSize, Buf) then
+    Exit;
+  if PtrSize = 4 then
+    Value := PDWord(@Buf)^
+  else
+    Value := PQWord(@Buf)^;
+  Result := True;
+end;
+
 { TPrimitiveEvaluator }
 
 function TPrimitiveEvaluator.CanHandle(const TypeInfo: TTypeInfo): Boolean;
@@ -322,32 +339,27 @@ function TAnsiStringEvaluator.Evaluate(const VarInfo: TVariableInfo;
   const TypeInfo: TTypeInfo; ProcessController: IProcessController;
   TypeSystem: TTypeSystem): TVariableValue;
 var
-  PointerBuf: array[0..7] of Byte;
   StringPtr: QWord;
   HeaderBuf: array[0..15] of Byte;
   Len: LongInt;
   DataBuf: array of Byte;
   Str: String;
   I: Integer;
+  PtrSize: Byte;
 begin
   Result.Name := TFPCDemangler.Demangle(VarInfo.Name);
   Result.TypeName := TypeInfo.Name;
   Result.Address := VarInfo.Address;
   Result.IsValid := False;
 
-  // AnsiString is a pointer to heap memory. The header layout is described
-  // by the type record itself (StrLengthOffset etc), emitted by the compiler,
-  // so the debugger does not hardcode FPC's internal AnsiString format.
+  PtrSize := TypeSystem.FDebugInfoReader.GetPointerSize;
+  if PtrSize = 0 then PtrSize := 8;
 
-  // Read pointer
-  FillChar(PointerBuf, SizeOf(PointerBuf), 0);
-  if not ProcessController.ReadMemory(VarInfo.Address, 8, PointerBuf) then
+  if not ReadPointerValue(ProcessController, VarInfo.Address, PtrSize, StringPtr) then
   begin
     Result.Value := '<error: failed to read pointer>';
     Exit;
   end;
-
-  StringPtr := PQWord(@PointerBuf)^;
 
   // Nil pointer means empty string
   if StringPtr = 0 then
@@ -407,32 +419,27 @@ function TUnicodeStringEvaluator.Evaluate(const VarInfo: TVariableInfo;
   const TypeInfo: TTypeInfo; ProcessController: IProcessController;
   TypeSystem: TTypeSystem): TVariableValue;
 var
-  PointerBuf: array[0..7] of Byte;
   StringPtr: QWord;
   HeaderBuf: array[0..15] of Byte;
   Len: LongInt;
   DataBuf: array of Byte;
   WideStr: UnicodeString;
   I: Integer;
+  PtrSize: Byte;
 begin
   Result.Name := TFPCDemangler.Demangle(VarInfo.Name);
   Result.TypeName := TypeInfo.Name;
   Result.Address := VarInfo.Address;
   Result.IsValid := False;
 
-  // UnicodeString / WideString is a pointer to heap memory. The header layout
-  // is described by the type record itself (StrLengthOffset etc), emitted by
-  // the compiler.
+  PtrSize := TypeSystem.FDebugInfoReader.GetPointerSize;
+  if PtrSize = 0 then PtrSize := 8;
 
-  // Read pointer
-  FillChar(PointerBuf, SizeOf(PointerBuf), 0);
-  if not ProcessController.ReadMemory(VarInfo.Address, 8, PointerBuf) then
+  if not ReadPointerValue(ProcessController, VarInfo.Address, PtrSize, StringPtr) then
   begin
     Result.Value := '<error: failed to read pointer>';
     Exit;
   end;
-
-  StringPtr := PQWord(@PointerBuf)^;
 
   // Nil pointer means empty string
   if StringPtr = 0 then
@@ -513,7 +520,8 @@ begin
   if IsManaged and (PropTypeInfo.Category = tcAnsiString) then
   begin
     { RetVal is the address of the result buffer, read the AnsiString pointer from it }
-    if not ProcessController.ReadMemory(RetVal, 8, StringPtr) then
+    if not ReadPointerValue(ProcessController, RetVal,
+         TypeSystem.FDebugInfoReader.GetPointerSize, StringPtr) then
       Exit;
     if StringPtr = 0 then
     begin
@@ -595,35 +603,33 @@ function TClassEvaluator.Evaluate(const VarInfo: TVariableInfo;
   const TypeInfo: TTypeInfo; ProcessController: IProcessController;
   TypeSystem: TTypeSystem): TVariableValue;
 var
-  PointerBuf: array[0..7] of Byte;
   InstancePtr: QWord;
   I: Integer;
   FieldInfo: TVariableInfo;
   FieldValue: TVariableValue;
   FieldOutput: String;
   Prop: TDebuggerProperty;
+  PtrSize: Byte;
 begin
   Result.Name := TFPCDemangler.Demangle(VarInfo.Name);
   Result.TypeName := TypeInfo.Name;
   Result.Address := VarInfo.Address;
   Result.IsValid := False;
 
-  // Check if ClassInfo exists
   if TypeInfo.ClassInfo = nil then
   begin
     Result.Value := '<error: no class info>';
     Exit;
   end;
 
-  // Read instance pointer (class variable is a pointer to instance)
-  FillChar(PointerBuf, SizeOf(PointerBuf), 0);
-  if not ProcessController.ReadMemory(VarInfo.Address, 8, PointerBuf) then
+  PtrSize := TypeSystem.FDebugInfoReader.GetPointerSize;
+  if PtrSize = 0 then PtrSize := 8;
+
+  if not ReadPointerValue(ProcessController, VarInfo.Address, PtrSize, InstancePtr) then
   begin
     Result.Value := '<error: failed to read instance pointer>';
     Exit;
   end;
-
-  InstancePtr := PQWord(@PointerBuf)^;
 
   // Check for nil instance
   if InstancePtr = 0 then
@@ -967,26 +973,25 @@ function TPointerEvaluator.Evaluate(const VarInfo: TVariableInfo;
   const TypeInfo: TTypeInfo; ProcessController: IProcessController;
   TypeSystem: TTypeSystem): TVariableValue;
 var
-  PointerBuf: array[0..7] of Byte;
   PtrValue: QWord;
   TargetTypeInfo: TTypeInfo;
   TargetVarInfo: TVariableInfo;
   TargetValue: TVariableValue;
+  PtrSize: Byte;
 begin
   Result.Name := TFPCDemangler.Demangle(VarInfo.Name);
   Result.TypeName := TypeInfo.Name;
   Result.Address := VarInfo.Address;
   Result.IsValid := False;
 
-  { Read pointer value }
-  FillChar(PointerBuf, SizeOf(PointerBuf), 0);
-  if not ProcessController.ReadMemory(VarInfo.Address, 8, PointerBuf) then
+  PtrSize := TypeSystem.FDebugInfoReader.GetPointerSize;
+  if PtrSize = 0 then PtrSize := 8;
+
+  if not ReadPointerValue(ProcessController, VarInfo.Address, PtrSize, PtrValue) then
   begin
     Result.Value := '<error: failed to read pointer>';
     Exit;
   end;
-
-  PtrValue := PQWord(@PointerBuf)^;
 
   { Nil pointer }
   if PtrValue = 0 then
@@ -1229,23 +1234,22 @@ function TInterfaceEvaluator.Evaluate(const VarInfo: TVariableInfo;
   const TypeInfo: TTypeInfo; ProcessController: IProcessController;
   TypeSystem: TTypeSystem): TVariableValue;
 var
-  PointerBuf: array[0..7] of Byte;
   PtrValue: QWord;
+  PtrSize: Byte;
 begin
   Result.Name := TFPCDemangler.Demangle(VarInfo.Name);
   Result.TypeName := TypeInfo.Name;
   Result.Address := VarInfo.Address;
   Result.IsValid := False;
 
-  { Read interface pointer value }
-  FillChar(PointerBuf, SizeOf(PointerBuf), 0);
-  if not ProcessController.ReadMemory(VarInfo.Address, 8, PointerBuf) then
+  PtrSize := TypeSystem.FDebugInfoReader.GetPointerSize;
+  if PtrSize = 0 then PtrSize := 8;
+
+  if not ReadPointerValue(ProcessController, VarInfo.Address, PtrSize, PtrValue) then
   begin
     Result.Value := '<error: failed to read interface pointer>';
     Exit;
   end;
-
-  PtrValue := PQWord(@PointerBuf)^;
 
   if PtrValue = 0 then
   begin
@@ -1396,13 +1400,13 @@ var
   TypeInfo: TTypeInfo;
   RIP: QWord;
   InstancePtr: QWord;
-  PointerBuf: array[0..7] of Byte;
   I: Integer;
   FieldName, RemainingPath: String;
   DotPos: Integer;
   Fields: TDebuggerFieldArray;
   FieldVarInfo: TVariableInfo;
   Found: Boolean;
+  PtrSize: Byte;
 begin
   Result.Name := BaseName + '.' + FieldPath;
   Result.IsValid := False;
@@ -1468,12 +1472,9 @@ begin
     InstancePtr := GetEffectiveRBP;
     if InstancePtr <> 0 then
     begin
-      FillChar(PointerBuf, SizeOf(PointerBuf), 0);
-      if FProcessController.ReadMemory(InstancePtr, 8, PointerBuf) then
-      begin
-        InstancePtr := PQWord(@PointerBuf)^;
+      PtrSize := FDebugInfoReader.GetPointerSize;
+      if ReadPointerValue(FProcessController, InstancePtr, PtrSize, InstancePtr) then
         VarInfo.Address := InstancePtr + VarInfo.LocationData;
-      end;
     end;
   end;
 
@@ -1502,13 +1503,12 @@ begin
 
     if (TypeInfo.Category = tcClass) and (TypeInfo.ClassInfo <> nil) then
     begin
-      FillChar(PointerBuf, SizeOf(PointerBuf), 0);
-      if not FProcessController.ReadMemory(VarInfo.Address, 8, PointerBuf) then
+      PtrSize := FDebugInfoReader.GetPointerSize;
+      if not ReadPointerValue(FProcessController, VarInfo.Address, PtrSize, InstancePtr) then
       begin
         Result.Value := '<error: failed to read instance pointer>';
         Exit;
       end;
-      InstancePtr := PQWord(@PointerBuf)^;
       if InstancePtr = 0 then
       begin
         Result.Value := 'nil';
@@ -1690,7 +1690,7 @@ var
   ComputedVarInfo: TVariableInfo;
   RBP: QWord;
   ParentRBP: QWord;
-  RBPBuf: array[0..7] of Byte;
+  PtrSize: Byte;
 begin
   Result.Name := VarInfo.Name;
   Result.IsValid := False;
@@ -1735,10 +1735,9 @@ begin
     if RBP <> 0 then
     begin
       { Follow the saved RBP chain: the saved RBP at [RBP+0] is the caller's RBP }
-      FillChar(RBPBuf, SizeOf(RBPBuf), 0);
-      if FProcessController.ReadMemory(RBP, 8, RBPBuf) then
+      PtrSize := FDebugInfoReader.GetPointerSize;
+      if ReadPointerValue(FProcessController, RBP, PtrSize, ParentRBP) then
       begin
-        ParentRBP := PQWord(@RBPBuf)^;
         ComputedVarInfo.Address := ParentRBP + VarInfo.LocationData;
         if gVerbose then
           WriteLn('[DEBUG] Computed parent frame address for ', VarInfo.Name,
