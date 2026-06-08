@@ -19,6 +19,10 @@ uses
   opdf_types, pdr_ports, pdr_engine, pdr_typesys, pdr_symbols,
   pdr_linux_ptrace, pdr_arch_adapters, pdr_opdf_adapter;
 
+{$IFDEF UNIX}
+function c_isatty(fd: LongInt): LongInt; cdecl; external 'c' name 'isatty';
+{$ENDIF}
+
 const
   PDR_VERSION = {$I version.inc};
   PDR_BUILD_DATE = {$I %DATE%};
@@ -1024,6 +1028,10 @@ begin
 
   // Create platform-specific adapters
   FProcessController := TLinuxPtraceAdapter.Create;
+  {$IFDEF UNIX}
+  if c_isatty(0) = 0 then
+    (FProcessController as TLinuxPtraceAdapter).RedirectChildIO := True;
+  {$ENDIF}
   FDebugInfoReader := TOPDFReaderAdapter.Create;
 
   // Create architecture adapter with process controller

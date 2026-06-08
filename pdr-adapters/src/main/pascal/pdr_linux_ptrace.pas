@@ -43,6 +43,7 @@ type
     FWatchSlots: array[0..3] of TWatchSlotInfo;
     FLastFiredWatchpoint: Integer;  // -1 = none, 0-3 = slot
     FPendingSignal: Integer;       // Signal to deliver on next continue (0 = none)
+    FRedirectChildIO: Boolean;     // Redirect child stdin/stdout/stderr to /dev/null
 
     { Signal classification helpers }
     function IsStopSignal(Sig: Integer): Boolean;
@@ -98,6 +99,7 @@ type
 
     property PID: Integer read FPID;
     property IsAttached: Boolean read FAttached;
+    property RedirectChildIO: Boolean read FRedirectChildIO write FRedirectChildIO;
   end;
 
 implementation
@@ -173,6 +175,7 @@ begin
   FLastBreakpointAddr := 0;
   FLastFiredWatchpoint := -1;
   FPendingSignal := 0;
+  FRedirectChildIO := False;
   for I := 0 to 3 do
     FWatchSlots[I].Active := False;
 
@@ -231,6 +234,7 @@ var
   Status: cInt;
   Args: array of PChar;
   I: Integer;
+  NullFD: cInt;
 begin
   Result := False;
 
@@ -265,6 +269,19 @@ begin
     // Put child in its own process group so terminal Ctrl+C
     // only goes to pdr, not the tracee
     c_setpgid(0, 0);
+
+    if FRedirectChildIO then
+    begin
+      NullFD := FpOpen('/dev/null', O_RDWR);
+      if NullFD >= 0 then
+      begin
+        FpDup2(NullFD, 0);
+        FpDup2(NullFD, 1);
+        FpDup2(NullFD, 2);
+        if NullFD > 2 then
+          FpClose(NullFD);
+      end;
+    end;
 
     if ptrace(PTRACE_TRACEME, 0, nil, nil) = -1 then
     begin
