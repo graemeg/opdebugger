@@ -81,6 +81,7 @@ type
       ManagedReturn: Boolean; out RetValue: QWord): Boolean;
     function SendInterrupt: Boolean;
     function GetLoadBase(const BinaryPath: String): QWord;
+    function GetTLSBase: QWord;
 
     property PID: Integer read FPID;
     property IsAttached: Boolean read FAttached;
@@ -1524,6 +1525,13 @@ begin
 
   if gVerbose and (Result <> 0) then
     WriteLn('[DEBUG] Load base from /proc/map: $', IntToHex(Result, 16));
+end;
+
+function TFreeBSDPtraceAdapter.GetTLSBase: QWord;
+begin
+  { TODO: Use sysarch(AMD64_GET_FSBASE) or ptrace(PT_GETFSBASE) on FreeBSD
+    to read the thread-local storage base address — untested. }
+  Result := 0;
 end;
 
 {$ENDIF} { FREEBSD }

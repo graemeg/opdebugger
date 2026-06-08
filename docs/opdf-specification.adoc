@@ -841,7 +841,11 @@ Location expressions encode where a variable resides at runtime. The `LocationEx
 |Parent frame RBP-relative
 |`SmallInt` (2 bytes): signed offset from enclosing procedure's frame base pointer
 
-|`3..255`
+|`4`
+|TLS-relative (thread-local)
+|`SmallInt` (2 bytes): signed offset from the thread-local storage base
+
+|`3, 5..255`
 |Reserved
 |Reserved for register-based, multi-level nesting, or complex expressions
 |===
@@ -860,6 +864,16 @@ effective_address = parent_RBP + SignExtend(LocationData)
 ----
 
 NOTE: The current implementation uses a saved-RBP-chain traversal as an approximation of the static link. This is accurate for one level of nesting. Deeper nesting levels are reserved for future implementation.
+
+.TLS-relative addressing (`LocationExpr = 4`)
+Used for thread-local variables declared with the `threadvar` keyword. The TLS base address is obtained from the operating system's thread-local storage mechanism:
+
+----
+tls_base          = OS-specific TLS base (e.g. fs_base on Linux x86_64)
+effective_address = tls_base + SignExtend(LocationData)
+----
+
+NOTE: The TLS base retrieval is platform-specific. On Linux x86_64, it is read via `PTRACE_PEEKUSER` at the `fs_base` offset. Other platforms require platform-specific implementations.
 
 == Platform-Specific Details
 

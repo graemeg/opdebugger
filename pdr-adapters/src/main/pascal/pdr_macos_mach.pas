@@ -95,6 +95,7 @@ type
       ManagedReturn: Boolean; out RetValue: QWord): Boolean;
     function SendInterrupt: Boolean;
     function GetLoadBase(const BinaryPath: String): QWord;
+    function GetTLSBase: QWord;
 
     property PID: Integer read FPID;
     property IsAttached: Boolean read FAttached;
@@ -1733,6 +1734,13 @@ function TMacOSMachAdapter.GetLoadBase(const BinaryPath: String): QWord;
 begin
   { TODO: Use task_info(TASK_DYLD_INFO) and parse the Mach-O load commands
     to determine the actual ASLR slide for macOS binaries. }
+  Result := 0;
+end;
+
+function TMacOSMachAdapter.GetTLSBase: QWord;
+begin
+  { TODO: Use thread_get_state with x86_THREAD_STATE64 to read fs_base,
+    or read the TLS base from the thread's Mach port — untested. }
   Result := 0;
 end;
 

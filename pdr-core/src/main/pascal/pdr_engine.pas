@@ -1728,6 +1728,14 @@ begin
     if RBP = 0 then RBP := FProcessController.GetFrameBasePointer;
     Addr := RBP + QWord(Int64(VarInfo.LocationData));
   end
+  else if VarInfo.LocationExpr = 4 then
+  begin
+    RBP := FProcessController.GetTLSBase;
+    if RBP <> 0 then
+      Addr := RBP + QWord(Int64(VarInfo.LocationData))
+    else
+      Addr := 0;
+  end
   else
     Addr := VarInfo.Address;
 
@@ -2386,6 +2394,14 @@ begin
     end;
     BaseAddr := RBP + VarInfo.LocationData;
   end
+  else if VarInfo.LocationExpr = 4 then
+  begin
+    RBP := FProcessController.GetTLSBase;
+    if RBP <> 0 then
+      BaseAddr := RBP + QWord(Int64(VarInfo.LocationData))
+    else
+      BaseAddr := 0;
+  end
   else
     BaseAddr := VarInfo.Address;
 
@@ -2468,6 +2484,14 @@ begin
       if RBP = 0 then RBP := FProcessController.GetFrameBasePointer;
     end;
     Addr := RBP + VarInfo.LocationData;
+  end
+  else if VarInfo.LocationExpr = 4 then
+  begin
+    RBP := FProcessController.GetTLSBase;
+    if RBP <> 0 then
+      Addr := RBP + QWord(Int64(VarInfo.LocationData))
+    else
+      Addr := 0;
   end
   else
     Addr := VarInfo.Address;

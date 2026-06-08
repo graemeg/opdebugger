@@ -376,6 +376,11 @@ type
       Call after Launch/Attach while the process is stopped.
       Returns 0 if the binary is not PIE or on error. }
     function GetLoadBase(const BinaryPath: String): QWord;
+
+    { Get the thread-local storage (TLS) base address for the current thread.
+      Used to resolve threadvar locations (LocationExpr = 4).
+      Returns 0 if TLS is not available or on error. }
+    function GetTLSBase: QWord;
   end;
 
   { Debug Info Reader Port - Format-specific debug info reading }

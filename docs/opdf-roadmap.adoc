@@ -785,7 +785,7 @@ navigation in a future GUI.
 Recommendation: start with Approach A (demangling only). It solves the display
 problem without format changes.
 
-=== Thread-Local Variable Support
+=== ✅ Thread-Local Variable Support
 
 **Priority: Low** +
 **Effort: Small (2-3 days)**

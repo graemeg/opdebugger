@@ -83,6 +83,7 @@ type
       ManagedReturn: Boolean; out RetValue: QWord): Boolean;
     function SendInterrupt: Boolean;
     function GetLoadBase(const BinaryPath: String): QWord;
+    function GetTLSBase: QWord;
 
     property IsAttached: Boolean read FAttached;
   end;
@@ -1394,6 +1395,13 @@ function TWindowsDebugAdapter.GetLoadBase(const BinaryPath: String): QWord;
 begin
   { TODO: Use NtQueryInformationProcess or EnumProcessModules to read
     the actual load base for ASLR-enabled Windows PE binaries. }
+  Result := 0;
+end;
+
+function TWindowsDebugAdapter.GetTLSBase: QWord;
+begin
+  { TODO: Use NtQueryInformationThread(ThreadBasicInformation) to read
+    the TEB address, then dereference the TLS pointer — untested. }
   Result := 0;
 end;
 

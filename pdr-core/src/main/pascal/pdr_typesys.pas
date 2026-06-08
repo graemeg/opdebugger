@@ -1476,6 +1476,12 @@ begin
       if ReadPointerValue(FProcessController, InstancePtr, PtrSize, InstancePtr) then
         VarInfo.Address := InstancePtr + VarInfo.LocationData;
     end;
+  end
+  else if VarInfo.LocationExpr = 4 then
+  begin
+    InstancePtr := FProcessController.GetTLSBase;
+    if InstancePtr <> 0 then
+      VarInfo.Address := InstancePtr + QWord(Int64(VarInfo.LocationData));
   end;
 
   { Get type info for the base variable }
@@ -1744,6 +1750,18 @@ begin
                   ': ParentRBP=$', IntToHex(ParentRBP, 16), ' + ', VarInfo.LocationData,
                   ' = $', IntToHex(ComputedVarInfo.Address, 16));
       end;
+    end;
+  end
+  else if (VarInfo.LocationExpr = 4) then { TLS-relative (thread-local variable) }
+  begin
+    ParentRBP := FProcessController.GetTLSBase;
+    if ParentRBP <> 0 then
+    begin
+      ComputedVarInfo.Address := ParentRBP + QWord(Int64(VarInfo.LocationData));
+      if gVerbose then
+        WriteLn('[DEBUG] Computed TLS address for ', VarInfo.Name,
+                ': TLSBase=$', IntToHex(ParentRBP, 16), ' + ', VarInfo.LocationData,
+                ' = $', IntToHex(ComputedVarInfo.Address, 16));
     end;
   end;
 

@@ -101,6 +101,7 @@ type
       Returns the start address of the first executable mapping matching
       BinaryPath. Returns 0 if not found or on error. }
     function GetLoadBase(const BinaryPath: String): QWord;
+    function GetTLSBase: QWord;
 
     property PID: Integer read FPID;
     property IsAttached: Boolean read FAttached;
@@ -1729,6 +1730,27 @@ begin
 
   if gVerbose and (Result <> 0) then
     WriteLn('[DEBUG] Load base from /proc/maps: $', IntToHex(Result, 16));
+end;
+
+function TLinuxPtraceAdapter.GetTLSBase: QWord;
+{$IFDEF CPUX86_64}
+const
+  FS_BASE_OFFSET = 21 * 8; { offset of fs_base in user_regs_struct }
+{$ENDIF}
+begin
+  Result := 0;
+  if FPID <= 0 then
+    Exit;
+  {$IFDEF CPUX86_64}
+  Result := QWord(ptrace(PTRACE_PEEKUSER, FPID,
+    Pointer(PtrUInt(FS_BASE_OFFSET)), nil));
+  if gVerbose then
+    WriteLn('[DEBUG] TLS base (fs_base): $', IntToHex(Result, 16));
+  {$ENDIF}
+  {$IFDEF CPUI386}
+  { i386: TLS base is in GS segment; reading it requires get_thread_area
+    or parsing /proc/<pid>/status — not yet implemented }
+  {$ENDIF}
 end;
 
 end.
