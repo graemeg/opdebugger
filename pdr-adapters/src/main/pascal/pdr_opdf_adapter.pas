@@ -14,7 +14,7 @@ unit pdr_opdf_adapter;
 interface
 
 uses
-  Classes, SysUtils, Contnrs, opdf_types, opdf_io, opdf_demangle, elf_reader, pdr_ports;
+  Classes, SysUtils, Contnrs, opdf_types, opdf_io, opdf_demangle, pdr_binary, pdr_ports;
 
 type
   { Pointer types for caching }
@@ -575,6 +575,7 @@ var
   LocalList: TFPList;
   I: Integer;
   ELFStream: TMemoryStream;
+  BinaryReader: IBinaryReader;
   RecStartPos: Int64;
   Resolution: Byte;
   GlobalTypeID: TTypeID;
@@ -588,15 +589,16 @@ begin
 
   FBinaryPath := BinaryPath;
 
-  // Try to extract .opdf section from ELF binary first
-  if TELFSectionReader.IsELFBinary(BinaryPath) then
+  // Try to extract .opdf section from the binary via format-agnostic reader
+  BinaryReader := CreateBinaryReader(BinaryPath);
+  if Assigned(BinaryReader) then
   begin
-    ELFStream := TELFSectionReader.ExtractSection(BinaryPath, '.opdf');
+    ELFStream := BinaryReader.ExtractSection('.opdf');
     if Assigned(ELFStream) then
     begin
       if gVerbose then
         WriteLn('[INFO] Loading embedded OPDF section from: ', BinaryPath);
-      FStream := ELFStream; { FStream owns the TMemoryStream }
+      FStream := ELFStream;
       FOPDFPath := BinaryPath;
       FReader := TOPDFReader.Create(FStream);
     end;

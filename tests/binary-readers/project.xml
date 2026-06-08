@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <name>binary-reader-tests</name>
+  <version>0.1.0</version>
+  <author>Graeme Geldenhuys</author>
+  <license>BSD-3-Clause</license>
+  <description>Unit tests for the binary format abstraction layer (ELF, PE, Mach-O readers)</description>
+
+  <build>
+    <packaging>application</packaging>
+    <mainSource>test_binary_readers.pas</mainSource>
+    <executableName>test_binary_readers</executableName>
+  </build>
+
+  <moduleDependencies>
+    <module>../../opdf-lib</module>
+    <module>../../pdr-adapters</module>
+    <module>../../pdr-core</module>
+  </moduleDependencies>
+</project>
