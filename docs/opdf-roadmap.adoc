@@ -738,7 +738,7 @@ that expand the debugger's capabilities. Each extension requires changes to both
 the format library (`opdf_types.pas`, `opdf_io.pas`) and the Blaise compiler's
 emitter (`uDebugOPDF.pas`).
 
-=== `recUnwindInfo` (Type 24) -- Covered in Phase 3
+=== `recUnwindInfo` (Type 24) -- Covered in Phase 3 ✅
 
 === Variant Record Support
 
