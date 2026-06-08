@@ -94,6 +94,7 @@ type
     function InjectCall(MethodAddr, SelfPtr: QWord;
       ManagedReturn: Boolean; out RetValue: QWord): Boolean;
     function SendInterrupt: Boolean;
+    function GetLoadBase(const BinaryPath: String): QWord;
 
     property PID: Integer read FPID;
     property IsAttached: Boolean read FAttached;
@@ -1726,6 +1727,13 @@ begin
     Exit;
   FpKill(FPID, SIGSTOP);
   Result := True;
+end;
+
+function TMacOSMachAdapter.GetLoadBase(const BinaryPath: String): QWord;
+begin
+  { TODO: Use task_info(TASK_DYLD_INFO) and parse the Mach-O load commands
+    to determine the actual ASLR slide for macOS binaries. }
+  Result := 0;
 end;
 
 {$ENDIF} { DARWIN }

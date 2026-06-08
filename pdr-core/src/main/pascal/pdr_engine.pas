@@ -304,10 +304,14 @@ end;
 { Execution control }
 
 function TDebuggerEngine.Run: Boolean;
+var
+  LoadBase: QWord;
+  Slide: QWord;
 begin
   Result := False;
   FLastException.IsValid := False;
   ResetSelectedFrame;
+  Slide := 0;
 
   if FState <> dsIdle then
   begin
@@ -332,8 +336,39 @@ begin
 
   FState := dsPaused;
 
-  { Set internal breakpoint on fpc_raiseexception for exception catching }
+  { Compute ASLR/PIE slide for position-independent executables.
+    ET_DYN (type=3) indicates a PIE binary whose link-time addresses
+    are relative; all OPDF addresses are adjusted by the runtime load base. }
+  if TELFSectionReader.GetELFType(FBinaryPath) = 3 then
+  begin
+    LoadBase := FProcessController.GetLoadBase(FBinaryPath);
+    if LoadBase <> 0 then
+    begin
+      Slide := LoadBase;
+      FDebugInfoReader.SetSlide(Slide);
+      if gVerbose then
+        WriteLn('[DEBUG] PIE binary detected — slide set to $', HexStr(Slide, 16));
+    end
+    else
+    begin
+      if gVerbose then
+        WriteLn('[DEBUG] PIE binary detected but could not determine load base');
+    end;
+  end
+  else
+  begin
+    if gVerbose then
+      WriteLn('[DEBUG] Non-PIE binary — no slide needed');
+  end;
+
+  { Set internal breakpoint on fpc_raiseexception for exception catching.
+    The symbol address from the ELF symtab is a link-time address; for PIE
+    binaries it needs the same ASLR slide applied. }
   FRaiseBreakpointAddr := TELFSectionReader.FindSymbolAddress(FBinaryPath, 'FPC_RAISEEXCEPTION');
+  if FRaiseBreakpointAddr <> 0 then
+  begin
+    FRaiseBreakpointAddr := FRaiseBreakpointAddr + Slide;
+  end;
   if FRaiseBreakpointAddr <> 0 then
   begin
     if FProcessController.SetBreakpoint(FRaiseBreakpointAddr) then

@@ -82,6 +82,7 @@ type
     function InjectCall(MethodAddr, SelfPtr: QWord;
       ManagedReturn: Boolean; out RetValue: QWord): Boolean;
     function SendInterrupt: Boolean;
+    function GetLoadBase(const BinaryPath: String): QWord;
 
     property IsAttached: Boolean read FAttached;
   end;
@@ -1387,6 +1388,13 @@ begin
   if (FProcessHandle = 0) or (not FAttached) then
     Exit;
   Result := DebugBreakProcess(FProcessHandle);
+end;
+
+function TWindowsDebugAdapter.GetLoadBase(const BinaryPath: String): QWord;
+begin
+  { TODO: Use NtQueryInformationProcess or EnumProcessModules to read
+    the actual load base for ASLR-enabled Windows PE binaries. }
+  Result := 0;
 end;
 
 {$ENDIF} { WINDOWS }

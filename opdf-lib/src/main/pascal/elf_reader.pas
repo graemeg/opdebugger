@@ -36,6 +36,10 @@ type
       Comparison is case-insensitive (FPC emits uppercase aliases). }
     class function FindSymbolAddress(const BinaryPath: String;
       const SymbolName: String): QWord;
+
+    { Read the ELF e_type field.
+      Returns 2 (ET_EXEC) for non-PIE, 3 (ET_DYN) for PIE, or 0 on error. }
+    class function GetELFType(const BinaryPath: String): Word;
   end;
 
 implementation
@@ -308,6 +312,41 @@ begin
         { Only process first .symtab section }
         Break;
       end;
+    finally
+      F.Free;
+    end;
+  except
+    Result := 0;
+  end;
+end;
+
+class function TELFSectionReader.GetELFType(const BinaryPath: String): Word;
+var
+  F: TFileStream;
+  Header: TElf64Header;
+begin
+  Result := 0;
+
+  if not FileExists(BinaryPath) then
+    Exit;
+
+  try
+    F := TFileStream.Create(BinaryPath, fmOpenRead or fmShareDenyNone);
+    try
+      if F.Size < SizeOf(TElf64Header) then
+        Exit;
+      F.ReadBuffer(Header, SizeOf(Header));
+
+      if (Header.e_ident[0] <> ELF_MAGIC[0]) or
+         (Header.e_ident[1] <> ELF_MAGIC[1]) or
+         (Header.e_ident[2] <> ELF_MAGIC[2]) or
+         (Header.e_ident[3] <> ELF_MAGIC[3]) then
+        Exit;
+
+      if Header.e_ident[4] <> ELFCLASS64 then
+        Exit;
+
+      Result := Header.e_type;
     finally
       F.Free;
     end;

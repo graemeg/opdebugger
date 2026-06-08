@@ -360,6 +360,11 @@ type
 
     { Send interrupt signal to stop a running process }
     function SendInterrupt: Boolean;
+
+    { Get the runtime load base address for PIE/ASLR binaries.
+      Call after Launch/Attach while the process is stopped.
+      Returns 0 if the binary is not PIE or on error. }
+    function GetLoadBase(const BinaryPath: String): QWord;
   end;
 
   { Debug Info Reader Port - Format-specific debug info reading }
@@ -416,6 +421,11 @@ type
 
     { Find a type by name (case-insensitive) }
     function FindTypeByName(const Name: String; out TypeInfo: TTypeInfo): Boolean;
+
+    { Set ASLR/PIE slide offset. All OPDF addresses are adjusted by this
+      value: runtime_addr = opdf_addr + Slide. For non-PIE binaries the
+      slide is 0. Call after Load and before any address lookups. }
+    procedure SetSlide(ASlide: QWord);
   end;
 
   { Architecture Adapter Port - Architecture-specific operations }

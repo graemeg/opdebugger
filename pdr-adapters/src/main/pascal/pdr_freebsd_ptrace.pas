@@ -80,6 +80,7 @@ type
     function InjectCall(MethodAddr, SelfPtr: QWord;
       ManagedReturn: Boolean; out RetValue: QWord): Boolean;
     function SendInterrupt: Boolean;
+    function GetLoadBase(const BinaryPath: String): QWord;
 
     property PID: Integer read FPID;
     property IsAttached: Boolean read FAttached;
@@ -1477,6 +1478,52 @@ begin
     Exit;
   FpKill(FPID, SIGSTOP);
   Result := True;
+end;
+
+function TFreeBSDPtraceAdapter.GetLoadBase(const BinaryPath: String): QWord;
+var
+  MapsFile: TextFile;
+  Line, BinaryBaseName: String;
+  SpacePos: Integer;
+  AddrStr: String;
+begin
+  Result := 0;
+
+  if FPID <= 0 then
+    Exit;
+
+  BinaryBaseName := ExtractFileName(BinaryPath);
+
+  { FreeBSD procfs: /proc/<pid>/map (NOTE: untested — format differs from Linux) }
+  {$PUSH}{$I-}
+  AssignFile(MapsFile, '/proc/' + IntToStr(FPID) + '/map');
+  Reset(MapsFile);
+  if IOResult <> 0 then
+    Exit;
+
+  while not EOF(MapsFile) do
+  begin
+    ReadLn(MapsFile, Line);
+    if IOResult <> 0 then
+      Break;
+
+    if (Pos(BinaryBaseName, Line) > 0) and (Pos('r-x', Line) > 0) then
+    begin
+      SpacePos := Pos(' ', Line);
+      if SpacePos > 1 then
+      begin
+        AddrStr := Copy(Line, 3, SpacePos - 3);
+        Result := StrToQWord('$' + AddrStr);
+        Break;
+      end;
+    end;
+  end;
+
+  CloseFile(MapsFile);
+  {$POP}
+
+  if gVerbose and (Result <> 0) then
+    WriteLn('[DEBUG] Load base from /proc/map: $', IntToHex(Result, 16));
 end;
 
 {$ENDIF} { FREEBSD }

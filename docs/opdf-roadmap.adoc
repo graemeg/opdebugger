@@ -504,7 +504,7 @@ Files affected::
   `{$IFDEF CPUARM}` branches; add `TFPRegisters` for floating-point state
 * `pdr_arch_adapters.pas` -- add `TArchAArch64Adapter`, `TArchARMAdapter`
 
-=== PIE/ASLR Support
+=== PIE/ASLR Support ✅
 
 **Priority: High** +
 **Effort: Small-Medium (2-3 days)**

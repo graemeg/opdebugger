@@ -90,6 +90,7 @@ type
     FLocalVariables: TFPHashList;   // ScopeID -> TList of TLocalVariableInfo
     FConstants: TFPHashList;         // Constant name -> TConstantInfo
     FLoaded: Boolean;
+    FSlide: QWord;
 
     { Collision remap — maps original TypeID to synthetic TypeID for the
       extremely rare case where two different types hash to the same value.
@@ -133,6 +134,7 @@ type
       out FuncInfo: TFunctionInfo): Boolean;
     function FindConstant(const Name: String; out ConstInfo: TConstantInfo): Boolean;
     function FindTypeByName(const Name: String; out TypeInfo: TTypeInfo): Boolean;
+    procedure SetSlide(ASlide: QWord);
   end;
 
 implementation
@@ -255,6 +257,7 @@ begin
   FReader := nil;
   FStream := nil;
   FLoaded := False;
+  FSlide := 0;
 end;
 
 destructor TOPDFReaderAdapter.Destroy;
@@ -1824,6 +1827,51 @@ begin
       Result := True;
       Exit;
     end;
+  end;
+end;
+
+procedure TOPDFReaderAdapter.SetSlide(ASlide: QWord);
+var
+  I: Integer;
+  PLine: PLineInfo;
+  PScope: PFunctionScope;
+  PVar: PVariableInfo;
+  Delta: QWord;
+begin
+  if ASlide = FSlide then
+    Exit;
+
+  { Compute the adjustment relative to the current slide }
+  Delta := ASlide - FSlide;
+  FSlide := ASlide;
+
+  if Delta = 0 then
+    Exit;
+
+  if gVerbose then
+    WriteLn('[DEBUG] Applying ASLR slide: +$', IntToHex(Delta, 16));
+
+  { Adjust all line info addresses }
+  for I := 0 to FLineInfo.Count - 1 do
+  begin
+    PLine := PLineInfo(FLineInfo[I]);
+    PLine^.Address := PLine^.Address + Delta;
+  end;
+
+  { Adjust all function scope addresses }
+  for I := 0 to FFunctionScopes.Count - 1 do
+  begin
+    PScope := PFunctionScope(FFunctionScopes[I]);
+    PScope^.LowPC := PScope^.LowPC + Delta;
+    PScope^.HighPC := PScope^.HighPC + Delta;
+  end;
+
+  { Adjust all global variable addresses }
+  for I := 0 to FVariables.Count - 1 do
+  begin
+    PVar := PVariableInfo(FVariables.Items[I]);
+    if (PVar <> nil) and (PVar^.LocationExpr = 0) then
+      PVar^.Address := PVar^.Address + Delta;
   end;
 end;
 

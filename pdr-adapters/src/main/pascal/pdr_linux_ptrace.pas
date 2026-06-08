@@ -97,6 +97,11 @@ type
 
     function SendInterrupt: Boolean;
 
+    { Read the load base address from /proc/<pid>/maps for PIE/ASLR support.
+      Returns the start address of the first executable mapping matching
+      BinaryPath. Returns 0 if not found or on error. }
+    function GetLoadBase(const BinaryPath: String): QWord;
+
     property PID: Integer read FPID;
     property IsAttached: Boolean read FAttached;
     property RedirectChildIO: Boolean read FRedirectChildIO write FRedirectChildIO;
@@ -1677,6 +1682,53 @@ begin
     Exit;
   FpKill(FPID, SIGSTOP);
   Result := True;
+end;
+
+function TLinuxPtraceAdapter.GetLoadBase(const BinaryPath: String): QWord;
+var
+  MapsFile: TextFile;
+  Line, BinaryBaseName: String;
+  DashPos, SpacePos, I: Integer;
+  AddrStr: String;
+begin
+  Result := 0;
+
+  if FPID <= 0 then
+    Exit;
+
+  BinaryBaseName := ExtractFileName(BinaryPath);
+
+  {$PUSH}{$I-}
+  AssignFile(MapsFile, '/proc/' + IntToStr(FPID) + '/maps');
+  Reset(MapsFile);
+  if IOResult <> 0 then
+    Exit;
+
+  while not EOF(MapsFile) do
+  begin
+    ReadLn(MapsFile, Line);
+    if IOResult <> 0 then
+      Break;
+
+    { Each line: start-end perms offset dev inode pathname
+      e.g. 55a3b4c00000-55a3b4c01000 r-xp 00000000 08:01 1234 /path/to/binary }
+    if (Pos(BinaryBaseName, Line) > 0) and (Pos('r-xp', Line) > 0) then
+    begin
+      DashPos := Pos('-', Line);
+      if DashPos > 1 then
+      begin
+        AddrStr := Copy(Line, 1, DashPos - 1);
+        Result := StrToQWord('$' + AddrStr);
+        Break;
+      end;
+    end;
+  end;
+
+  CloseFile(MapsFile);
+  {$POP}
+
+  if gVerbose and (Result <> 0) then
+    WriteLn('[DEBUG] Load base from /proc/maps: $', IntToHex(Result, 16));
 end;
 
 end.
