@@ -462,7 +462,7 @@ Suggested implementation order::
 . Windows (largest user base outside Linux; uses PE reader)
 . macOS (requires code-signing infrastructure; uses Mach-O reader)
 
-=== Architecture Adapter Expansion
+=== ✅ Architecture Adapter Expansion
 
 **Priority: High** +
 **Effort: Small per architecture (1-2 days each)**

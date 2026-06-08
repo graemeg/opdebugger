@@ -41,6 +41,37 @@ type
     EIP: Cardinal;
     EFLAGS: Cardinal;
     {$ENDIF}
+    {$IFDEF CPUAARCH64}
+    X: array[0..30] of QWord;   // X0-X30 (X29=FP, X30=LR)
+    SP: QWord;
+    PC: QWord;
+    PSTATE: QWord;              // NZCV condition flags
+    {$ENDIF}
+    {$IFDEF CPUARM}
+    R: array[0..15] of Cardinal; // R0-R15 (R13=SP, R14=LR, R15=PC)
+    CPSR: Cardinal;              // Current Program Status Register
+    {$ENDIF}
+  end;
+
+  { Floating-point / SIMD register state }
+  TFPRegisters = record
+    {$IFDEF CPUX86_64}
+    XMM: array[0..15] of array[0..15] of Byte;  // XMM0-XMM15 (128-bit each)
+    MXCSR: Cardinal;
+    {$ENDIF}
+    {$IFDEF CPUI386}
+    XMM: array[0..7] of array[0..15] of Byte;   // XMM0-XMM7 (128-bit each)
+    MXCSR: Cardinal;
+    {$ENDIF}
+    {$IFDEF CPUAARCH64}
+    V: array[0..31] of array[0..15] of Byte;    // V0-V31 (128-bit NEON/FP)
+    FPCR: Cardinal;                               // FP Control Register
+    FPSR: Cardinal;                               // FP Status Register
+    {$ENDIF}
+    {$IFDEF CPUARM}
+    D: array[0..15] of QWord;                    // D0-D15 (64-bit VFPv3-D16)
+    FPSCR: Cardinal;                              // FP Status/Control Register
+    {$ENDIF}
   end;
 
   { Breakpoint handle }

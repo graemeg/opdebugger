@@ -1045,6 +1045,16 @@ begin
     WriteLn('[INFO] Detected architecture: i386');
   FArchAdapter := TArchX86Adapter.Create(FProcessController);
   {$ENDIF}
+  {$IFDEF CPUAARCH64}
+  if gVerbose then
+    WriteLn('[INFO] Detected architecture: AArch64');
+  FArchAdapter := TArchAArch64Adapter.Create(FProcessController);
+  {$ENDIF}
+  {$IFDEF CPUARM}
+  if gVerbose then
+    WriteLn('[INFO] Detected architecture: ARM');
+  FArchAdapter := TArchARMAdapter.Create(FProcessController);
+  {$ENDIF}
 
   // Create debugger engine
   FEngine := TDebuggerEngine.Create(FProcessController, FDebugInfoReader, FArchAdapter);
