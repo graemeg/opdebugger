@@ -121,6 +121,10 @@ type
     procedure WriteParameter(const ParamName: String; TypeID: TTypeID;
                             IsVar, IsConst, IsOut: Boolean);
 
+    { Write per-function unwind info }
+    procedure WriteUnwindInfo(LowPC, HighPC: QWord;
+                             const Rules: array of TUnwindRule);
+
     { Finalize - update header with final record count }
     procedure Finalize;
 
@@ -174,6 +178,8 @@ type
     function ReadClassVar(out Def: TDefClassVar; out Name: String): Boolean;
     function ReadClassConst(out Def: TDefClassConst; out ValueBytes: TBytes;
                             out Name: String): Boolean;
+    function ReadUnwindInfo(out Def: TDefUnwindInfo;
+                            out Rules: TUnwindRuleArray): Boolean;
 
     { Skip current record (for unsupported types) }
     procedure SkipRecord(const RecHeader: TOPDFRecordHeader);
@@ -802,6 +808,31 @@ begin
   Inc(FRecordCount);
 end;
 
+procedure TOPDFWriter.WriteUnwindInfo(LowPC, HighPC: QWord;
+                                     const Rules: array of TUnwindRule);
+var
+  RecHeader: TOPDFRecordHeader;
+  Payload: TDefUnwindInfo;
+  I: Integer;
+begin
+  if not FHeaderWritten then
+    WriteHeader;
+
+  Payload.LowPC := LowPC;
+  Payload.HighPC := HighPC;
+  Payload.RuleCount := Length(Rules);
+
+  RecHeader.RecType := Ord(recUnwindInfo);
+  RecHeader.RecSize := SizeOf(TDefUnwindInfo) + Cardinal(Length(Rules)) * SizeOf(TUnwindRule);
+
+  FStream.Write(RecHeader, SizeOf(RecHeader));
+  FStream.Write(Payload, SizeOf(Payload));
+  for I := 0 to High(Rules) do
+    FStream.Write(Rules[I], SizeOf(TUnwindRule));
+
+  Inc(FRecordCount);
+end;
+
 procedure TOPDFWriter.Finalize;
 var
   Header: TOPDFHeader;
@@ -1400,6 +1431,32 @@ begin
   SetLength(Name, Def.NameLen);
   if Def.NameLen > 0 then
     FStream.Read(Name[1], Def.NameLen);
+
+  Result := True;
+end;
+
+function TOPDFReader.ReadUnwindInfo(out Def: TDefUnwindInfo;
+                                    out Rules: TUnwindRuleArray): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  SetLength(Rules, 0);
+
+  if FStream.Position + SizeOf(TDefUnwindInfo) > FStream.Size then
+    Exit;
+
+  FStream.Read(Def, SizeOf(Def));
+
+  if Def.RuleCount > 10000 then
+    Exit;
+
+  if FStream.Position + Int64(Def.RuleCount) * SizeOf(TUnwindRule) > FStream.Size then
+    Exit;
+
+  SetLength(Rules, Def.RuleCount);
+  for I := 0 to Def.RuleCount - 1 do
+    FStream.Read(Rules[I], SizeOf(TUnwindRule));
 
   Result := True;
 end;

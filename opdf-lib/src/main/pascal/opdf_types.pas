@@ -74,7 +74,8 @@ type
     recConstant      = 20, // Compile-time constant (value embedded in record)
     recClassVar      = 21, // Class variable (static field) — owner class TypeID + global address
     recClassConst    = 22, // Class constant — owner class TypeID + embedded value
-    recUtf8Str       = 23  // UTF-8 string — data-pointer layout, no code-page or element-size fields
+    recUtf8Str       = 23, // UTF-8 string — data-pointer layout, no code-page or element-size fields
+    recUnwindInfo    = 24  // Per-function unwind rules for stack walking without frame pointers
   );
 
   { Constant value kind }
@@ -406,6 +407,36 @@ type
     // Followed by NameLen bytes of name
   end;
 
+  { Unwind rule kind — how to recover the caller's CFA / return address }
+  TUnwindRuleKind = (
+    uwCFA_RBP_Offset = 0,  // CFA = RBP + Offset (classic frame pointer)
+    uwCFA_RSP_Offset = 1,  // CFA = RSP + Offset (no frame pointer)
+    uwRetAddr_CFA    = 2,  // Return address at [CFA - PtrSize] (standard)
+    uwRBP_CFA        = 3   // Saved RBP at [CFA - 2*PtrSize] (standard)
+  );
+
+  { Unwind Rule — one rule entry within a recUnwindInfo record.
+    Each rule defines how to recover a register/address from a given
+    code offset within the function. }
+  TUnwindRule = packed record
+    CodeOffset: Cardinal;   // 4 bytes — byte offset from function LowPC
+    RuleKind: Byte;         // 1 byte (TUnwindRuleKind)
+    Operand: SmallInt;      // 2 bytes — signed offset operand
+  end;
+
+  { Unwind Info Definition (recUnwindInfo = 24)
+    Per-function unwind rules. Associates an address range (LowPC..HighPC)
+    with a sequence of rules for recovering the caller's frame at any
+    instruction within the function. }
+  TDefUnwindInfo = packed record
+    LowPC: QWord;           // 8 bytes — function start address
+    HighPC: QWord;           // 8 bytes — function end address (exclusive)
+    RuleCount: Word;         // 2 bytes — number of TUnwindRule entries
+    // Followed by RuleCount × TUnwindRule (7 bytes each)
+  end;
+
+  TUnwindRuleArray = array of TUnwindRule;
+
   TEnumMemberArray = array of TEnumMember;
   TInterfaceMethodDescriptorArray = array of TInterfaceMethodDescriptor;
 
@@ -461,6 +492,7 @@ begin
     recConstant:      Result := 'Constant';
     recClassVar:      Result := 'ClassVar';
     recClassConst:    Result := 'ClassConst';
+    recUnwindInfo:    Result := 'UnwindInfo';
     else              Result := 'Unknown';
   end;
 end;

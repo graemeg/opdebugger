@@ -188,7 +188,11 @@ TOPDFRecordType = (
   recEnum          = 17,  // Enumeration type with named members
   recSet           = 18,  // Set type (bitfield over ordinal or enum base)
   recUnitDirectory = 19,  // Unit directory table (index of all compilation units)
-  recConstant      = 20   // Compile-time constant (value embedded in record)
+  recConstant      = 20,  // Compile-time constant (value embedded in record)
+  recClassVar      = 21,  // Class variable (static field)
+  recClassConst    = 22,  // Class constant (embedded value)
+  recUtf8Str       = 23,  // UTF-8 string (Blaise-specific)
+  recUnwindInfo    = 24   // Per-function unwind rules for stack walking
 );
 ----
 
@@ -768,6 +772,54 @@ end;
 ----
 
 `ScopeID` must match the `ScopeID` fields in all `recLocalVar` records belonging to this function. It is derived from `LowPC` at read time (low 32 bits of the entry address).
+
+=== Unwind Info (recUnwindInfo = 24)
+
+Per-function unwind rules enabling stack walking without frame pointers. Each record covers a single function's address range and contains a sequence of rules, sorted by code offset. When the debugger needs to unwind through a function, it finds the latest rule entry whose `CodeOffset` is less than or equal to the current instruction offset from `LowPC`.
+
+[source,pascal]
+----
+TUnwindRuleKind = (
+  uwCFA_RBP_Offset = 0,  // CFA = RBP + Operand
+  uwCFA_RSP_Offset = 1,  // CFA = RSP + Operand
+  uwRetAddr_CFA    = 2,  // Return address at [CFA + Operand]
+  uwRBP_CFA        = 3   // Saved RBP at [CFA + Operand]
+);
+
+TUnwindRule = packed record
+  CodeOffset: Cardinal;   // 4 bytes — byte offset from LowPC
+  RuleKind: Byte;         // 1 byte (TUnwindRuleKind)
+  Operand: SmallInt;      // 2 bytes — signed offset operand
+end;
+// Total: 7 bytes per rule
+
+TDefUnwindInfo = packed record
+  LowPC: QWord;           // 8 bytes — function start address
+  HighPC: QWord;           // 8 bytes — function end address (exclusive)
+  RuleCount: Word;         // 2 bytes — number of TUnwindRule entries
+  // Followed by: RuleCount × TUnwindRule (7 bytes each)
+end;
+// Fixed part: 18 bytes
+----
+
+The CFA (Canonical Frame Address) is the stack pointer value at the call site. Standard x86_64 frame-pointer convention is:
+
+----
+CFA         = RBP + 16          (uwCFA_RBP_Offset, operand=16)
+return addr = [CFA - 8]         (uwRetAddr_CFA, operand=-8)
+saved RBP   = [CFA - 16]        (uwRBP_CFA, operand=-16)
+----
+
+For functions compiled without frame pointers (RSP-relative):
+
+----
+CFA         = RSP + N           (uwCFA_RSP_Offset, operand=N)
+return addr = [CFA - 8]         (uwRetAddr_CFA, operand=-8)
+----
+
+Rules within a record must be sorted by `CodeOffset` in ascending order. The debugger applies all rules whose `CodeOffset` ≤ current instruction offset, with later rules overriding earlier ones. This handles the prologue/epilogue transitions where the CFA register changes from RSP to RBP and back.
+
+If no `recUnwindInfo` record covers a given address, the debugger falls back to classic frame-pointer chain walking (`[RBP]` = saved RBP, `[RBP+8]` = return address).
 
 == Location Expressions
 

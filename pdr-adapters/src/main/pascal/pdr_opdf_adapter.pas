@@ -23,6 +23,14 @@ type
   PConstantInfo = ^TConstantInfo;
   PLineInfo = ^TLineInfo;
 
+  { Cached unwind info — one per function that has unwind rules }
+  TUnwindInfoEntry = record
+    LowPC: QWord;
+    HighPC: QWord;
+    Rules: TUnwindRuleArray;
+  end;
+  PUnwindInfoEntry = ^TUnwindInfoEntry;
+
   { Function scope information }
   TFunctionScope = record
     ScopeID: Cardinal;      // low_pc address of function (unique identifier)
@@ -89,6 +97,7 @@ type
     FFunctionScopes: TFPList;       // List of TFunctionScope records
     FLocalVariables: TFPHashList;   // ScopeID -> TList of TLocalVariableInfo
     FConstants: TFPHashList;         // Constant name -> TConstantInfo
+    FUnwindInfos: TFPList;           // List of PUnwindInfoEntry (sorted by LowPC)
     FLoaded: Boolean;
     FSlide: QWord;
 
@@ -135,6 +144,7 @@ type
     function FindConstant(const Name: String; out ConstInfo: TConstantInfo): Boolean;
     function FindTypeByName(const Name: String; out TypeInfo: TTypeInfo): Boolean;
     procedure SetSlide(ASlide: QWord);
+    function FindUnwindEntry(Address: QWord; out Entry: TUnwindEntry): Boolean;
   end;
 
 implementation
@@ -252,6 +262,7 @@ begin
   FFunctionScopes := TFPList.Create;
   FLocalVariables := TFPHashList.Create;
   FConstants := TFPHashList.Create;
+  FUnwindInfos := TFPList.Create;
   SetLength(FCollisionRemap, 0);
   FCollisionCount := 0;
   FReader := nil;
@@ -266,6 +277,7 @@ begin
   FTypes.Free;
   FVariables.Free;
   FConstants.Free;
+  FUnwindInfos.Free;
   SetLength(FCollisionRemap, 0);
   FLineInfo.Free;
   FFunctionScopes.Free;
@@ -333,6 +345,11 @@ begin
     LocalList.Free;
   end;
   FLocalVariables.Clear;
+
+  // Free unwind info entries
+  for I := 0 to FUnwindInfos.Count - 1 do
+    Dispose(PUnwindInfoEntry(FUnwindInfos[I]));
+  FUnwindInfos.Clear;
 
   SetLength(FCollisionRemap, 0);
   FCollisionCount := 0;
@@ -552,6 +569,9 @@ var
   DefConstant: TDefConstant;
   DefClassVar: TDefClassVar;
   DefClassConst: TDefClassConst;
+  DefUnwindInfo: TDefUnwindInfo;
+  UnwindRules: TUnwindRuleArray;
+  PUnwind: PUnwindInfoEntry;
   ConstBytes: TBytes;
   ConstName: String;
   PConst: PConstantInfo;
@@ -1184,6 +1204,18 @@ begin
                 end;
               end;
             end;
+          end;
+        end;
+
+      recUnwindInfo:
+        begin
+          if FReader.ReadUnwindInfo(DefUnwindInfo, UnwindRules) then
+          begin
+            New(PUnwind);
+            PUnwind^.LowPC := DefUnwindInfo.LowPC;
+            PUnwind^.HighPC := DefUnwindInfo.HighPC;
+            PUnwind^.Rules := UnwindRules;
+            FUnwindInfos.Add(PUnwind);
           end;
         end;
 
@@ -1872,6 +1904,75 @@ begin
     PVar := PVariableInfo(FVariables.Items[I]);
     if (PVar <> nil) and (PVar^.LocationExpr = 0) then
       PVar^.Address := PVar^.Address + Delta;
+  end;
+
+  { Adjust all unwind info addresses }
+  for I := 0 to FUnwindInfos.Count - 1 do
+  begin
+    PUnwindInfoEntry(FUnwindInfos[I])^.LowPC :=
+      PUnwindInfoEntry(FUnwindInfos[I])^.LowPC + Delta;
+    PUnwindInfoEntry(FUnwindInfos[I])^.HighPC :=
+      PUnwindInfoEntry(FUnwindInfos[I])^.HighPC + Delta;
+  end;
+end;
+
+function TOPDFReaderAdapter.FindUnwindEntry(Address: QWord;
+  out Entry: TUnwindEntry): Boolean;
+var
+  I, J: Integer;
+  PUnwind: PUnwindInfoEntry;
+  Offset: Cardinal;
+  BestIdx: Integer;
+  Rule: TUnwindRule;
+begin
+  Result := False;
+  Entry.IsValid := False;
+
+  for I := 0 to FUnwindInfos.Count - 1 do
+  begin
+    PUnwind := PUnwindInfoEntry(FUnwindInfos[I]);
+    if (Address >= PUnwind^.LowPC) and (Address < PUnwind^.HighPC) then
+    begin
+      if Length(PUnwind^.Rules) = 0 then
+        Exit;
+
+      Offset := Cardinal(Address - PUnwind^.LowPC);
+
+      { Initialise with defaults (classic frame pointer convention) }
+      Entry.CFARegister := 0;     { RBP }
+      Entry.CFAOffset := 16;      { CFA = RBP + 16 }
+      Entry.RetAddrOffset := -SmallInt(FHeader.PointerSize);
+      Entry.SavedBPOffset := -SmallInt(FHeader.PointerSize * 2);
+
+      { Apply all rules whose CodeOffset <= current offset }
+      for J := 0 to High(PUnwind^.Rules) do
+      begin
+        Rule := PUnwind^.Rules[J];
+        if Rule.CodeOffset > Offset then
+          Break;
+
+        case TUnwindRuleKind(Rule.RuleKind) of
+          uwCFA_RBP_Offset:
+            begin
+              Entry.CFARegister := 0;
+              Entry.CFAOffset := Rule.Operand;
+            end;
+          uwCFA_RSP_Offset:
+            begin
+              Entry.CFARegister := 1;
+              Entry.CFAOffset := Rule.Operand;
+            end;
+          uwRetAddr_CFA:
+            Entry.RetAddrOffset := Rule.Operand;
+          uwRBP_CFA:
+            Entry.SavedBPOffset := Rule.Operand;
+        end;
+      end;
+
+      Entry.IsValid := True;
+      Result := True;
+      Exit;
+    end;
   end;
 end;
 

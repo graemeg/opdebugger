@@ -563,7 +563,7 @@ Affected evaluators::
 Fix: thread `GetPointerSize` through all evaluators (it is already available on
 `TTypeSystem` via the `IArchAdapter`).
 
-=== `recUnwindInfo` (Record Type 24)
+=== `recUnwindInfo` (Record Type 24) ✅
 
 **Priority: Medium** +
 **Effort: Small-Medium (3-4 days)**

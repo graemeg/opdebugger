@@ -25,7 +25,7 @@ uses
 
 const
   OPDF_DUMP_VERSION = {$I version.inc};
-  MAX_REC_TYPE = 22;
+  MAX_REC_TYPE = 24;
 
 type
   TRecordCounts = array[0..MAX_REC_TYPE] of Cardinal;
@@ -92,6 +92,8 @@ begin
   if LName = 'constant' then Exit(20);
   if LName = 'classvar' then Exit(21);
   if LName = 'classconst' then Exit(22);
+  if LName = 'utf8string' then Exit(23);
+  if LName = 'unwindinfo' then Exit(24);
   Result := -1;
 end;
 
@@ -425,6 +427,35 @@ begin
   WriteLn;
 end;
 
+function UnwindRuleKindToString(Kind: Byte): String;
+begin
+  case Kind of
+    0: Result := 'CFA_RBP_Offset';
+    1: Result := 'CFA_RSP_Offset';
+    2: Result := 'RetAddr_CFA';
+    3: Result := 'RBP_CFA';
+  else
+    Result := Format('Unknown(%d)', [Kind]);
+  end;
+end;
+
+procedure DumpUnwindInfo(Stream: TStream);
+var
+  Def: TDefUnwindInfo;
+  Rule: TUnwindRule;
+  I: Integer;
+begin
+  Stream.Read(Def, SizeOf(Def));
+  WriteLn(Format('    LowPC=0x%x HighPC=0x%x Rules=%d',
+    [Def.LowPC, Def.HighPC, Def.RuleCount]));
+  for I := 0 to Def.RuleCount - 1 do
+  begin
+    Stream.Read(Rule, SizeOf(Rule));
+    WriteLn(Format('      [%d] CodeOffset=+%d Kind=%s Operand=%d',
+      [I, Rule.CodeOffset, UnwindRuleKindToString(Rule.RuleKind), Rule.Operand]));
+  end;
+end;
+
 procedure DumpUnitDirectory(Stream: TStream);
 var
   UnitCnt: Word;
@@ -618,6 +649,7 @@ begin
           recConstant:      DumpConstant(Stream);
           recClassVar:      DumpClassVar(Stream);
           recClassConst:    DumpClassConst(Stream);
+          recUnwindInfo:    DumpUnwindInfo(Stream);
         else
           { Unknown record type — skip }
         end;
@@ -701,7 +733,8 @@ begin
   WriteLn('Record types: Primitive, GlobalVar, ShortString, AnsiString,');
   WriteLn('  UnicodeString, Pointer, Array, Record, Class, Property,');
   WriteLn('  Method, LocalVar, Parameter, LineInfo, FunctionScope,');
-  WriteLn('  Interface, Enum, Set, UnitDirectory, Constant');
+  WriteLn('  Interface, Enum, Set, UnitDirectory, Constant,');
+  WriteLn('  ClassVar, ClassConst, Utf8String, UnwindInfo');
 end;
 
 procedure ParseArgs;

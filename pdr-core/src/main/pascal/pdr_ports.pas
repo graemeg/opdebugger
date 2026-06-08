@@ -271,6 +271,17 @@ type
     HighPC: QWord;
   end;
 
+  { Resolved unwind entry — the active rules for a given address.
+    CFA (Canonical Frame Address) is the stack pointer value at the
+    call site. Return address lives at [CFA - PtrSize]. }
+  TUnwindEntry = record
+    IsValid: Boolean;
+    CFARegister: Byte;     { 0 = RBP/EBP, 1 = RSP/ESP }
+    CFAOffset: SmallInt;   { CFA = Register + CFAOffset }
+    RetAddrOffset: SmallInt; { return address at [CFA + RetAddrOffset] }
+    SavedBPOffset: SmallInt; { saved frame pointer at [CFA + SavedBPOffset] }
+  end;
+
   { Calling convention types }
   TCallingConvention = (
     ccRegister,    // FPC default (registers then stack)
@@ -426,6 +437,12 @@ type
       value: runtime_addr = opdf_addr + Slide. For non-PIE binaries the
       slide is 0. Call after Load and before any address lookups. }
     procedure SetSlide(ASlide: QWord);
+
+    { Find unwind entry for an address. Returns a resolved TUnwindEntry
+      with IsValid=True if unwind rules exist for this address, or
+      IsValid=False if no unwind info covers this address (caller should
+      fall back to frame-pointer-based walking). }
+    function FindUnwindEntry(Address: QWord; out Entry: TUnwindEntry): Boolean;
   end;
 
   { Architecture Adapter Port - Architecture-specific operations }
