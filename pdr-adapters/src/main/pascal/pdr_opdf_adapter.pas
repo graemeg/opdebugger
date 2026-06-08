@@ -706,7 +706,7 @@ begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
               PType^.TypeID := GlobalTypeID;
-              PType^.Name := TypeName;
+              PType^.Name := TFPCDemangler.DemangleGenericName(TypeName);
               PType^.Size := DefPrimitive.SizeInBytes;
               PType^.IsSigned := DefPrimitive.IsSigned <> 0;
               PType^.SubKind := DefPrimitive.SubKind;
@@ -733,7 +733,7 @@ begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
               PType^.TypeID := GlobalTypeID;
-              PType^.Name := TypeName;
+              PType^.Name := TFPCDemangler.DemangleGenericName(TypeName);
               PType^.Size := DefShortString.MaxLength + 1; // Length byte + data
               PType^.IsSigned := False;
               PType^.Category := tcShortString;
@@ -754,7 +754,7 @@ begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
               PType^.TypeID := GlobalTypeID;
-              PType^.Name := TypeName;
+              PType^.Name := TFPCDemangler.DemangleGenericName(TypeName);
               PType^.Size := FHeader.PointerSize;
               PType^.IsSigned := False;
               PType^.Category := tcAnsiString;
@@ -779,7 +779,7 @@ begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
               PType^.TypeID := GlobalTypeID;
-              PType^.Name := TypeName;
+              PType^.Name := TFPCDemangler.DemangleGenericName(TypeName);
               PType^.Size := FHeader.PointerSize;
               PType^.IsSigned := False;
               // Distinguish UnicodeString vs WideString by name
@@ -861,7 +861,7 @@ begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
               PType^.TypeID := GlobalTypeID;
-              PType^.Name := TypeName;
+              PType^.Name := TFPCDemangler.DemangleGenericName(TypeName);
               PType^.Size := FHeader.PointerSize;  // Classes are pointers
               PType^.IsSigned := False;
               PType^.Category := tcClass;
@@ -921,7 +921,7 @@ begin
             PScope^.ScopeID := DefFunctionScope.ScopeID;
             PScope^.LowPC := DefFunctionScope.LowPC;
             PScope^.HighPC := DefFunctionScope.HighPC;
-            PScope^.Name := FunctionName;
+            PScope^.Name := TFPCDemangler.DemangleGenericName(FunctionName);
             PScope^.DeclIndex := DefFunctionScope.DeclIndex;
 
             FFunctionScopes.Add(PScope);
@@ -938,7 +938,7 @@ begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
               PType^.TypeID := GlobalTypeID;
-              PType^.Name := TypeName;
+              PType^.Name := TFPCDemangler.DemangleGenericName(TypeName);
               PType^.Size := 0;  // Arrays have variable size
               PType^.IsSigned := False;
               PType^.Category := tcArray;
@@ -972,7 +972,7 @@ begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
               PType^.TypeID := GlobalTypeID;
-              PType^.Name := TypeName;
+              PType^.Name := TFPCDemangler.DemangleGenericName(TypeName);
               PType^.Size := FHeader.PointerSize;
               PType^.IsSigned := False;
               PType^.Category := tcPointer;
@@ -994,7 +994,7 @@ begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
               PType^.TypeID := GlobalTypeID;
-              PType^.Name := TypeName;
+              PType^.Name := TFPCDemangler.DemangleGenericName(TypeName);
               PType^.Size := DefRecord.TotalSize;
               PType^.IsSigned := False;
               PType^.Category := tcRecord;
@@ -1026,7 +1026,7 @@ begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
               PType^.TypeID := GlobalTypeID;
-              PType^.Name := TypeName;
+              PType^.Name := TFPCDemangler.DemangleGenericName(TypeName);
               PType^.Size := DefEnum.SizeInBytes;
               PType^.IsSigned := False;
               PType^.Category := tcEnum;
@@ -1055,7 +1055,7 @@ begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
               PType^.TypeID := GlobalTypeID;
-              PType^.Name := TypeName;
+              PType^.Name := TFPCDemangler.DemangleGenericName(TypeName);
               PType^.Size := DefSet.SizeInBytes;
               PType^.IsSigned := False;
               PType^.Category := tcSet;
@@ -1111,7 +1111,7 @@ begin
               New(PType);
               FillChar(PType^, SizeOf(TTypeInfo), 0);
               PType^.TypeID := GlobalTypeID;
-              PType^.Name := TypeName;
+              PType^.Name := TFPCDemangler.DemangleGenericName(TypeName);
               PType^.Size := FHeader.PointerSize;  // Interface is a pointer
               PType^.IsSigned := False;
               PType^.Category := tcInterface;

@@ -31,6 +31,11 @@ type
 
     { Convert FPC uppercase identifier to mixed case }
     class function ToMixedCase(const UpperName: String): String;
+
+    { Demangle a generic type name.
+      FPC: TFOO$1$TBAR -> TFoo<TBar>, TFOO$2$TBAR$TBAZ -> TFoo<TBar, TBaz>
+      Blaise: TFoo<TBar> passes through unchanged. }
+    class function DemangleGenericName(const TypeName: String): String;
   end;
 
 implementation
@@ -167,6 +172,76 @@ begin
   // If we couldn't extract anything useful, return original
   if Result = '' then
     Result := MangledName;
+end;
+
+class function TFPCDemangler.DemangleGenericName(const TypeName: String): String;
+var
+  DollarPos, ParamCountEnd, ParamCount: Integer;
+  BaseName, ParamSection, Param: String;
+  I, Start: Integer;
+  IsFirst: Boolean;
+begin
+  Result := TypeName;
+  if TypeName = '' then
+    Exit;
+
+  { Already in angle-bracket form (Blaise convention) — pass through }
+  if Pos('<', TypeName) > 0 then
+    Exit;
+
+  { FPC pattern: BaseName$N$Param1$Param2...
+    where N is the parameter count digit(s) }
+  DollarPos := Pos('$', TypeName);
+  if DollarPos < 2 then
+    Exit;
+
+  BaseName := Copy(TypeName, 1, DollarPos - 1);
+
+  { Read parameter count (digits after first $) }
+  ParamCountEnd := DollarPos + 1;
+  while (ParamCountEnd <= Length(TypeName)) and
+        (TypeName[ParamCountEnd] >= '0') and (TypeName[ParamCountEnd] <= '9') do
+    Inc(ParamCountEnd);
+
+  if ParamCountEnd = DollarPos + 1 then
+    Exit; { No digits after $ — not a generic pattern }
+
+  { Verify the digit(s) are followed by $ }
+  if (ParamCountEnd > Length(TypeName)) or (TypeName[ParamCountEnd] <> '$') then
+    Exit;
+
+  ParamSection := Copy(TypeName, ParamCountEnd + 1, Length(TypeName));
+  if ParamSection = '' then
+    Exit;
+
+  { Split parameters by $ }
+  Result := ToMixedCase(BaseName) + '<';
+  IsFirst := True;
+  Start := 1;
+  for I := 1 to Length(ParamSection) do
+  begin
+    if ParamSection[I] = '$' then
+    begin
+      Param := Copy(ParamSection, Start, I - Start);
+      if Param <> '' then
+      begin
+        if not IsFirst then
+          Result := Result + ', ';
+        Result := Result + ToMixedCase(Param);
+        IsFirst := False;
+      end;
+      Start := I + 1;
+    end;
+  end;
+  { Last parameter (no trailing $) }
+  Param := Copy(ParamSection, Start, Length(ParamSection) - Start + 1);
+  if Param <> '' then
+  begin
+    if not IsFirst then
+      Result := Result + ', ';
+    Result := Result + ToMixedCase(Param);
+  end;
+  Result := Result + '>';
 end;
 
 end.

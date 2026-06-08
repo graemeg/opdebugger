@@ -765,7 +765,7 @@ FreeVision TUI), OPDF needs a way to distinguish them.
 Option A: extend `recClass` with a flag indicating "object vs class". +
 Option B: define `recObject` (type 25) with its own layout description.
 
-=== Generic Type Representation
+=== Generic Type Representation ✅
 
 **Priority: Low** +
 **Effort: Medium (1-2 weeks)**
