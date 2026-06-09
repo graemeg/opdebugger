@@ -1153,6 +1153,12 @@ begin
   I := 1;
   while I <= ParamCount do
   begin
+    if (ParamStr(I) = '--help') or (ParamStr(I) = '-h') then
+    begin
+      I := ParamCount + 2;
+      Break;
+    end;
+
     if ParamStr(I) = '--version' then
     begin
       WriteLn('PDR (Pascal Debug Reference) ', PDR_VERSION);
@@ -1225,6 +1231,7 @@ begin
     WriteLn('Debug an Object Pascal program using OPDF debug information.');
     WriteLn;
     WriteLn('Options:');
+    WriteLn('  --help, -h         - Show this help and exit');
     WriteLn('  --version          - Show version information and exit');
     WriteLn('  --verbose, -v      - Enable diagnostic output at startup');
     WriteLn('  --quiet, -q        - Suppress the startup banner');
@@ -1242,7 +1249,10 @@ begin
     WriteLn('  pdr ./myprogram arg1 arg2 arg3');
     WriteLn('  pdr --batch -ex "break main.pas:10" -ex "run" -ex "print x" ./myprogram');
     WriteLn('  pdr --source debug_script.pdr ./myprogram');
-    Halt(1);
+    if I > ParamCount + 1 then
+      Halt(0)
+    else
+      Halt(1);
   end;
 
   BinaryArgIdx := I;
