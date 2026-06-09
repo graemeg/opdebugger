@@ -70,7 +70,14 @@ begin
   inherited Destroy;
 end;
 
+procedure PrintCommandHelp; forward;
+
 procedure TCLIDebugger.PrintHelp;
+begin
+  PrintCommandHelp;
+end;
+
+procedure PrintCommandHelp;
 begin
   WriteLn('PDR Debugger Commands:');
   WriteLn('  run, r         - Start program (automatically done on launch)');
@@ -1159,6 +1166,12 @@ begin
       Break;
     end;
 
+    if ParamStr(I) = '--help-commands' then
+    begin
+      PrintCommandHelp;
+      Halt(0);
+    end;
+
     if ParamStr(I) = '--version' then
     begin
       WriteLn('PDR (Pascal Debug Reference) ', PDR_VERSION);
@@ -1232,6 +1245,7 @@ begin
     WriteLn;
     WriteLn('Options:');
     WriteLn('  --help, -h         - Show this help and exit');
+    WriteLn('  --help-commands    - Show debugger REPL commands and exit');
     WriteLn('  --version          - Show version information and exit');
     WriteLn('  --verbose, -v      - Enable diagnostic output at startup');
     WriteLn('  --quiet, -q        - Suppress the startup banner');
