@@ -1021,6 +1021,7 @@ end;
 function TDebuggerEngine.ParseLocation(const Location: String; out Address: QWord): Boolean;
 var
   VarInfo: TVariableInfo;
+  FuncInfo: TFunctionInfo;
   ErrorCode: Integer;
   ColonPos: Integer;
   FileName: String;
@@ -1072,6 +1073,16 @@ begin
     Exit;
   end;
 
+  // Try finding as function name (e.g., "TMyClass_Destroy", "_ClassRelease")
+  if FDebugInfoReader.FindFunctionByName(Location, FuncInfo) then
+  begin
+    Address := FuncInfo.LowPC;
+    Result := True;
+    if gVerbose then
+      WriteLn('[INFO] Resolved function ', FuncInfo.Name, ' to address 0x', IntToHex(Address, 8));
+    Exit;
+  end;
+
   // Try finding as variable name (breakpoint on variable address)
   // This allows setting breakpoints on global variables
   if FDebugInfoReader.FindVariable(Location, VarInfo) then
@@ -1083,7 +1094,7 @@ begin
 
   // Could not parse location
   WriteLn('[ERROR] Could not resolve location: ', Location);
-  WriteLn('[INFO] Location can be: file:line, hex address (0xNNNN), decimal address, or variable name');
+  WriteLn('[INFO] Location can be: file:line, hex address (0xNNNN), function name, or variable name');
 end;
 
 function TDebuggerEngine.FindBreakpointByHandle(Handle: TBreakpointHandle): Integer;

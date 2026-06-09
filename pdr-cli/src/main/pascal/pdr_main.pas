@@ -104,6 +104,7 @@ begin
   WriteLn('    Location formats:');
   WriteLn('      file.pas:22        - Source file and line number');
   WriteLn('      0x401000           - Hex address');
+  WriteLn('      MyFunction         - Function name');
   WriteLn('      MyGlobalInt        - Variable name');
   WriteLn('  condition <num> count=N - Set/change hit-count condition');
   WriteLn('  condition <num>  - Remove condition (make unconditional)');
