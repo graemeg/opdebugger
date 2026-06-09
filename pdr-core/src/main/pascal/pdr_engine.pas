@@ -74,6 +74,7 @@ type
     function FindBreakpointByHandle(Handle: TBreakpointHandle): Integer;
     function FindBreakpointByAddress(Address: QWord): Integer;
     procedure HandleExceptionBreakpoint;
+    procedure ApplyPendingBreakpoints;
     function LoadSourceFile(const FileName: String): TStringList;
     procedure BuildFrameCache;
     procedure ResetSelectedFrame;
@@ -384,6 +385,8 @@ begin
     if gVerbose then
       WriteLn('[DEBUG] fpc_raiseexception not found in symbol table — exception catching disabled');
   end;
+
+  ApplyPendingBreakpoints;
 
   WriteLn('[INFO] Program started and paused at entry point');
   WriteLn('[INFO] You can now set breakpoints and use "continue" to start execution');
@@ -1127,6 +1130,38 @@ begin
   end;
 end;
 
+procedure TDebuggerEngine.ApplyPendingBreakpoints;
+var
+  I: Integer;
+  Address: QWord;
+begin
+  for I := 0 to High(FBreakpoints) do
+  begin
+    if (not FBreakpoints[I].Active) and (FBreakpoints[I].Address = 0)
+       and FBreakpoints[I].Enabled then
+    begin
+      if ParseLocation(FBreakpoints[I].Location, Address) then
+      begin
+        if FProcessController.SetBreakpoint(Address) then
+        begin
+          FBreakpoints[I].Address := Address;
+          FBreakpoints[I].Active := True;
+          if gVerbose then
+            WriteLn('[INFO] Breakpoint #', FBreakpoints[I].Handle,
+                    ' resolved at 0x', IntToHex(Address, 16),
+                    ' (', FBreakpoints[I].Location, ')');
+        end
+        else
+          WriteLn('[WARNING] Breakpoint #', FBreakpoints[I].Handle,
+                  ' could not be set at 0x', IntToHex(Address, 16));
+      end
+      else
+        WriteLn('[WARNING] Breakpoint #', FBreakpoints[I].Handle,
+                ' could not resolve: ', FBreakpoints[I].Location);
+    end;
+  end;
+end;
+
 { Exception handling }
 
 procedure TDebuggerEngine.HandleExceptionBreakpoint;
@@ -1303,7 +1338,27 @@ begin
 
   if FState = dsIdle then
   begin
-    WriteLn('[ERROR] Not attached to a process');
+    if FBinaryPath = '' then
+    begin
+      WriteLn('[ERROR] No program loaded');
+      Exit;
+    end;
+
+    // Store as pending — will be resolved and activated after Run
+    Entry.Handle := FNextHandle;
+    Entry.Address := 0;
+    Entry.Location := Location;
+    Entry.Active := False;
+    Entry.Enabled := True;
+    Entry.Temporary := False;
+    Entry.ConditionType := bctNone;
+    Entry.HitCount := 0;
+    Entry.CurrentHitCount := 0;
+    SetLength(FBreakpoints, Length(FBreakpoints) + 1);
+    FBreakpoints[High(FBreakpoints)] := Entry;
+    Result := FNextHandle;
+    Inc(FNextHandle);
+    WriteLn('[INFO] Breakpoint #', Result, ' (pending) at ', Location, ' — will resolve on run');
     Exit;
   end;
 
