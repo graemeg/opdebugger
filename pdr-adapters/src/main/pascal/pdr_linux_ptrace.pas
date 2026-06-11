@@ -1712,15 +1712,34 @@ begin
       Break;
 
     { Each line: start-end perms offset dev inode pathname
-      e.g. 55a3b4c00000-55a3b4c01000 r-xp 00000000 08:01 1234 /path/to/binary }
-    if (Pos(BinaryBaseName, Line) > 0) and (Pos('r-xp', Line) > 0) then
+      e.g. 55a3b4c00000-55a3b4c01000 r--p 00000000 08:01 1234 /path/to/binary
+
+      The load base is the mapping of the binary with FILE OFFSET 0 — the
+      lowest mapping, which holds the ELF header.  Do NOT use the r-xp
+      (executable) mapping: with the modern multi-segment link layout the
+      executable segment starts at a non-zero vaddr (e.g. 0x3000), so its
+      start address is base + vaddr, not the base — every slid address
+      would be off by that vaddr.  /proc/maps is sorted by address, so the
+      first offset-0 entry backed by the binary is the load base. }
+    if Pos(BinaryBaseName, Line) > 0 then
     begin
       DashPos := Pos('-', Line);
-      if DashPos > 1 then
+      SpacePos := Pos(' ', Line);
+      if (DashPos > 1) and (SpacePos > DashPos) then
       begin
-        AddrStr := Copy(Line, 1, DashPos - 1);
-        Result := StrToQWord('$' + AddrStr);
-        Break;
+        { Field 3 is the file offset: 'start-end perms offset ...' }
+        AddrStr := Copy(Line, SpacePos + 1, Length(Line) - SpacePos);
+        I := Pos(' ', AddrStr);                  { skip perms }
+        AddrStr := Copy(AddrStr, I + 1, Length(AddrStr) - I);
+        I := Pos(' ', AddrStr);                  { offset field }
+        if I > 1 then
+          AddrStr := Copy(AddrStr, 1, I - 1);
+        if StrToQWordDef('$' + AddrStr, 1) = 0 then
+        begin
+          AddrStr := Copy(Line, 1, DashPos - 1);
+          Result := StrToQWord('$' + AddrStr);
+          Break;
+        end;
       end;
     end;
   end;
