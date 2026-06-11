@@ -132,6 +132,7 @@ type
     function GetGlobalVariables: TStringArray;
     function GetTargetArch: TTargetArch;
     function GetPointerSize: Byte;
+    function DynArrayLen32: Boolean;
     function FindAddressByLine(const FileName: String; LineNum: Cardinal;
                               out Address: QWord): Boolean;
     function FindLineByAddress(Address: QWord; out LineInfo: TLineInfo): Boolean;
@@ -1441,6 +1442,11 @@ begin
     Result := FHeader.PointerSize
   else
     Result := 0;
+end;
+
+function TOPDFReaderAdapter.DynArrayLen32: Boolean;
+begin
+  Result := FLoaded and ((FHeader.Flags and OPDF_FLAG_DYNARRAY_LEN32) <> 0);
 end;
 
 function TOPDFReaderAdapter.FindAddressByLine(const FileName: String;

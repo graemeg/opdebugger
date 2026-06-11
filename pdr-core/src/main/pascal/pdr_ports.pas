@@ -409,6 +409,12 @@ type
     { Get pointer size }
     function GetPointerSize: Byte;
 
+    { True when the producer set OPDF_FLAG_DYNARRAY_LEN32 in the header:
+      dynamic arrays carry a [refcount: Int32][length: Int32] header and
+      the element count is the Int32 at data - 4.  When False the FPC
+      convention applies: high index as SizeInt at data - PointerSize. }
+    function DynArrayLen32: Boolean;
+
     { Find address for source line }
     function FindAddressByLine(const FileName: String; LineNum: Cardinal;
                               out Address: QWord): Boolean;

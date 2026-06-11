@@ -176,6 +176,11 @@ type
 { Format a class constant value for display }
 function FormatClassConst(const C: TDebuggerClassConst): String;
 
+{ Read a pointer-sized value from target memory (used for indirect and
+  parent-frame location expressions; shared with the engine). }
+function ReadPointerValue(ProcessController: IProcessController;
+  Address: QWord; PtrSize: Byte; out Value: QWord): Boolean;
+
 implementation
 
 function ReadPointerValue(ProcessController: IProcessController;
@@ -818,7 +823,6 @@ var
   PointerBuf: array[0..7] of Byte;
   HighBuf: array[0..7] of Byte;
   ArrayPtr: QWord;
-  ArrayHigh: Int64;
   ArrayLength: LongInt;
   PtrSize: Byte;
   I, MaxElements: Integer;
@@ -858,20 +862,34 @@ begin
     Exit;
   end;
 
-  { Read array high value. FPC stores the high index (Length-1) at
-    ArrayPtr - SizeOf(SizeInt). SizeInt matches pointer size. }
+  { Read the element count.  Layout depends on the producer (header
+    flag OPDF_FLAG_DYNARRAY_LEN32 — see the OPDF specification):
+    set   → [refcount: Int32][length: Int32] header; length is the
+            Int32 at ArrayPtr - 4.
+    clear → FPC convention; high index (Length - 1) as SizeInt at
+            ArrayPtr - PtrSize. }
   FillChar(HighBuf, SizeOf(HighBuf), 0);
-  if not ProcessController.ReadMemory(ArrayPtr - PtrSize, PtrSize, HighBuf) then
+  if TypeSystem.FDebugInfoReader.DynArrayLen32 then
   begin
-    Result.Value := '<error: failed to read array length>';
-    Exit;
-  end;
-
-  if PtrSize = 4 then
-    ArrayHigh := PLongInt(@HighBuf)^
+    if not ProcessController.ReadMemory(ArrayPtr - 4, 4, HighBuf) then
+    begin
+      Result.Value := '<error: failed to read array length>';
+      Exit;
+    end;
+    ArrayLength := PLongInt(@HighBuf)^;
+  end
   else
-    ArrayHigh := PInt64(@HighBuf)^;
-  ArrayLength := ArrayHigh + 1;
+  begin
+    if not ProcessController.ReadMemory(ArrayPtr - PtrSize, PtrSize, HighBuf) then
+    begin
+      Result.Value := '<error: failed to read array length>';
+      Exit;
+    end;
+    if PtrSize = 4 then
+      ArrayLength := PLongInt(@HighBuf)^ + 1
+    else
+      ArrayLength := LongInt(PInt64(@HighBuf)^ + 1);
+  end;
   if ArrayLength < 0 then ArrayLength := 0;
 
   { Get element type information }
@@ -1477,6 +1495,19 @@ begin
         VarInfo.Address := InstancePtr + VarInfo.LocationData;
     end;
   end
+  else if VarInfo.LocationExpr = 3 then
+  begin
+    { RBP-relative indirect: the frame slot holds the ADDRESS of the value
+      (var/out parameters, by-reference aggregates, captured outer locals). }
+    InstancePtr := GetEffectiveRBP;
+    if InstancePtr <> 0 then
+    begin
+      PtrSize := FDebugInfoReader.GetPointerSize;
+      if ReadPointerValue(FProcessController,
+           InstancePtr + QWord(Int64(VarInfo.LocationData)), PtrSize, InstancePtr) then
+        VarInfo.Address := InstancePtr;
+    end;
+  end
   else if VarInfo.LocationExpr = 4 then
   begin
     InstancePtr := FProcessController.GetTLSBase;
@@ -1749,6 +1780,26 @@ begin
           WriteLn('[DEBUG] Computed parent frame address for ', VarInfo.Name,
                   ': ParentRBP=$', IntToHex(ParentRBP, 16), ' + ', VarInfo.LocationData,
                   ' = $', IntToHex(ComputedVarInfo.Address, 16));
+      end;
+    end;
+  end
+  else if (VarInfo.LocationExpr = 3) then { RBP-relative indirect }
+  begin
+    { The frame slot holds the ADDRESS of the value: read the pointer at
+      RBP+offset and use it as the variable's base.  Emitted for var/out
+      parameters, by-reference aggregates and captured outer locals. }
+    RBP := GetEffectiveRBP;
+    if RBP <> 0 then
+    begin
+      PtrSize := FDebugInfoReader.GetPointerSize;
+      if ReadPointerValue(FProcessController,
+           RBP + QWord(Int64(VarInfo.LocationData)), PtrSize, ParentRBP) then
+      begin
+        ComputedVarInfo.Address := ParentRBP;
+        if gVerbose then
+          WriteLn('[DEBUG] Computed indirect address for ', VarInfo.Name,
+                  ': *(RBP+', VarInfo.LocationData, ') = $',
+                  IntToHex(ComputedVarInfo.Address, 16));
       end;
     end;
   end

@@ -113,10 +113,21 @@ TOPDFHeader = packed record
   TargetArch: Byte;            // Architecture ID (1 byte)
   PointerSize: Byte;           // Pointer size in bytes: 4 or 8 (1 byte)
   TotalRecords: Cardinal;      // Number of debug records (4 bytes)
-  Flags: Cardinal;             // Reserved for future use (4 bytes)
+  Flags: Cardinal;             // Bit flags — see table below (4 bytes)
 end;
 // Total: 32 bytes
 ----
+
+.Header Flags
+[cols="1,2,4"]
+|===
+|Bit |Name |Meaning
+
+|0 |`OPDF_FLAG_HAS_DIRECTORY` |A unit-directory record follows the header.
+|1 |`OPDF_FLAG_DYNARRAY_LEN32` |Dynamic arrays use a `[refcount: Int32][length: Int32]` heap header; the element count is the Int32 at `data - 4`. When clear, the FPC convention applies: the high index (`Length - 1`) is stored as a SizeInt at `data - PointerSize`.
+|===
+
+Unassigned bits are reserved and must be emitted as zero.
 
 .Architecture Identifiers
 [cols="1,2"]
@@ -365,14 +376,35 @@ end;
 The variable stores elements inline, packed contiguously from `LowerBound` to `UpperBound`.
 
 .Dynamic array runtime layout (x86_64)
+
+The heap header layout depends on the producer and is declared via the
+`OPDF_FLAG_DYNARRAY_LEN32` header flag.
+
+With `OPDF_FLAG_DYNARRAY_LEN32` set (e.g. the Blaise compiler):
+
+----
+Variable: [Pointer: 8 bytes]
+  -> Heap block:
+     Offset  -8: Reference count (Int32)
+     Offset  -4: Length (Int32) — element count
+     Offset   0: Element 0
+     Offset   N: Element 1  (N = element size)
+     ...
+----
+
+With the flag clear (FPC convention):
+
 ----
 Variable: [Pointer: 8 bytes]
   -> Heap block:
      Offset  -8: High index (SizeInt, 8 bytes) — Length = High + 1
      Offset   0: Element 0
-     Offset   N: Element 1  (N = element size)
      ...
 ----
+
+Effective bounds for subscripting are `[0, Length - 1]`; the debugger
+derives them from the live header rather than from `TArrayBound`
+records, which are present only for static arrays.
 
 A nil dynamic array has Pointer = 0.
 
@@ -841,11 +873,15 @@ Location expressions encode where a variable resides at runtime. The `LocationEx
 |Parent frame RBP-relative
 |`SmallInt` (2 bytes): signed offset from enclosing procedure's frame base pointer
 
+|`3`
+|RBP-relative indirect (current frame)
+|`SmallInt` (2 bytes): signed offset of a frame slot that holds the value's ADDRESS
+
 |`4`
 |TLS-relative (thread-local)
 |`SmallInt` (2 bytes): signed offset from the thread-local storage base
 
-|`3, 5..255`
+|`5..255`
 |Reserved
 |Reserved for register-based, multi-level nesting, or complex expressions
 |===
@@ -854,6 +890,23 @@ Location expressions encode where a variable resides at runtime. The `LocationEx
 ----
 effective_address = RBP + SignExtend(LocationData)
 ----
+
+.RBP-relative indirect addressing (`LocationExpr = 3`)
+The frame slot holds a pointer to the value rather than the value itself.
+Emitted for by-reference variables: `var`/`out` parameters, aggregates
+passed by reference at the ABI level, and outer-scope locals captured by a
+nested procedure (each captured variable's pointer is materialised in the
+nested frame):
+
+----
+slot_address      = RBP + SignExtend(LocationData)
+effective_address = *(slot_address)
+----
+
+The variable's TypeID describes the pointed-to VALUE (e.g. the record or
+class type), not a pointer type — the single dereference is part of the
+location, so field access and element indexing work on the result exactly
+as for a directly-located variable.
 
 .Parent frame addressing (`LocationExpr = 2`)
 Used for variables from an enclosing procedure accessed inside a nested procedure. The saved RBP at `*(breakpoint_RBP)` gives the parent frame base:

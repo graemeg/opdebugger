@@ -1794,6 +1794,16 @@ begin
     if RBP = 0 then RBP := FProcessController.GetFrameBasePointer;
     Addr := RBP + QWord(Int64(VarInfo.LocationData));
   end
+  else if VarInfo.LocationExpr = 3 then
+  begin
+    { RBP-relative indirect: the slot holds the value's address. }
+    RBP := FProcessController.GetLastBreakpointRBP;
+    if RBP = 0 then RBP := FProcessController.GetFrameBasePointer;
+    if not ReadPointerValue(FProcessController,
+         RBP + QWord(Int64(VarInfo.LocationData)),
+         FDebugInfoReader.GetPointerSize, Addr) then
+      Addr := 0;
+  end
   else if VarInfo.LocationExpr = 4 then
   begin
     RBP := FProcessController.GetTLSBase;
@@ -2400,6 +2410,8 @@ var
   I: Int64;
   ElemInfo: TVariableInfo;
   ElemValue: TVariableValue;
+  DynPtr: QWord;
+  LenBuf: array[0..7] of Byte;
 begin
   SetLength(Result, 0);
   if FState = dsIdle then Exit;
@@ -2439,14 +2451,19 @@ begin
   ElemSize := ElemTypeInfo.Size;
   if ElemSize = 0 then ElemSize := 1;
 
-  if Length(TypeInfo.Bounds) = 0 then
+  LowerBound := 0;
+  UpperBound := -1;
+  if not TypeInfo.IsDynamic then
   begin
-    WriteLn('[ERROR] Array has no bounds info');
-    Exit;
+    { Static array: bounds come from the debug info. }
+    if Length(TypeInfo.Bounds) = 0 then
+    begin
+      WriteLn('[ERROR] Array has no bounds info');
+      Exit;
+    end;
+    LowerBound := TypeInfo.Bounds[0].LowerBound;
+    UpperBound := TypeInfo.Bounds[0].UpperBound;
   end;
-
-  LowerBound := TypeInfo.Bounds[0].LowerBound;
-  UpperBound := TypeInfo.Bounds[0].UpperBound;
 
   { Compute actual base address }
   if VarInfo.LocationExpr = 1 then
@@ -2460,6 +2477,21 @@ begin
     end;
     BaseAddr := RBP + VarInfo.LocationData;
   end
+  else if VarInfo.LocationExpr = 3 then
+  begin
+    { RBP-relative indirect: the slot holds the value's address. }
+    if FTypeSystem.OverrideRBP <> 0 then
+      RBP := FTypeSystem.OverrideRBP
+    else
+    begin
+      RBP := FProcessController.GetLastBreakpointRBP;
+      if RBP = 0 then RBP := FProcessController.GetFrameBasePointer;
+    end;
+    if not ReadPointerValue(FProcessController,
+         RBP + QWord(Int64(VarInfo.LocationData)),
+         FDebugInfoReader.GetPointerSize, BaseAddr) then
+      BaseAddr := 0;
+  end
   else if VarInfo.LocationExpr = 4 then
   begin
     RBP := FProcessController.GetTLSBase;
@@ -2470,6 +2502,48 @@ begin
   end
   else
     BaseAddr := VarInfo.Address;
+
+  if TypeInfo.IsDynamic then
+  begin
+    { Dynamic array: BaseAddr is the slot holding the data pointer.
+      Dereference it, then take the element count from the Int32 at
+      data - 4 (the [refcount][length] header before element 0). }
+    if not ReadPointerValue(FProcessController, BaseAddr,
+         FDebugInfoReader.GetPointerSize, DynPtr) then
+      DynPtr := 0;
+    if DynPtr = 0 then
+    begin
+      WriteLn('[INFO] Array is nil');
+      Exit;
+    end;
+    FillChar(LenBuf, SizeOf(LenBuf), 0);
+    if FDebugInfoReader.DynArrayLen32 then
+    begin
+      { [refcount: Int32][length: Int32] header — length at data - 4. }
+      if not FProcessController.ReadMemory(DynPtr - 4, 4, LenBuf) then
+      begin
+        WriteLn('[ERROR] Failed to read dynamic array length');
+        Exit;
+      end;
+      UpperBound := PLongInt(@LenBuf)^ - 1;
+    end
+    else
+    begin
+      { FPC convention — high index as SizeInt at data - PointerSize. }
+      if not FProcessController.ReadMemory(
+           DynPtr - FDebugInfoReader.GetPointerSize,
+           FDebugInfoReader.GetPointerSize, LenBuf) then
+      begin
+        WriteLn('[ERROR] Failed to read dynamic array length');
+        Exit;
+      end;
+      if FDebugInfoReader.GetPointerSize = 4 then
+        UpperBound := PLongInt(@LenBuf)^
+      else
+        UpperBound := PInt64(@LenBuf)^;
+    end;
+    BaseAddr := DynPtr;
+  end;
 
   { Clamp slice indices to actual bounds with warnings }
   if LowIndex < LowerBound then
@@ -2550,6 +2624,21 @@ begin
       if RBP = 0 then RBP := FProcessController.GetFrameBasePointer;
     end;
     Addr := RBP + VarInfo.LocationData;
+  end
+  else if VarInfo.LocationExpr = 3 then
+  begin
+    { RBP-relative indirect: the slot holds the value's address. }
+    if FTypeSystem.OverrideRBP <> 0 then
+      RBP := FTypeSystem.OverrideRBP
+    else
+    begin
+      RBP := FProcessController.GetLastBreakpointRBP;
+      if RBP = 0 then RBP := FProcessController.GetFrameBasePointer;
+    end;
+    if not ReadPointerValue(FProcessController,
+         RBP + QWord(Int64(VarInfo.LocationData)),
+         FDebugInfoReader.GetPointerSize, Addr) then
+      Addr := 0;
   end
   else if VarInfo.LocationExpr = 4 then
   begin

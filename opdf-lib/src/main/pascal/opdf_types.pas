@@ -26,6 +26,12 @@ const
   { Header flags }
   OPDF_FLAG_HAS_DIRECTORY = 1;
 
+  { Dynamic arrays use a [refcount: Int32][length: Int32] header before
+    element 0 — the element count is the Int32 at data - 4.  When clear,
+    the FPC convention applies: high index (Length - 1) stored as a
+    SizeInt at data - PointerSize. }
+  OPDF_FLAG_DYNARRAY_LEN32 = 2;
+
 type
   { Architecture identifiers }
   TTargetArch = (
@@ -46,7 +52,7 @@ type
     TargetArch: Byte;            // Architecture ID (1 byte)
     PointerSize: Byte;           // Pointer size in bytes: 4 or 8 (1 byte)
     TotalRecords: Cardinal;      // Number of debug records (4 bytes)
-    Flags: Cardinal;             // Reserved for future use (4 bytes)
+    Flags: Cardinal;             // Bit flags — see OPDF_FLAG_* (4 bytes)
   end;
 
   { Record types }
