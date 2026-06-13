@@ -57,9 +57,11 @@ if [ ! -x "$BLAISE" ]; then
     exit 1
 fi
 
-# Filter non-deterministic output (shared with the FPC suite).
+# Filter non-deterministic output.
+# pdr runs in --source mode (see run_test), which suppresses the banner and the
+# '(pdr) ' prompt, so no prompt-stripping is needed here — only address
+# normalisation and selecting result lines.
 filter_output() {
-    sed 's/^(pdr) //' | \
     sed -E 's/ \(0x[0-9A-Fa-f ]+\)//' | \
     sed -E 's/\(\$[0-9A-Fa-f]+\)/(<ptr>)/' | \
     grep -E '^(([A-Za-z(][A-Za-z0-9_.]+(\[[0-9]+\])? = |[-A-Za-z(][A-Za-z0-9_.]+[A-Za-z0-9_. +*/()<>-]*= (-?[0-9]|True|False|nil|'"'"'|\$))|(\[INFO\] )?[Ss]tepped to line:|(\[INFO\] )?[Rr]eturned to:|\[CALLSTACK\]|#[0-9]+ |Exception: [A-Za-z]+ —|(=>|  ) +[0-9]+($|  ))' | \
@@ -89,10 +91,12 @@ run_test() {
         return 1
     fi
 
-    # Run PDR with commands.
+    # Run PDR with commands via --source (batch-style): pdr suppresses the
+    # banner and '(pdr) ' prompt in this mode, and collects multi-line blocks
+    # like 'commands N ... end' from the script.
     echo "  [2/3] Running PDR..."
     if [ -f "$test_base.commands" ]; then
-        cat "$test_base.commands" | "$PDR_BIN" --verbose "$test_base" 2>&1 | filter_output > "$test_base.actual"
+        "$PDR_BIN" --source "$test_base.commands" "$test_base" 2>&1 | filter_output > "$test_base.actual"
     else
         echo -e "${YELLOW}  No commands file${NC}"
         return 0
