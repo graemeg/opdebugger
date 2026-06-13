@@ -41,6 +41,16 @@ type
     FQuiet: Boolean;
     FBatch: Boolean;
 
+    { Pending input lines for the current driver (a --source script).  When
+      non-empty, NextInputLine pulls from here so that multi-line sub-blocks
+      like 'commands N ... end' read from the SAME source as the surrounding
+      commands, rather than falling through to stdin.  Empty in interactive /
+      piped-stdin mode, where NextInputLine reads stdin directly. }
+    FInputLines: TStringArray;
+    FInputPos: Integer;
+
+    function NextInputLine(out ALine: String): Boolean;
+
     procedure PrintHelp;
     procedure PrintDisplayList;
     procedure PrintExceptionInfo;
@@ -274,10 +284,35 @@ begin
   Result := True;
 end;
 
+{ Pull the next input line.  Prefers FInputLines (a loaded --source script) so
+  that sub-blocks read from the same source as their surrounding commands; only
+  when the buffer is exhausted does it fall back to stdin (interactive / piped).
+  Returns False at end of input. }
+function TCLIDebugger.NextInputLine(out ALine: String): Boolean;
+begin
+  if FInputPos <= High(FInputLines) then
+  begin
+    ALine := FInputLines[FInputPos];
+    Inc(FInputPos);
+    Result := True;
+    Exit;
+  end;
+  if EOF then
+  begin
+    ALine := '';
+    Result := False;
+    Exit;
+  end;
+  ReadLn(ALine);
+  Result := True;
+end;
+
 function TCLIDebugger.ExecuteScript(const Filename: String): Boolean;
 var
   ScriptFile: TextFile;
   Line: String;
+  SavedLines: TStringArray;
+  SavedPos: Integer;
 begin
   Result := True;
   if not FileExists(Filename) then
@@ -287,12 +322,31 @@ begin
     Exit;
   end;
 
+  { Load the whole script into the input buffer so that 'commands N ... end'
+    and other multi-line sub-blocks inside ProcessCommand read their lines
+    from the script (via NextInputLine), not from stdin.  Save/restore any
+    outer buffer so nested --source invocations compose. }
+  SavedLines := FInputLines;
+  SavedPos := FInputPos;
+  SetLength(FInputLines, 0);
+  FInputPos := 0;
+
   AssignFile(ScriptFile, Filename);
   Reset(ScriptFile);
   try
     while not EOF(ScriptFile) do
     begin
       ReadLn(ScriptFile, Line);
+      SetLength(FInputLines, Length(FInputLines) + 1);
+      FInputLines[High(FInputLines)] := Line;
+    end;
+  finally
+    CloseFile(ScriptFile);
+  end;
+
+  try
+    while NextInputLine(Line) do
+    begin
       Line := Trim(Line);
       if (Line = '') or (Line[1] = '#') then
         Continue;
@@ -304,7 +358,8 @@ begin
       end;
     end;
   finally
-    CloseFile(ScriptFile);
+    FInputLines := SavedLines;
+    FInputPos := SavedPos;
   end;
 end;
 
@@ -688,18 +743,22 @@ begin
           Exit;
         end;
 
-        { Read command lines until 'end' }
+        { Read command lines until 'end'.  NextInputLine pulls from the active
+          --source script when one is driving, so the block is collected from
+          the same source as the 'commands' line itself; in interactive mode it
+          falls back to stdin and the '  > ' sub-prompt guides the user. }
         SetLength(CmdList, 0);
-        Write('  > ');
-        while not EOF do
+        if FInputPos > High(FInputLines) then
+          Write('  > ');
+        while NextInputLine(Line) do
         begin
-          ReadLn(Line);
           Line := Trim(Line);
           if LowerCase(Line) = 'end' then
             Break;
           SetLength(CmdList, Length(CmdList) + 1);
           CmdList[High(CmdList)] := Line;
-          Write('  > ');
+          if FInputPos > High(FInputLines) then
+            Write('  > ');
         end;
         FEngine.SetBreakpointCommands(BpNum, CmdList);
       end;
