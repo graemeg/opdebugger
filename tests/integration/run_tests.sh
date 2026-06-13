@@ -70,10 +70,14 @@ run_test() {
         return 1
     fi
 
-    # Run PDR with commands
+    # Run PDR with commands via --source (batch-style): suppresses the banner
+    # and '(pdr) ' prompt and collects 'commands N ... end' blocks from the
+    # script.  Read stdout ONLY: pdr sends status/diagnostics to stderr, and
+    # merging via 2>&1 risks splicing a partial stderr line into a result line
+    # (the streams buffer independently).
     echo "  [2/3] Running PDR..."
     if [ -f "$test_base.commands" ]; then
-        cat "$test_base.commands" | "$PDR_BIN" --verbose "$test_base" 2>&1 | filter_output > "$test_base.actual"
+        "$PDR_BIN" --source "$test_base.commands" "$test_base" 2>/dev/null | filter_output > "$test_base.actual"
     else
         echo -e "${YELLOW}  No commands file${NC}"
         return 0

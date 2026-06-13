@@ -540,7 +540,7 @@ begin
     FCollisionRemap[FCollisionCount].SyntheticTypeID := NewTypeID;
     Inc(FCollisionCount);
     if gVerbose then
-      WriteLn('[DEBUG] Hash collision: TypeID ', OrigTypeID, ' "', ExistingType^.Name,
+      WriteLn(StdErr, '[DEBUG] Hash collision: TypeID ', OrigTypeID, ' "', ExistingType^.Name,
               '" vs "', TypeName, '" -> synthetic ', NewTypeID);
     Result := TR_COLLISION;
   end;
@@ -623,7 +623,7 @@ begin
     if Assigned(ELFStream) then
     begin
       if gVerbose then
-        WriteLn('[INFO] Loading embedded OPDF section from: ', BinaryPath);
+        WriteLn(StdErr, '[INFO] Loading embedded OPDF section from: ', BinaryPath);
       FStream := ELFStream;
       FOPDFPath := BinaryPath;
       FReader := TOPDFReader.Create(FStream);
@@ -636,11 +636,11 @@ begin
     FOPDFPath := FindOPDFFile(BinaryPath);
     if FOPDFPath = '' then
     begin
-      WriteLn('[ERROR] OPDF data not found for binary: ', BinaryPath);
+      WriteLn(StdErr, '[ERROR] OPDF data not found for binary: ', BinaryPath);
       Exit;
     end;
 
-    WriteLn('[INFO] Loading OPDF file: ', FOPDFPath);
+    WriteLn(StdErr, '[INFO] Loading OPDF file: ', FOPDFPath);
 
     try
       FStream := TFileStream.Create(FOPDFPath, fmOpenRead or fmShareDenyWrite);
@@ -648,7 +648,7 @@ begin
     except
       on E: Exception do
       begin
-        WriteLn('[ERROR] Failed to open OPDF file: ', E.Message);
+        WriteLn(StdErr, '[ERROR] Failed to open OPDF file: ', E.Message);
         Exit;
       end;
     end;
@@ -657,7 +657,7 @@ begin
   // Read and validate header
   if not FReader.ReadHeader then
   begin
-    WriteLn('[ERROR] Failed to read OPDF header');
+    WriteLn(StdErr, '[ERROR] Failed to read OPDF header');
     Exit;
   end;
 
@@ -665,16 +665,16 @@ begin
 
   if not IsValidOPDFHeader(FHeader) then
   begin
-    WriteLn('[ERROR] Invalid OPDF header');
+    WriteLn(StdErr, '[ERROR] Invalid OPDF header');
     Exit;
   end;
 
   if gVerbose then
   begin
-    WriteLn('[INFO] OPDF version: ', FHeader.Version);
-    WriteLn('[INFO] Target architecture: ', ArchToString(TTargetArch(FHeader.TargetArch)));
-    WriteLn('[INFO] Pointer size: ', FHeader.PointerSize, ' bytes');
-    WriteLn('[INFO] Total records: ', FHeader.TotalRecords);
+    WriteLn(StdErr, '[INFO] OPDF version: ', FHeader.Version);
+    WriteLn(StdErr, '[INFO] Target architecture: ', ArchToString(TTargetArch(FHeader.TargetArch)));
+    WriteLn(StdErr, '[INFO] Pointer size: ', FHeader.PointerSize, ' bytes');
+    WriteLn(StdErr, '[INFO] Total records: ', FHeader.TotalRecords);
   end;
 
   // Read all records and cache them.
@@ -686,7 +686,7 @@ begin
     if FReader.TryReadNextHeader then
     begin
       if gVerbose then
-        WriteLn('[DEBUG] New OPDF header at offset 0x', IntToHex(FStream.Position - SizeOf(TOPDFHeader), 1));
+        WriteLn(StdErr, '[DEBUG] New OPDF header at offset 0x', IntToHex(FStream.Position - SizeOf(TOPDFHeader), 1));
       Continue;
     end;
 
@@ -1142,7 +1142,7 @@ begin
         begin
           { unit directory is informational - skip via seek below }
           if gVerbose then
-            WriteLn('[DEBUG] Skipping UnitDirectory record');
+            WriteLn(StdErr, '[DEBUG] Skipping UnitDirectory record');
         end;
 
       recConstant:
@@ -1238,13 +1238,13 @@ begin
     FStream.Position := RecStartPos + RecHeader.RecSize;
   end;
 
-  WriteLn('[INFO] Loaded ', FTypes.Count, ' type(s), ', FVariables.Count,
+  WriteLn(StdErr, '[INFO] Loaded ', FTypes.Count, ' type(s), ', FVariables.Count,
           ' variable(s), ', FConstants.Count, ' constant(s), ',
           FFunctionScopes.Count, ' function scope(s), and ',
           FLineInfo.Count, ' line mapping(s)');
 
   if FCollisionCount > 0 then
-    WriteLn('[INFO] Resolved ', FCollisionCount, ' hash collision(s)');
+    WriteLn(StdErr, '[INFO] Resolved ', FCollisionCount, ' hash collision(s)');
 
   FLoaded := True;
   Result := True;
@@ -1261,7 +1261,7 @@ begin
 
   if not FLoaded then
   begin
-    WriteLn('[ERROR] OPDF file not loaded');
+    WriteLn(StdErr, '[ERROR] OPDF file not loaded');
     Exit;
   end;
 
@@ -1293,7 +1293,7 @@ begin
   end;
 
   if gVerbose then
-    WriteLn('[DEBUG] Variable not found: ', Name);
+    WriteLn(StdErr, '[DEBUG] Variable not found: ', Name);
 end;
 
 { Find variable with scope awareness - checks local variables first, then globals }
@@ -1313,7 +1313,7 @@ begin
 
   if not FLoaded then
   begin
-    WriteLn('[ERROR] OPDF file not loaded');
+    WriteLn(StdErr, '[ERROR] OPDF file not loaded');
     Exit;
   end;
 
@@ -1339,7 +1339,7 @@ begin
         VarInfo.CompanionData := LocalVar.CompanionData;
         Result := True;
         if gVerbose then
-          WriteLn('[DEBUG] Found local var: ', LocalVar.Name, ' LocationExpr=', LocalVar.LocationExpr,
+          WriteLn(StdErr, '[DEBUG] Found local var: ', LocalVar.Name, ' LocationExpr=', LocalVar.LocationExpr,
                   ' LocationData=', LocalVar.LocationData);
         Exit;
       end;
@@ -1382,7 +1382,7 @@ begin
             VarInfo.LocationData := LocalVar.LocationData;
             Result := True;
             if gVerbose then
-              WriteLn('[DEBUG] Found enclosing scope var: ', LocalVar.Name,
+              WriteLn(StdErr, '[DEBUG] Found enclosing scope var: ', LocalVar.Name,
                       ' in ', FuncScope^.Name, ' LocationData=', LocalVar.LocationData);
             Exit;
           end;
@@ -1402,7 +1402,7 @@ begin
 
   if not FLoaded then
   begin
-    WriteLn('[ERROR] OPDF file not loaded');
+    WriteLn(StdErr, '[ERROR] OPDF file not loaded');
     Exit;
   end;
 
@@ -1419,7 +1419,7 @@ begin
   end;
 
   if gVerbose then
-    WriteLn('[DEBUG] Type not found: TypeID=', TypeID);
+    WriteLn(StdErr, '[DEBUG] Type not found: TypeID=', TypeID);
 end;
 
 function TOPDFReaderAdapter.GetGlobalVariables: TStringArray;
@@ -1654,7 +1654,7 @@ begin
       FuncScope := PFunctionScope(FFunctionScopes[I]);
       if FuncScope^.ScopeID = ScopeID then
       begin
-        WriteLn('[DEBUG] GetScopeLocals: scope=', FuncScope^.Name,
+        WriteLn(StdErr, '[DEBUG] GetScopeLocals: scope=', FuncScope^.Name,
                 ' [0x', IntToHex(FuncScope^.LowPC, 1), '..0x', IntToHex(FuncScope^.HighPC, 1), ')');
         Break;
       end;
@@ -1677,10 +1677,10 @@ begin
     begin
       PType := FTypes.Find(Locals[I].TypeID);
       if Assigned(PType) then
-        WriteLn('[DEBUG]   local: ', Locals[I].Name, ' TypeID=', Locals[I].TypeID,
+        WriteLn(StdErr, '[DEBUG]   local: ', Locals[I].Name, ' TypeID=', Locals[I].TypeID,
                 ' -> ', PType^.Name, ' (', PType^.Size, ' bytes)')
       else
-        WriteLn('[DEBUG]   local: ', Locals[I].Name, ' TypeID=', Locals[I].TypeID,
+        WriteLn(StdErr, '[DEBUG]   local: ', Locals[I].Name, ' TypeID=', Locals[I].TypeID,
                 ' -> <type not found>');
     end;
   end;
@@ -1819,14 +1819,14 @@ begin
       FuncInfo.HighPC := FuncScope^.HighPC;
       Result := True;
       if gVerbose then
-        WriteLn('[DEBUG] FindFunctionByName: found ', Name, ' at $',
+        WriteLn(StdErr, '[DEBUG] FindFunctionByName: found ', Name, ' at $',
                 IntToHex(FuncInfo.LowPC, 16));
       Exit;
     end;
   end;
 
   if gVerbose then
-    WriteLn('[DEBUG] FindFunctionByName: not found: ', Name);
+    WriteLn(StdErr, '[DEBUG] FindFunctionByName: not found: ', Name);
 end;
 
 function TOPDFReaderAdapter.FindConstant(const Name: String;
@@ -1850,7 +1850,7 @@ begin
   end;
 
   if gVerbose then
-    WriteLn('[DEBUG] Constant not found: ', Name);
+    WriteLn(StdErr, '[DEBUG] Constant not found: ', Name);
 end;
 
 function TOPDFReaderAdapter.FindTypeByName(const Name: String;
@@ -1897,7 +1897,7 @@ begin
     Exit;
 
   if gVerbose then
-    WriteLn('[DEBUG] Applying ASLR slide: +$', IntToHex(Delta, 16));
+    WriteLn(StdErr, '[DEBUG] Applying ASLR slide: +$', IntToHex(Delta, 16));
 
   { Adjust all line info addresses }
   for I := 0 to FLineInfo.Count - 1 do

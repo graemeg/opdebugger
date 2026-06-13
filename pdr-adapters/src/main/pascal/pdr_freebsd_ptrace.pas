@@ -281,24 +281,24 @@ begin
 
   if FAttached then
   begin
-    WriteLn('[ERROR] Already attached to PID ', FPID);
+    WriteLn(StdErr, '[ERROR] Already attached to PID ', FPID);
     Exit;
   end;
 
   if not FileExists(BinaryPath) then
   begin
-    WriteLn('[ERROR] Binary file not found: ', BinaryPath);
+    WriteLn(StdErr, '[ERROR] Binary file not found: ', BinaryPath);
     Exit;
   end;
 
   if gVerbose then
-    WriteLn('[INFO] Launching program: ', BinaryPath);
+    WriteLn(StdErr, '[INFO] Launching program: ', BinaryPath);
 
   ChildPID := FpFork;
 
   if ChildPID = -1 then
   begin
-    WriteLn('[ERROR] Failed to fork: ', SysErrorMessage(fpgeterrno));
+    WriteLn(StdErr, '[ERROR] Failed to fork: ', SysErrorMessage(fpgeterrno));
     Exit;
   end;
 
@@ -309,7 +309,7 @@ begin
     { FreeBSD uses PT_TRACE_ME; addr and data are ignored }
     if ptrace(PT_TRACE_ME, 0, nil, 0) = -1 then
     begin
-      WriteLn('[ERROR] Child: Failed to enable tracing');
+      WriteLn(StdErr, '[ERROR] Child: Failed to enable tracing');
       fpExit(1);
     end;
 
@@ -321,27 +321,27 @@ begin
 
     FpExecV(PChar(BinaryPath), @Args[0]);
 
-    WriteLn('[ERROR] Child: Failed to exec: ', SysErrorMessage(fpgeterrno));
+    WriteLn(StdErr, '[ERROR] Child: Failed to exec: ', SysErrorMessage(fpgeterrno));
     fpExit(1);
   end
   else
   begin
     if gVerbose then
-      WriteLn('[INFO] Child process created with PID ', ChildPID);
+      WriteLn(StdErr, '[INFO] Child process created with PID ', ChildPID);
 
     gWaitingPID := ChildPID;
     gUserInterrupted := False;
     if FpWaitPid(ChildPID, @Status, 0) = -1 then
     begin
       gWaitingPID := -1;
-      WriteLn('[ERROR] Failed to wait for child process: ', SysErrorMessage(fpgeterrno));
+      WriteLn(StdErr, '[ERROR] Failed to wait for child process: ', SysErrorMessage(fpgeterrno));
       Exit;
     end;
     gWaitingPID := -1;
 
     if not WIFSTOPPED(Status) then
     begin
-      WriteLn('[ERROR] Child process did not stop as expected');
+      WriteLn(StdErr, '[ERROR] Child process did not stop as expected');
       Exit;
     end;
 
@@ -350,8 +350,8 @@ begin
 
     if gVerbose then
     begin
-      WriteLn('[INFO] Child process stopped at entry point');
-      WriteLn('[INFO] Debugger has control (process is paused)');
+      WriteLn(StdErr, '[INFO] Child process stopped at entry point');
+      WriteLn(StdErr, '[INFO] Debugger has control (process is paused)');
     end;
     Result := True;
   end;
@@ -365,7 +365,7 @@ begin
 
   if FAttached then
   begin
-    WriteLn('[ERROR] Already attached to PID ', FPID);
+    WriteLn(StdErr, '[ERROR] Already attached to PID ', FPID);
     Exit;
   end;
 
@@ -373,21 +373,21 @@ begin
 
   if ptrace(PT_ATTACH, FPID, nil, 0) = -1 then
   begin
-    WriteLn('[ERROR] Failed to attach to process ', PID, ': ', SysErrorMessage(fpgeterrno));
+    WriteLn(StdErr, '[ERROR] Failed to attach to process ', PID, ': ', SysErrorMessage(fpgeterrno));
     FPID := -1;
     Exit;
   end;
 
   if FpWaitPid(FPID, @Status, 0) = -1 then
   begin
-    WriteLn('[ERROR] Failed to wait for process: ', SysErrorMessage(fpgeterrno));
+    WriteLn(StdErr, '[ERROR] Failed to wait for process: ', SysErrorMessage(fpgeterrno));
     ptrace(PT_DETACH, FPID, nil, 0);
     FPID := -1;
     Exit;
   end;
 
   FAttached := True;
-  WriteLn('[INFO] Successfully attached to PID ', FPID);
+  WriteLn(StdErr, '[INFO] Successfully attached to PID ', FPID);
   Result := True;
 end;
 
@@ -399,14 +399,14 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[WARN] Not attached to any process');
+    WriteLn(StdErr, '[WARN] Not attached to any process');
     Exit(True);
   end;
 
   if Length(FBreakpoints) > 0 then
   begin
     if gVerbose then
-      WriteLn('[INFO] Removing all breakpoints before detach');
+      WriteLn(StdErr, '[INFO] Removing all breakpoints before detach');
     for I := 0 to High(FBreakpoints) do
     begin
       if FBreakpoints[I].Active then
@@ -418,12 +418,12 @@ begin
   { FreeBSD PT_DETACH: addr=1 (resume at current PC), data=signal to deliver }
   if ptrace(PT_DETACH, FPID, Pointer(1), 0) = -1 then
   begin
-    WriteLn('[ERROR] Failed to detach from process: ', SysErrorMessage(fpgeterrno));
+    WriteLn(StdErr, '[ERROR] Failed to detach from process: ', SysErrorMessage(fpgeterrno));
     Exit;
   end;
 
   if gVerbose then
-    WriteLn('[INFO] Detached from PID ', FPID);
+    WriteLn(StdErr, '[INFO] Detached from PID ', FPID);
   FAttached := False;
   FPID := -1;
   Result := True;
@@ -444,7 +444,7 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[ERROR] Not attached to any process');
+    WriteLn(StdErr, '[ERROR] Not attached to any process');
     Exit;
   end;
 
@@ -452,7 +452,7 @@ begin
   begin
     DataSignal := FPendingSignal;
     if gVerbose then
-      WriteLn('[DEBUG] Delivering pending signal ', SignalName(FPendingSignal),
+      WriteLn(StdErr, '[DEBUG] Delivering pending signal ', SignalName(FPendingSignal),
               ' to process');
     FPendingSignal := 0;
   end
@@ -464,7 +464,7 @@ begin
     { FreeBSD PT_CONTINUE: addr=1 means resume at current PC, data=signal }
     if ptrace(PT_CONTINUE, FPID, Pointer(1), DataSignal) = -1 then
     begin
-      WriteLn('[ERROR] Failed to continue process: ', SysErrorMessage(fpgeterrno));
+      WriteLn(StdErr, '[ERROR] Failed to continue process: ', SysErrorMessage(fpgeterrno));
       Exit;
     end;
 
@@ -476,7 +476,7 @@ begin
     gWaitingPID := -1;
     if WaitResult = -1 then
     begin
-      WriteLn('[ERROR] Failed to wait for process: ', SysErrorMessage(fpgeterrno));
+      WriteLn(StdErr, '[ERROR] Failed to wait for process: ', SysErrorMessage(fpgeterrno));
       Exit;
     end;
 
@@ -512,13 +512,13 @@ begin
           end;
 
           if gVerbose then
-            WriteLn('[DEBUG] Hardware watchpoint hit: slot ', WatchSlot);
+            WriteLn(StdErr, '[DEBUG] Hardware watchpoint hit: slot ', WatchSlot);
         end
         else
         begin
           if not HandleBreakpointHit then
           begin
-            WriteLn('[ERROR] Failed to handle breakpoint');
+            WriteLn(StdErr, '[ERROR] Failed to handle breakpoint');
             Exit;
           end;
         end;
@@ -529,13 +529,13 @@ begin
       begin
         gUserInterrupted := False;
         WriteLn('');
-        WriteLn('[INFO] Interrupted');
+        WriteLn(StdErr, '[INFO] Interrupted');
         Result := True;
         Exit;
       end
       else if IsStopSignal(Sig) then
       begin
-        WriteLn('[INFO] Process received ', SignalName(Sig), ' (signal ', Sig, ')');
+        WriteLn(StdErr, '[INFO] Process received ', SignalName(Sig), ' (signal ', Sig, ')');
         FPendingSignal := Sig;
         Result := True;
         Exit;
@@ -543,13 +543,13 @@ begin
       else
       begin
         if gVerbose then
-          WriteLn('[DEBUG] Passing through ', SignalName(Sig), ' to process');
+          WriteLn(StdErr, '[DEBUG] Passing through ', SignalName(Sig), ' to process');
         DataSignal := Sig;
       end;
     end
     else if WIFEXITED(Status) then
     begin
-      WriteLn('[INFO] Process exited with code ', WEXITSTATUS(Status));
+      WriteLn(StdErr, '[INFO] Process exited with code ', WEXITSTATUS(Status));
       FAttached := False;
       FPID := -1;
       FPendingSignal := 0;
@@ -558,7 +558,7 @@ begin
     end
     else if WIFSIGNALED(Status) then
     begin
-      WriteLn('[INFO] Process terminated by signal ',
+      WriteLn(StdErr, '[INFO] Process terminated by signal ',
               SignalName(WTERMSIG(Status)), ' (', WTERMSIG(Status), ')');
       FAttached := False;
       FPID := -1;
@@ -580,7 +580,7 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[ERROR] Not attached to any process');
+    WriteLn(StdErr, '[ERROR] Not attached to any process');
     Exit;
   end;
 
@@ -591,7 +591,7 @@ begin
     { FreeBSD PT_STEP: addr=1 means resume at current PC, data=signal }
     if ptrace(PT_STEP, FPID, Pointer(1), DataSignal) = -1 then
     begin
-      WriteLn('[ERROR] Failed to single step: ', SysErrorMessage(fpgeterrno));
+      WriteLn(StdErr, '[ERROR] Failed to single step: ', SysErrorMessage(fpgeterrno));
       Exit;
     end;
 
@@ -603,7 +603,7 @@ begin
     gWaitingPID := -1;
     if WaitResult = -1 then
     begin
-      WriteLn('[ERROR] Failed to wait for step: ', SysErrorMessage(fpgeterrno));
+      WriteLn(StdErr, '[ERROR] Failed to wait for step: ', SysErrorMessage(fpgeterrno));
       Exit;
     end;
 
@@ -613,7 +613,7 @@ begin
 
       if Sig = SIGTRAP then
       begin
-        if gVerbose then WriteLn('[INFO] Step complete');
+        if gVerbose then WriteLn(StdErr, '[INFO] Step complete');
         Result := True;
         Exit;
       end
@@ -621,13 +621,13 @@ begin
       begin
         gUserInterrupted := False;
         WriteLn('');
-        WriteLn('[INFO] Interrupted');
+        WriteLn(StdErr, '[INFO] Interrupted');
         Result := True;
         Exit;
       end
       else if IsStopSignal(Sig) then
       begin
-        WriteLn('[INFO] Process received ', SignalName(Sig),
+        WriteLn(StdErr, '[INFO] Process received ', SignalName(Sig),
                 ' (signal ', Sig, ') during step');
         FPendingSignal := Sig;
         Result := True;
@@ -636,13 +636,13 @@ begin
       else
       begin
         if gVerbose then
-          WriteLn('[DEBUG] Passing through ', SignalName(Sig), ' during step');
+          WriteLn(StdErr, '[DEBUG] Passing through ', SignalName(Sig), ' during step');
         DataSignal := Sig;
       end;
     end
     else if WIFEXITED(Status) then
     begin
-      WriteLn('[INFO] Process exited during step with code ', WEXITSTATUS(Status));
+      WriteLn(StdErr, '[INFO] Process exited during step with code ', WEXITSTATUS(Status));
       FAttached := False;
       FPID := -1;
       FPendingSignal := 0;
@@ -651,7 +651,7 @@ begin
     end
     else if WIFSIGNALED(Status) then
     begin
-      WriteLn('[INFO] Process terminated during step by signal ',
+      WriteLn(StdErr, '[INFO] Process terminated during step by signal ',
               SignalName(WTERMSIG(Status)), ' (', WTERMSIG(Status), ')');
       FAttached := False;
       FPID := -1;
@@ -674,7 +674,7 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[ERROR] Not attached to any process');
+    WriteLn(StdErr, '[ERROR] Not attached to any process');
     Exit;
   end;
 
@@ -687,7 +687,7 @@ begin
 
     if (Data = -1) and (fpgeterrno <> 0) then
     begin
-      WriteLn('[ERROR] Failed to read memory at $', IntToHex(Address + Offset, 16),
+      WriteLn(StdErr, '[ERROR] Failed to read memory at $', IntToHex(Address + Offset, 16),
               ': ', SysErrorMessage(fpgeterrno));
       Exit;
     end;
@@ -714,7 +714,7 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[ERROR] Not attached to any process');
+    WriteLn(StdErr, '[ERROR] Not attached to any process');
     Exit;
   end;
 
@@ -728,7 +728,7 @@ begin
       Data := ptrace(PT_READ_D, FPID, Pointer(PtrUInt(Address + Offset)), 0);
       if (Data = -1) and (fpgeterrno <> 0) then
       begin
-        WriteLn('[ERROR] Failed to read memory for partial write: ',
+        WriteLn(StdErr, '[ERROR] Failed to read memory for partial write: ',
                 SysErrorMessage(fpgeterrno));
         Exit;
       end;
@@ -739,7 +739,7 @@ begin
 
     if ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(Address + Offset)), cInt(Data)) = -1 then
     begin
-      WriteLn('[ERROR] Failed to write memory at $', IntToHex(Address + Offset, 16),
+      WriteLn(StdErr, '[ERROR] Failed to write memory at $', IntToHex(Address + Offset, 16),
               ': ', SysErrorMessage(fpgeterrno));
       Exit;
     end;
@@ -758,7 +758,7 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[ERROR] Not attached to any process');
+    WriteLn(StdErr, '[ERROR] Not attached to any process');
     Exit;
   end;
 
@@ -767,7 +767,7 @@ begin
   { FreeBSD PT_GETREGS: addr is ignored, data points to struct reg }
   if ptrace(PT_GETREGS, FPID, @FreeBSDRegs, 0) = -1 then
   begin
-    WriteLn('[ERROR] Failed to get registers: ', SysErrorMessage(fpgeterrno));
+    WriteLn(StdErr, '[ERROR] Failed to get registers: ', SysErrorMessage(fpgeterrno));
     Exit;
   end;
 
@@ -816,7 +816,7 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[ERROR] Not attached to any process');
+    WriteLn(StdErr, '[ERROR] Not attached to any process');
     Exit;
   end;
 
@@ -825,7 +825,7 @@ begin
   { Get current registers first to preserve segment registers etc. }
   if ptrace(PT_GETREGS, FPID, @FreeBSDRegs, 0) = -1 then
   begin
-    WriteLn('[ERROR] Failed to get current registers: ', SysErrorMessage(fpgeterrno));
+    WriteLn(StdErr, '[ERROR] Failed to get current registers: ', SysErrorMessage(fpgeterrno));
     Exit;
   end;
 
@@ -865,7 +865,7 @@ begin
 
   if ptrace(PT_SETREGS, FPID, @FreeBSDRegs, 0) = -1 then
   begin
-    WriteLn('[ERROR] Failed to set registers: ', SysErrorMessage(fpgeterrno));
+    WriteLn(StdErr, '[ERROR] Failed to set registers: ', SysErrorMessage(fpgeterrno));
     Exit;
   end;
 
@@ -886,7 +886,7 @@ begin
 
   if not GetRegisters(Regs) then
   begin
-    WriteLn('[ERROR] Failed to get registers after breakpoint');
+    WriteLn(StdErr, '[ERROR] Failed to get registers after breakpoint');
     Exit;
   end;
 
@@ -908,12 +908,12 @@ begin
   Idx := FindBreakpoint(BreakpointAddr);
   if Idx < 0 then
   begin
-    WriteLn('[WARN] Breakpoint hit at unknown address: 0x', IntToHex(BreakpointAddr, 16));
+    WriteLn(StdErr, '[WARN] Breakpoint hit at unknown address: 0x', IntToHex(BreakpointAddr, 16));
     Exit(True);
   end;
 
   if gVerbose then
-    WriteLn('[INFO] Hit breakpoint at 0x', IntToHex(BreakpointAddr, 16));
+    WriteLn(StdErr, '[INFO] Hit breakpoint at 0x', IntToHex(BreakpointAddr, 16));
 
   { Back up instruction pointer }
   {$IFDEF CPUX86_64}
@@ -925,7 +925,7 @@ begin
 
   if not SetRegisters(Regs) then
   begin
-    WriteLn('[ERROR] Failed to restore instruction pointer');
+    WriteLn(StdErr, '[ERROR] Failed to restore instruction pointer');
     Exit;
   end;
 
@@ -933,20 +933,20 @@ begin
   if ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(BreakpointAddr)),
             cInt(FBreakpoints[Idx].OriginalData)) = -1 then
   begin
-    WriteLn('[ERROR] Failed to restore original instruction');
+    WriteLn(StdErr, '[ERROR] Failed to restore original instruction');
     Exit;
   end;
 
   { Single-step over the original instruction }
   if ptrace(PT_STEP, FPID, Pointer(1), 0) = -1 then
   begin
-    WriteLn('[ERROR] Failed to single-step over restored instruction');
+    WriteLn(StdErr, '[ERROR] Failed to single-step over restored instruction');
     Exit;
   end;
 
   if FpWaitPid(FPID, @Status, 0) = -1 then
   begin
-    WriteLn('[ERROR] Failed to wait for single-step');
+    WriteLn(StdErr, '[ERROR] Failed to wait for single-step');
     Exit;
   end;
 
@@ -957,7 +957,7 @@ begin
   NewData := OrigData and cLong($FFFFFFFFFFFFFF00) or $CC;
   if ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(BreakpointAddr)), cInt(NewData)) = -1 then
   begin
-    WriteLn('[ERROR] Failed to re-insert breakpoint');
+    WriteLn(StdErr, '[ERROR] Failed to re-insert breakpoint');
     Exit;
   end;
 
@@ -988,7 +988,7 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[ERROR] Not attached to any process');
+    WriteLn(StdErr, '[ERROR] Not attached to any process');
     Exit;
   end;
 
@@ -997,7 +997,7 @@ begin
   begin
     if FBreakpoints[Idx].Active then
     begin
-      WriteLn('[WARN] Breakpoint already set at $', IntToHex(Address, 16));
+      WriteLn(StdErr, '[WARN] Breakpoint already set at $', IntToHex(Address, 16));
       Exit(True);
     end
     else
@@ -1008,13 +1008,13 @@ begin
 
       if ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(Address)), cInt(ModifiedData)) = -1 then
       begin
-        WriteLn('[ERROR] Failed to reactivate breakpoint: ', SysErrorMessage(fpgeterrno));
+        WriteLn(StdErr, '[ERROR] Failed to reactivate breakpoint: ', SysErrorMessage(fpgeterrno));
         Exit(False);
       end;
 
       FBreakpoints[Idx].Active := True;
       if gVerbose then
-        WriteLn('[INFO] Reactivated breakpoint at $', IntToHex(Address, 16));
+        WriteLn(StdErr, '[INFO] Reactivated breakpoint at $', IntToHex(Address, 16));
       Exit(True);
     end;
   end;
@@ -1022,7 +1022,7 @@ begin
   Data := ptrace(PT_READ_D, FPID, Pointer(PtrUInt(Address)), 0);
   if (Data = -1) and (fpgeterrno <> 0) then
   begin
-    WriteLn('[ERROR] Failed to read memory for breakpoint: ', SysErrorMessage(fpgeterrno));
+    WriteLn(StdErr, '[ERROR] Failed to read memory for breakpoint: ', SysErrorMessage(fpgeterrno));
     Exit;
   end;
 
@@ -1036,7 +1036,7 @@ begin
 
   if ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(Address)), cInt(ModifiedData)) = -1 then
   begin
-    WriteLn('[ERROR] Failed to set breakpoint: ', SysErrorMessage(fpgeterrno));
+    WriteLn(StdErr, '[ERROR] Failed to set breakpoint: ', SysErrorMessage(fpgeterrno));
     Exit;
   end;
 
@@ -1044,7 +1044,7 @@ begin
   FBreakpoints[High(FBreakpoints)] := BpInfo;
 
   if gVerbose then
-    WriteLn('[INFO] Breakpoint set at $', IntToHex(Address, 16));
+    WriteLn(StdErr, '[INFO] Breakpoint set at $', IntToHex(Address, 16));
   Result := True;
 end;
 
@@ -1056,34 +1056,34 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[ERROR] Not attached to any process');
+    WriteLn(StdErr, '[ERROR] Not attached to any process');
     Exit;
   end;
 
   Idx := FindBreakpoint(Address);
   if Idx < 0 then
   begin
-    WriteLn('[ERROR] No breakpoint found at $', IntToHex(Address, 16));
+    WriteLn(StdErr, '[ERROR] No breakpoint found at $', IntToHex(Address, 16));
     Exit;
   end;
 
   if not FBreakpoints[Idx].Active then
   begin
-    WriteLn('[WARN] Breakpoint at $', IntToHex(Address, 16), ' already removed');
+    WriteLn(StdErr, '[WARN] Breakpoint at $', IntToHex(Address, 16), ' already removed');
     Exit(True);
   end;
 
   if ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(Address)),
             cInt(FBreakpoints[Idx].OriginalData)) = -1 then
   begin
-    WriteLn('[ERROR] Failed to remove breakpoint: ', SysErrorMessage(fpgeterrno));
+    WriteLn(StdErr, '[ERROR] Failed to remove breakpoint: ', SysErrorMessage(fpgeterrno));
     Exit;
   end;
 
   FBreakpoints[Idx].Active := False;
 
   if gVerbose then
-    WriteLn('[INFO] Breakpoint removed from $', IntToHex(Address, 16));
+    WriteLn(StdErr, '[INFO] Breakpoint removed from $', IntToHex(Address, 16));
   Result := True;
 end;
 
@@ -1136,7 +1136,7 @@ begin
     FCommandLineArgs[I] := Args[I];
 
   if Length(Args) > 0 then
-    WriteLn('[INFO] Set command-line arguments: ', String.Join(' ', Args));
+    WriteLn(StdErr, '[INFO] Set command-line arguments: ', String.Join(' ', Args));
 
   Result := True;
 end;
@@ -1188,7 +1188,7 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[ERROR] Not attached to any process');
+    WriteLn(StdErr, '[ERROR] Not attached to any process');
     Exit;
   end;
 
@@ -1202,7 +1202,7 @@ begin
 
   if Slot = -1 then
   begin
-    WriteLn('[ERROR] All 4 hardware watchpoint slots are in use');
+    WriteLn(StdErr, '[ERROR] All 4 hardware watchpoint slots are in use');
     Result := -1;
     Exit;
   end;
@@ -1213,7 +1213,7 @@ begin
     4: LenCode := 3;
     8: LenCode := 2;
   else
-    WriteLn('[ERROR] Unsupported watchpoint size: ', Size, ' (must be 1, 2, 4, or 8)');
+    WriteLn(StdErr, '[ERROR] Unsupported watchpoint size: ', Size, ' (must be 1, 2, 4, or 8)');
     Result := -1;
     Exit;
   end;
@@ -1225,7 +1225,7 @@ begin
 
   if not WriteDebugRegister(Slot, Address) then
   begin
-    WriteLn('[ERROR] Failed to write watchpoint address to DR', Slot);
+    WriteLn(StdErr, '[ERROR] Failed to write watchpoint address to DR', Slot);
     Result := -1;
     Exit;
   end;
@@ -1240,7 +1240,7 @@ begin
 
   if not WriteDebugRegister(7, DR7) then
   begin
-    WriteLn('[ERROR] Failed to write DR7 control register');
+    WriteLn(StdErr, '[ERROR] Failed to write DR7 control register');
     Result := -1;
     Exit;
   end;
@@ -1250,7 +1250,7 @@ begin
   FWatchSlots[Slot].Active := True;
 
   if gVerbose then
-    WriteLn('[DEBUG] Watchpoint set in slot ', Slot,
+    WriteLn(StdErr, '[DEBUG] Watchpoint set in slot ', Slot,
             ' at 0x', IntToHex(Address, 16), ' size=', Size);
 
   Result := Slot;
@@ -1264,13 +1264,13 @@ begin
 
   if (Slot < 0) or (Slot > 3) then
   begin
-    WriteLn('[ERROR] Invalid watchpoint slot: ', Slot);
+    WriteLn(StdErr, '[ERROR] Invalid watchpoint slot: ', Slot);
     Exit;
   end;
 
   if not FWatchSlots[Slot].Active then
   begin
-    if gVerbose then WriteLn('[INFO] Watchpoint slot ', Slot, ' already inactive');
+    if gVerbose then WriteLn(StdErr, '[INFO] Watchpoint slot ', Slot, ' already inactive');
     Result := True;
     Exit;
   end;
@@ -1281,7 +1281,7 @@ begin
 
   if not WriteDebugRegister(7, DR7) then
   begin
-    WriteLn('[ERROR] Failed to clear DR7 for slot ', Slot);
+    WriteLn(StdErr, '[ERROR] Failed to clear DR7 for slot ', Slot);
     Exit;
   end;
 
@@ -1290,7 +1290,7 @@ begin
   FWatchSlots[Slot].Active := False;
 
   if gVerbose then
-    WriteLn('[DEBUG] Watchpoint slot ', Slot, ' cleared');
+    WriteLn(StdErr, '[DEBUG] Watchpoint slot ', Slot, ' cleared');
 
   Result := True;
 end;
@@ -1322,13 +1322,13 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[ERROR] InjectCall: not attached to any process');
+    WriteLn(StdErr, '[ERROR] InjectCall: not attached to any process');
     Exit;
   end;
 
   if not GetRegisters(SavedRegs) then
   begin
-    WriteLn('[ERROR] InjectCall: failed to save registers');
+    WriteLn(StdErr, '[ERROR] InjectCall: failed to save registers');
     Exit;
   end;
 
@@ -1337,14 +1337,14 @@ begin
   OrigData := ptrace(PT_READ_D, FPID, Pointer(PtrUInt(SentinelAddr)), 0);
   if (OrigData = -1) and (fpgeterrno <> 0) then
   begin
-    WriteLn('[ERROR] InjectCall: failed to read memory at sentinel');
+    WriteLn(StdErr, '[ERROR] InjectCall: failed to read memory at sentinel');
     Exit;
   end;
 
   if ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(SentinelAddr)),
             cInt(OrigData and cLong($FFFFFFFFFFFFFF00) or $CC)) = -1 then
   begin
-    WriteLn('[ERROR] InjectCall: failed to write INT3 sentinel');
+    WriteLn(StdErr, '[ERROR] InjectCall: failed to write INT3 sentinel');
     Exit;
   end;
 
@@ -1358,7 +1358,7 @@ begin
     ZeroBuf := 0;
     if not WriteMemory(ResultBufAddr, 8, ZeroBuf) then
     begin
-      WriteLn('[ERROR] InjectCall: failed to zero result buffer');
+      WriteLn(StdErr, '[ERROR] InjectCall: failed to zero result buffer');
       ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(SentinelAddr)), cInt(OrigData));
       Exit;
     end;
@@ -1367,7 +1367,7 @@ begin
   ReturnAddr := SentinelAddr;
   if not WriteMemory(NewRSP, 8, ReturnAddr) then
   begin
-    WriteLn('[ERROR] InjectCall: failed to write return address');
+    WriteLn(StdErr, '[ERROR] InjectCall: failed to write return address');
     ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(SentinelAddr)), cInt(OrigData));
     Exit;
   end;
@@ -1381,13 +1381,13 @@ begin
 
   if not SetRegisters(NewRegs) then
   begin
-    WriteLn('[ERROR] InjectCall: failed to set registers');
+    WriteLn(StdErr, '[ERROR] InjectCall: failed to set registers');
     ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(SentinelAddr)), cInt(OrigData));
     Exit;
   end;
 
   if gVerbose then
-    WriteLn('[DEBUG] InjectCall: calling $', IntToHex(MethodAddr, 16),
+    WriteLn(StdErr, '[DEBUG] InjectCall: calling $', IntToHex(MethodAddr, 16),
             ' Self=$', IntToHex(SelfPtr, 16),
             ' RSP=$', IntToHex(NewRSP, 16));
 
@@ -1395,19 +1395,19 @@ begin
   repeat
     if ptrace(PT_CONTINUE, FPID, Pointer(1), 0) = -1 then
     begin
-      WriteLn('[ERROR] InjectCall: failed to continue');
+      WriteLn(StdErr, '[ERROR] InjectCall: failed to continue');
       Break;
     end;
 
     if FpWaitPid(FPID, @Status, 0) = -1 then
     begin
-      WriteLn('[ERROR] InjectCall: failed to wait');
+      WriteLn(StdErr, '[ERROR] InjectCall: failed to wait');
       Break;
     end;
 
     if WIFEXITED(Status) or WIFSIGNALED(Status) then
     begin
-      WriteLn('[ERROR] InjectCall: process terminated during injection');
+      WriteLn(StdErr, '[ERROR] InjectCall: process terminated during injection');
       FAttached := False;
       FPID := -1;
       Exit;
@@ -1433,7 +1433,7 @@ begin
     if BpIdx >= 0 then
     begin
       if gVerbose then
-        WriteLn('[DEBUG] InjectCall: hit user breakpoint at $',
+        WriteLn(StdErr, '[DEBUG] InjectCall: hit user breakpoint at $',
                 IntToHex(StoppedAddr, 16), ' — stepping past');
       RetRegs.RIP := StoppedAddr;
       SetRegisters(RetRegs);
@@ -1448,7 +1448,7 @@ begin
     else
     begin
       if gVerbose then
-        WriteLn('[DEBUG] InjectCall: unexpected stop at $',
+        WriteLn(StdErr, '[DEBUG] InjectCall: unexpected stop at $',
                 IntToHex(StoppedAddr, 16), ' signal=', WSTOPSIG(Status));
     end;
 
@@ -1456,19 +1456,19 @@ begin
   until Iterations >= MAX_ITERATIONS;
 
   if Iterations >= MAX_ITERATIONS then
-    WriteLn('[ERROR] InjectCall: timeout — iteration limit reached');
+    WriteLn(StdErr, '[ERROR] InjectCall: timeout — iteration limit reached');
 
   ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(SentinelAddr)), cInt(OrigData));
   SetRegisters(SavedRegs);
 
   if gVerbose and Result then
-    WriteLn('[DEBUG] InjectCall: completed, RetValue=$', IntToHex(RetValue, 16));
+    WriteLn(StdErr, '[DEBUG] InjectCall: completed, RetValue=$', IntToHex(RetValue, 16));
 end;
 {$ELSE}
 begin
   Result := False;
   RetValue := 0;
-  WriteLn('[ERROR] InjectCall: only supported on x86_64');
+  WriteLn(StdErr, '[ERROR] InjectCall: only supported on x86_64');
 end;
 {$ENDIF}
 
@@ -1524,7 +1524,7 @@ begin
   {$POP}
 
   if gVerbose and (Result <> 0) then
-    WriteLn('[DEBUG] Load base from /proc/map: $', IntToHex(Result, 16));
+    WriteLn(StdErr, '[DEBUG] Load base from /proc/map: $', IntToHex(Result, 16));
 end;
 
 function TFreeBSDPtraceAdapter.GetTLSBase: QWord;

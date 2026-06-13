@@ -268,18 +268,18 @@ begin
 
   if FAttached then
   begin
-    WriteLn('[ERROR] Already attached to a process');
+    WriteLn(StdErr, '[ERROR] Already attached to a process');
     Exit;
   end;
 
   if not FileExists(BinaryPath) then
   begin
-    WriteLn('[ERROR] Binary file not found: ', BinaryPath);
+    WriteLn(StdErr, '[ERROR] Binary file not found: ', BinaryPath);
     Exit;
   end;
 
   if gVerbose then
-    WriteLn('[INFO] Launching program: ', BinaryPath);
+    WriteLn(StdErr, '[INFO] Launching program: ', BinaryPath);
 
   FillChar(StartupInfo, SizeOf(StartupInfo), 0);
   StartupInfo.cb := SizeOf(StartupInfo);
@@ -301,7 +301,7 @@ begin
     StartupInfo,
     FProcessInfo) then
   begin
-    WriteLn('[ERROR] Failed to create process: ', SysErrorMessage(GetLastError));
+    WriteLn(StdErr, '[ERROR] Failed to create process: ', SysErrorMessage(GetLastError));
     Exit;
   end;
 
@@ -316,7 +316,7 @@ begin
   begin
     if not WaitForDebugEvent(DebugEvent, INFINITE) then
     begin
-      WriteLn('[ERROR] WaitForDebugEvent failed: ', SysErrorMessage(GetLastError));
+      WriteLn(StdErr, '[ERROR] WaitForDebugEvent failed: ', SysErrorMessage(GetLastError));
       FAttached := False;
       Exit;
     end;
@@ -325,7 +325,7 @@ begin
       CREATE_PROCESS_DEBUG_EVENT:
       begin
         if gVerbose then
-          WriteLn('[INFO] Process created, PID=', FProcessID);
+          WriteLn(StdErr, '[INFO] Process created, PID=', FProcessID);
         { Close the image file handle returned by the event }
         if DebugEvent.CreateProcessInfo.hFile <> 0 then
           CloseHandle(DebugEvent.CreateProcessInfo.hFile);
@@ -340,8 +340,8 @@ begin
           ContinueDebugEvent(FProcessID, DebugEvent.dwThreadId, DBG_CONTINUE);
           if gVerbose then
           begin
-            WriteLn('[INFO] Child process stopped at entry point');
-            WriteLn('[INFO] Debugger has control (process is paused)');
+            WriteLn(StdErr, '[INFO] Child process stopped at entry point');
+            WriteLn(StdErr, '[INFO] Debugger has control (process is paused)');
           end;
         end
         else
@@ -368,13 +368,13 @@ begin
 
   if FAttached then
   begin
-    WriteLn('[ERROR] Already attached to a process');
+    WriteLn(StdErr, '[ERROR] Already attached to a process');
     Exit;
   end;
 
   if not DebugActiveProcess(DWORD(PID)) then
   begin
-    WriteLn('[ERROR] Failed to attach to process ', PID, ': ',
+    WriteLn(StdErr, '[ERROR] Failed to attach to process ', PID, ': ',
             SysErrorMessage(GetLastError));
     Exit;
   end;
@@ -383,7 +383,7 @@ begin
   FProcessHandle := OpenProcess(PROCESS_ALL_ACCESS, False, DWORD(PID));
   if FProcessHandle = 0 then
   begin
-    WriteLn('[ERROR] Failed to open process handle: ', SysErrorMessage(GetLastError));
+    WriteLn(StdErr, '[ERROR] Failed to open process handle: ', SysErrorMessage(GetLastError));
     DebugActiveProcessStop(DWORD(PID));
     Exit;
   end;
@@ -391,7 +391,7 @@ begin
   FProcessID := DWORD(PID);
   FAttached := True;
   FInitialBreakpointHit := False;
-  WriteLn('[INFO] Successfully attached to PID ', PID);
+  WriteLn(StdErr, '[INFO] Successfully attached to PID ', PID);
   Result := True;
 end;
 
@@ -403,14 +403,14 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[WARN] Not attached to any process');
+    WriteLn(StdErr, '[WARN] Not attached to any process');
     Exit(True);
   end;
 
   if Length(FBreakpoints) > 0 then
   begin
     if gVerbose then
-      WriteLn('[INFO] Removing all breakpoints before detach');
+      WriteLn(StdErr, '[INFO] Removing all breakpoints before detach');
     for I := 0 to High(FBreakpoints) do
     begin
       if FBreakpoints[I].Active then
@@ -421,7 +421,7 @@ begin
 
   if not DebugActiveProcessStop(FProcessID) then
   begin
-    WriteLn('[ERROR] Failed to detach from process: ', SysErrorMessage(GetLastError));
+    WriteLn(StdErr, '[ERROR] Failed to detach from process: ', SysErrorMessage(GetLastError));
     Exit;
   end;
 
@@ -431,7 +431,7 @@ begin
     CloseHandle(FMainThreadHandle);
 
   if gVerbose then
-    WriteLn('[INFO] Detached from PID ', FProcessID);
+    WriteLn(StdErr, '[INFO] Detached from PID ', FProcessID);
 
   FAttached := False;
   FProcessHandle := 0;
@@ -453,7 +453,7 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[ERROR] Not attached to any process');
+    WriteLn(StdErr, '[ERROR] Not attached to any process');
     Exit;
   end;
 
@@ -464,7 +464,7 @@ begin
   begin
     if not WaitForDebugEvent(DebugEvent, INFINITE) then
     begin
-      WriteLn('[ERROR] WaitForDebugEvent failed: ', SysErrorMessage(GetLastError));
+      WriteLn(StdErr, '[ERROR] WaitForDebugEvent failed: ', SysErrorMessage(GetLastError));
       Exit;
     end;
 
@@ -477,7 +477,7 @@ begin
         begin
           if not HandleBreakpointHit(FMainThreadHandle) then
           begin
-            WriteLn('[ERROR] Failed to handle breakpoint');
+            WriteLn(StdErr, '[ERROR] Failed to handle breakpoint');
             ContinueDebugEvent(FProcessID, DebugEvent.dwThreadId, DBG_CONTINUE);
             Exit;
           end;
@@ -506,7 +506,7 @@ begin
               SetThreadContext(FMainThreadHandle, Ctx);
 
               if gVerbose then
-                WriteLn('[DEBUG] Hardware watchpoint hit: slot ', WatchSlot);
+                WriteLn(StdErr, '[DEBUG] Hardware watchpoint hit: slot ', WatchSlot);
 
               ContinueDebugEvent(FProcessID, DebugEvent.dwThreadId, DBG_CONTINUE);
               Result := True;
@@ -522,7 +522,7 @@ begin
         else if (ExCode = STATUS_ACCESS_VIOLATION) or
                 (ExCode = STATUS_STACK_OVERFLOW) then
         begin
-          WriteLn('[INFO] Process received exception $', IntToHex(ExCode, 8));
+          WriteLn(StdErr, '[INFO] Process received exception $', IntToHex(ExCode, 8));
           ContinueDebugEvent(FProcessID, DebugEvent.dwThreadId,
                              DBG_EXCEPTION_NOT_HANDLED);
           Result := True;
@@ -536,7 +536,7 @@ begin
                                DBG_EXCEPTION_NOT_HANDLED)
           else
           begin
-            WriteLn('[INFO] Unhandled exception $', IntToHex(ExCode, 8));
+            WriteLn(StdErr, '[INFO] Unhandled exception $', IntToHex(ExCode, 8));
             ContinueDebugEvent(FProcessID, DebugEvent.dwThreadId,
                                DBG_EXCEPTION_NOT_HANDLED);
             Result := True;
@@ -546,7 +546,7 @@ begin
       end;
       EXIT_PROCESS_DEBUG_EVENT:
       begin
-        WriteLn('[INFO] Process exited with code ',
+        WriteLn(StdErr, '[INFO] Process exited with code ',
                 DebugEvent.ExitProcess.dwExitCode);
         ContinueDebugEvent(FProcessID, DebugEvent.dwThreadId, DBG_CONTINUE);
         FAttached := False;
@@ -577,7 +577,7 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[ERROR] Not attached to any process');
+    WriteLn(StdErr, '[ERROR] Not attached to any process');
     Exit;
   end;
 
@@ -586,7 +586,7 @@ begin
   Ctx.ContextFlags := CONTEXT_FULL_FLAG;
   if not GetThreadContext(FMainThreadHandle, Ctx) then
   begin
-    WriteLn('[ERROR] Failed to get thread context for step: ',
+    WriteLn(StdErr, '[ERROR] Failed to get thread context for step: ',
             SysErrorMessage(GetLastError));
     Exit;
   end;
@@ -595,7 +595,7 @@ begin
 
   if not SetThreadContext(FMainThreadHandle, Ctx) then
   begin
-    WriteLn('[ERROR] Failed to set trap flag: ', SysErrorMessage(GetLastError));
+    WriteLn(StdErr, '[ERROR] Failed to set trap flag: ', SysErrorMessage(GetLastError));
     Exit;
   end;
 
@@ -606,7 +606,7 @@ begin
   begin
     if not WaitForDebugEvent(DebugEvent, INFINITE) then
     begin
-      WriteLn('[ERROR] WaitForDebugEvent failed during step: ',
+      WriteLn(StdErr, '[ERROR] WaitForDebugEvent failed during step: ',
               SysErrorMessage(GetLastError));
       Exit;
     end;
@@ -616,7 +616,7 @@ begin
       begin
         if DebugEvent.Exception.ExceptionRecord.ExceptionCode = STATUS_SINGLE_STEP then
         begin
-          if gVerbose then WriteLn('[INFO] Step complete');
+          if gVerbose then WriteLn(StdErr, '[INFO] Step complete');
           ContinueDebugEvent(FProcessID, DebugEvent.dwThreadId, DBG_CONTINUE);
           Result := True;
           Exit;
@@ -629,7 +629,7 @@ begin
       end;
       EXIT_PROCESS_DEBUG_EVENT:
       begin
-        WriteLn('[INFO] Process exited during step with code ',
+        WriteLn(StdErr, '[INFO] Process exited during step with code ',
                 DebugEvent.ExitProcess.dwExitCode);
         ContinueDebugEvent(FProcessID, DebugEvent.dwThreadId, DBG_CONTINUE);
         FAttached := False;
@@ -654,14 +654,14 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[ERROR] Not attached to any process');
+    WriteLn(StdErr, '[ERROR] Not attached to any process');
     Exit;
   end;
 
   if not ReadProcessMemory(FProcessHandle, Pointer(PtrUInt(Address)),
                            @Buffer, Size, BytesRead) then
   begin
-    WriteLn('[ERROR] Failed to read memory at $', IntToHex(Address, 16),
+    WriteLn(StdErr, '[ERROR] Failed to read memory at $', IntToHex(Address, 16),
             ': ', SysErrorMessage(GetLastError));
     Exit;
   end;
@@ -678,14 +678,14 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[ERROR] Not attached to any process');
+    WriteLn(StdErr, '[ERROR] Not attached to any process');
     Exit;
   end;
 
   if not WriteProcessMemory(FProcessHandle, Pointer(PtrUInt(Address)),
                             @Buffer, Size, BytesWritten) then
   begin
-    WriteLn('[ERROR] Failed to write memory at $', IntToHex(Address, 16),
+    WriteLn(StdErr, '[ERROR] Failed to write memory at $', IntToHex(Address, 16),
             ': ', SysErrorMessage(GetLastError));
     Exit;
   end;
@@ -704,7 +704,7 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[ERROR] Not attached to any process');
+    WriteLn(StdErr, '[ERROR] Not attached to any process');
     Exit;
   end;
 
@@ -713,7 +713,7 @@ begin
 
   if not GetThreadContext(FMainThreadHandle, Ctx) then
   begin
-    WriteLn('[ERROR] Failed to get thread context: ', SysErrorMessage(GetLastError));
+    WriteLn(StdErr, '[ERROR] Failed to get thread context: ', SysErrorMessage(GetLastError));
     Exit;
   end;
 
@@ -762,7 +762,7 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[ERROR] Not attached to any process');
+    WriteLn(StdErr, '[ERROR] Not attached to any process');
     Exit;
   end;
 
@@ -771,7 +771,7 @@ begin
 
   if not GetThreadContext(FMainThreadHandle, Ctx) then
   begin
-    WriteLn('[ERROR] Failed to get current thread context: ',
+    WriteLn(StdErr, '[ERROR] Failed to get current thread context: ',
             SysErrorMessage(GetLastError));
     Exit;
   end;
@@ -812,7 +812,7 @@ begin
 
   if not SetThreadContext(FMainThreadHandle, Ctx) then
   begin
-    WriteLn('[ERROR] Failed to set thread context: ', SysErrorMessage(GetLastError));
+    WriteLn(StdErr, '[ERROR] Failed to set thread context: ', SysErrorMessage(GetLastError));
     Exit;
   end;
 
@@ -832,7 +832,7 @@ begin
 
   if not GetRegisters(Regs) then
   begin
-    WriteLn('[ERROR] Failed to get registers after breakpoint');
+    WriteLn(StdErr, '[ERROR] Failed to get registers after breakpoint');
     Exit;
   end;
 
@@ -854,12 +854,12 @@ begin
   Idx := FindBreakpoint(BreakpointAddr);
   if Idx < 0 then
   begin
-    WriteLn('[WARN] Breakpoint hit at unknown address: 0x', IntToHex(BreakpointAddr, 16));
+    WriteLn(StdErr, '[WARN] Breakpoint hit at unknown address: 0x', IntToHex(BreakpointAddr, 16));
     Exit(True);
   end;
 
   if gVerbose then
-    WriteLn('[INFO] Hit breakpoint at 0x', IntToHex(BreakpointAddr, 16));
+    WriteLn(StdErr, '[INFO] Hit breakpoint at 0x', IntToHex(BreakpointAddr, 16));
 
   { Back up instruction pointer }
   {$IFDEF CPUX86_64}
@@ -871,7 +871,7 @@ begin
 
   if not SetRegisters(Regs) then
   begin
-    WriteLn('[ERROR] Failed to restore instruction pointer');
+    WriteLn(StdErr, '[ERROR] Failed to restore instruction pointer');
     Exit;
   end;
 
@@ -879,7 +879,7 @@ begin
   OrigByte := FBreakpoints[Idx].OriginalByte;
   if not WriteMemory(BreakpointAddr, 1, OrigByte) then
   begin
-    WriteLn('[ERROR] Failed to restore original instruction');
+    WriteLn(StdErr, '[ERROR] Failed to restore original instruction');
     Exit;
   end;
 
@@ -895,7 +895,7 @@ begin
 
   if not WaitForDebugEvent(DebugEvent, 5000) then
   begin
-    WriteLn('[ERROR] Timeout waiting for single-step after breakpoint');
+    WriteLn(StdErr, '[ERROR] Timeout waiting for single-step after breakpoint');
     Exit;
   end;
 
@@ -903,7 +903,7 @@ begin
   OrigByte := $CC;
   if not WriteMemory(BreakpointAddr, 1, OrigByte) then
   begin
-    WriteLn('[ERROR] Failed to re-insert breakpoint');
+    WriteLn(StdErr, '[ERROR] Failed to re-insert breakpoint');
     Exit;
   end;
 
@@ -932,7 +932,7 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[ERROR] Not attached to any process');
+    WriteLn(StdErr, '[ERROR] Not attached to any process');
     Exit;
   end;
 
@@ -941,7 +941,7 @@ begin
   begin
     if FBreakpoints[Idx].Active then
     begin
-      WriteLn('[WARN] Breakpoint already set at $', IntToHex(Address, 16));
+      WriteLn(StdErr, '[WARN] Breakpoint already set at $', IntToHex(Address, 16));
       Exit(True);
     end
     else
@@ -949,12 +949,12 @@ begin
       TrapByte := $CC;
       if not WriteMemory(Address, 1, TrapByte) then
       begin
-        WriteLn('[ERROR] Failed to reactivate breakpoint: ', SysErrorMessage(GetLastError));
+        WriteLn(StdErr, '[ERROR] Failed to reactivate breakpoint: ', SysErrorMessage(GetLastError));
         Exit(False);
       end;
       FBreakpoints[Idx].Active := True;
       if gVerbose then
-        WriteLn('[INFO] Reactivated breakpoint at $', IntToHex(Address, 16));
+        WriteLn(StdErr, '[INFO] Reactivated breakpoint at $', IntToHex(Address, 16));
       Exit(True);
     end;
   end;
@@ -962,7 +962,7 @@ begin
   { Read original byte }
   if not ReadMemory(Address, 1, OrigByte) then
   begin
-    WriteLn('[ERROR] Failed to read memory for breakpoint: ', SysErrorMessage(GetLastError));
+    WriteLn(StdErr, '[ERROR] Failed to read memory for breakpoint: ', SysErrorMessage(GetLastError));
     Exit;
   end;
 
@@ -974,7 +974,7 @@ begin
   TrapByte := $CC;
   if not WriteMemory(Address, 1, TrapByte) then
   begin
-    WriteLn('[ERROR] Failed to set breakpoint: ', SysErrorMessage(GetLastError));
+    WriteLn(StdErr, '[ERROR] Failed to set breakpoint: ', SysErrorMessage(GetLastError));
     Exit;
   end;
 
@@ -982,7 +982,7 @@ begin
   FBreakpoints[High(FBreakpoints)] := BpInfo;
 
   if gVerbose then
-    WriteLn('[INFO] Breakpoint set at $', IntToHex(Address, 16));
+    WriteLn(StdErr, '[INFO] Breakpoint set at $', IntToHex(Address, 16));
   Result := True;
 end;
 
@@ -994,33 +994,33 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[ERROR] Not attached to any process');
+    WriteLn(StdErr, '[ERROR] Not attached to any process');
     Exit;
   end;
 
   Idx := FindBreakpoint(Address);
   if Idx < 0 then
   begin
-    WriteLn('[ERROR] No breakpoint found at $', IntToHex(Address, 16));
+    WriteLn(StdErr, '[ERROR] No breakpoint found at $', IntToHex(Address, 16));
     Exit;
   end;
 
   if not FBreakpoints[Idx].Active then
   begin
-    WriteLn('[WARN] Breakpoint at $', IntToHex(Address, 16), ' already removed');
+    WriteLn(StdErr, '[WARN] Breakpoint at $', IntToHex(Address, 16), ' already removed');
     Exit(True);
   end;
 
   if not WriteMemory(Address, 1, FBreakpoints[Idx].OriginalByte) then
   begin
-    WriteLn('[ERROR] Failed to remove breakpoint: ', SysErrorMessage(GetLastError));
+    WriteLn(StdErr, '[ERROR] Failed to remove breakpoint: ', SysErrorMessage(GetLastError));
     Exit;
   end;
 
   FBreakpoints[Idx].Active := False;
 
   if gVerbose then
-    WriteLn('[INFO] Breakpoint removed from $', IntToHex(Address, 16));
+    WriteLn(StdErr, '[INFO] Breakpoint removed from $', IntToHex(Address, 16));
   Result := True;
 end;
 
@@ -1073,7 +1073,7 @@ begin
     FCommandLineArgs[I] := Args[I];
 
   if Length(Args) > 0 then
-    WriteLn('[INFO] Set command-line arguments: ', String.Join(' ', Args));
+    WriteLn(StdErr, '[INFO] Set command-line arguments: ', String.Join(' ', Args));
 
   Result := True;
 end;
@@ -1141,7 +1141,7 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[ERROR] Not attached to any process');
+    WriteLn(StdErr, '[ERROR] Not attached to any process');
     Exit;
   end;
 
@@ -1155,7 +1155,7 @@ begin
 
   if Slot = -1 then
   begin
-    WriteLn('[ERROR] All 4 hardware watchpoint slots are in use');
+    WriteLn(StdErr, '[ERROR] All 4 hardware watchpoint slots are in use');
     Result := -1;
     Exit;
   end;
@@ -1163,7 +1163,7 @@ begin
   case Size of
     1, 2, 4, 8: ;
   else
-    WriteLn('[ERROR] Unsupported watchpoint size: ', Size, ' (must be 1, 2, 4, or 8)');
+    WriteLn(StdErr, '[ERROR] Unsupported watchpoint size: ', Size, ' (must be 1, 2, 4, or 8)');
     Result := -1;
     Exit;
   end;
@@ -1175,7 +1175,7 @@ begin
   UpdateDebugRegisters(FMainThreadHandle);
 
   if gVerbose then
-    WriteLn('[DEBUG] Watchpoint set in slot ', Slot,
+    WriteLn(StdErr, '[DEBUG] Watchpoint set in slot ', Slot,
             ' at 0x', IntToHex(Address, 16), ' size=', Size);
 
   Result := Slot;
@@ -1187,13 +1187,13 @@ begin
 
   if (Slot < 0) or (Slot > 3) then
   begin
-    WriteLn('[ERROR] Invalid watchpoint slot: ', Slot);
+    WriteLn(StdErr, '[ERROR] Invalid watchpoint slot: ', Slot);
     Exit;
   end;
 
   if not FWatchSlots[Slot].Active then
   begin
-    if gVerbose then WriteLn('[INFO] Watchpoint slot ', Slot, ' already inactive');
+    if gVerbose then WriteLn(StdErr, '[INFO] Watchpoint slot ', Slot, ' already inactive');
     Result := True;
     Exit;
   end;
@@ -1203,7 +1203,7 @@ begin
   UpdateDebugRegisters(FMainThreadHandle);
 
   if gVerbose then
-    WriteLn('[DEBUG] Watchpoint slot ', Slot, ' cleared');
+    WriteLn(StdErr, '[DEBUG] Watchpoint slot ', Slot, ' cleared');
 
   Result := True;
 end;
@@ -1235,13 +1235,13 @@ begin
 
   if not FAttached then
   begin
-    WriteLn('[ERROR] InjectCall: not attached to any process');
+    WriteLn(StdErr, '[ERROR] InjectCall: not attached to any process');
     Exit;
   end;
 
   if not GetRegisters(SavedRegs) then
   begin
-    WriteLn('[ERROR] InjectCall: failed to save registers');
+    WriteLn(StdErr, '[ERROR] InjectCall: failed to save registers');
     Exit;
   end;
 
@@ -1249,14 +1249,14 @@ begin
 
   if not ReadMemory(SentinelAddr, 1, OrigByte) then
   begin
-    WriteLn('[ERROR] InjectCall: failed to read memory at sentinel');
+    WriteLn(StdErr, '[ERROR] InjectCall: failed to read memory at sentinel');
     Exit;
   end;
 
   TrapByte := $CC;
   if not WriteMemory(SentinelAddr, 1, TrapByte) then
   begin
-    WriteLn('[ERROR] InjectCall: failed to write INT3 sentinel');
+    WriteLn(StdErr, '[ERROR] InjectCall: failed to write INT3 sentinel');
     Exit;
   end;
 
@@ -1270,7 +1270,7 @@ begin
     ZeroBuf := 0;
     if not WriteMemory(ResultBufAddr, 8, ZeroBuf) then
     begin
-      WriteLn('[ERROR] InjectCall: failed to zero result buffer');
+      WriteLn(StdErr, '[ERROR] InjectCall: failed to zero result buffer');
       WriteMemory(SentinelAddr, 1, OrigByte);
       Exit;
     end;
@@ -1279,7 +1279,7 @@ begin
   ReturnAddr := SentinelAddr;
   if not WriteMemory(NewRSP, 8, ReturnAddr) then
   begin
-    WriteLn('[ERROR] InjectCall: failed to write return address');
+    WriteLn(StdErr, '[ERROR] InjectCall: failed to write return address');
     WriteMemory(SentinelAddr, 1, OrigByte);
     Exit;
   end;
@@ -1294,13 +1294,13 @@ begin
 
   if not SetRegisters(NewRegs) then
   begin
-    WriteLn('[ERROR] InjectCall: failed to set registers');
+    WriteLn(StdErr, '[ERROR] InjectCall: failed to set registers');
     WriteMemory(SentinelAddr, 1, OrigByte);
     Exit;
   end;
 
   if gVerbose then
-    WriteLn('[DEBUG] InjectCall: calling $', IntToHex(MethodAddr, 16),
+    WriteLn(StdErr, '[DEBUG] InjectCall: calling $', IntToHex(MethodAddr, 16),
             ' Self=$', IntToHex(SelfPtr, 16),
             ' RSP=$', IntToHex(NewRSP, 16));
 
@@ -1310,13 +1310,13 @@ begin
 
     if not WaitForDebugEvent(DebugEvent, 10000) then
     begin
-      WriteLn('[ERROR] InjectCall: timeout waiting for debug event');
+      WriteLn(StdErr, '[ERROR] InjectCall: timeout waiting for debug event');
       Break;
     end;
 
     if DebugEvent.dwDebugEventCode = EXIT_PROCESS_DEBUG_EVENT then
     begin
-      WriteLn('[ERROR] InjectCall: process terminated during injection');
+      WriteLn(StdErr, '[ERROR] InjectCall: process terminated during injection');
       FAttached := False;
       Exit;
     end;
@@ -1353,7 +1353,7 @@ begin
     if BpIdx >= 0 then
     begin
       if gVerbose then
-        WriteLn('[DEBUG] InjectCall: hit user breakpoint at $',
+        WriteLn(StdErr, '[DEBUG] InjectCall: hit user breakpoint at $',
                 IntToHex(StoppedAddr, 16), ' — stepping past');
       RetRegs.RIP := StoppedAddr;
       SetRegisters(RetRegs);
@@ -1367,19 +1367,19 @@ begin
   until Iterations >= MAX_ITERATIONS;
 
   if Iterations >= MAX_ITERATIONS then
-    WriteLn('[ERROR] InjectCall: timeout — iteration limit reached');
+    WriteLn(StdErr, '[ERROR] InjectCall: timeout — iteration limit reached');
 
   WriteMemory(SentinelAddr, 1, OrigByte);
   SetRegisters(SavedRegs);
 
   if gVerbose and Result then
-    WriteLn('[DEBUG] InjectCall: completed, RetValue=$', IntToHex(RetValue, 16));
+    WriteLn(StdErr, '[DEBUG] InjectCall: completed, RetValue=$', IntToHex(RetValue, 16));
 end;
 {$ELSE}
 begin
   Result := False;
   RetValue := 0;
-  WriteLn('[ERROR] InjectCall: only supported on x86_64');
+  WriteLn(StdErr, '[ERROR] InjectCall: only supported on x86_64');
 end;
 {$ENDIF}
 

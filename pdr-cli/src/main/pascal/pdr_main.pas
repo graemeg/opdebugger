@@ -323,7 +323,7 @@ begin
   Result := True;
   if not FileExists(Filename) then
   begin
-    WriteLn('[ERROR] Script file not found: ', Filename);
+    WriteLn(StdErr, '[ERROR] Script file not found: ', Filename);
     Result := False;
     Exit;
   end;
@@ -410,7 +410,7 @@ begin
 
     'quit', 'q', 'exit':
       begin
-        WriteLn('Exiting...');
+        WriteLn(StdErr, 'Exiting...');
         FRunning := False;
         Result := False;
       end;
@@ -433,11 +433,11 @@ begin
         end
         else
         begin
-          WriteLn('[INFO] Usage: args <argument> [<argument> ...]');
+          WriteLn(StdErr, '[INFO] Usage: args <argument> [<argument> ...]');
           if Length(FCommandLineArgs) > 0 then
-            WriteLn('[INFO] Current arguments: ', String.Join(' ', FCommandLineArgs))
+            WriteLn(StdErr, '[INFO] Current arguments: ', String.Join(' ', FCommandLineArgs))
           else
-            WriteLn('[INFO] No arguments set');
+            WriteLn(StdErr, '[INFO] No arguments set');
         end;
       end;
 
@@ -445,13 +445,13 @@ begin
       begin
         if Length(Parts) < 2 then
         begin
-          WriteLn('[ERROR] Usage: attach <pid>');
+          WriteLn(StdErr, '[ERROR] Usage: attach <pid>');
           Exit;
         end;
 
         if not TryStrToInt(Parts[1], PID) then
         begin
-          WriteLn('[ERROR] Invalid PID: ', Parts[1]);
+          WriteLn(StdErr, '[ERROR] Invalid PID: ', Parts[1]);
           Exit;
         end;
 
@@ -532,10 +532,10 @@ begin
               end;
             end;
             if not FoundNextLine then
-              WriteLn('[ERROR] No subsequent line found');
+              WriteLn(StdErr, '[ERROR] No subsequent line found');
           end
           else
-            WriteLn('[ERROR] Cannot determine current line');
+            WriteLn(StdErr, '[ERROR] Cannot determine current line');
         end;
       end;
 
@@ -549,12 +549,12 @@ begin
       begin
         if Length(Parts) < 2 then
         begin
-          WriteLn('[ERROR] Usage: frame <number>');
+          WriteLn(StdErr, '[ERROR] Usage: frame <number>');
           Exit;
         end;
         if not TryStrToInt(Parts[1], BpNum) then
         begin
-          WriteLn('[ERROR] Invalid frame number: ', Parts[1]);
+          WriteLn(StdErr, '[ERROR] Invalid frame number: ', Parts[1]);
           Exit;
         end;
         FEngine.SelectFrame(BpNum);
@@ -564,7 +564,7 @@ begin
       begin
         if Length(Parts) < 2 then
         begin
-          WriteLn('[ERROR] Usage: print <expression>');
+          WriteLn(StdErr, '[ERROR] Usage: print <expression>');
           Exit;
         end;
 
@@ -583,7 +583,7 @@ begin
             if SliceResult[I].IsValid then
               WriteLn(SliceResult[I].Name, ' = ', SliceResult[I].Value)
             else
-              WriteLn('[ERROR] ', SliceResult[I].Name, ': ', SliceResult[I].Value);
+              WriteLn(StdErr, '[ERROR] ', SliceResult[I].Name, ': ', SliceResult[I].Value);
           end;
         end
         else
@@ -593,7 +593,7 @@ begin
           if VarValue.IsValid then
             WriteLn(VarValue.Name, ' = ', VarValue.Value)
           else
-            WriteLn('[ERROR] ', VarValue.Value);
+            WriteLn(StdErr, '[ERROR] ', VarValue.Value);
         end;
       end;
 
@@ -601,7 +601,7 @@ begin
       begin
         if Length(Parts) < 2 then
         begin
-          WriteLn('[ERROR] Usage: tbreak <location>');
+          WriteLn(StdErr, '[ERROR] Usage: tbreak <location>');
           Exit;
         end;
         BpHandle := FEngine.SetBreakpoint(Parts[1]);
@@ -613,8 +613,8 @@ begin
       begin
         if Length(Parts) < 2 then
         begin
-          WriteLn('[ERROR] Usage: break <location> [if <expr>]');
-          WriteLn('[INFO] Location can be: hex address (0xNNNN), decimal address, or variable name');
+          WriteLn(StdErr, '[ERROR] Usage: break <location> [if <expr>]');
+          WriteLn(StdErr, '[INFO] Location can be: hex address (0xNNNN), decimal address, or variable name');
           Exit;
         end;
 
@@ -631,7 +631,7 @@ begin
                (BpNum > 0) then
               FEngine.SetBreakpointCondition(BpHandle, bctHitCount, BpNum)
             else
-              WriteLn('[ERROR] Invalid hit count: ', Copy(Parts[3], 7, Length(Parts[3])));
+              WriteLn(StdErr, '[ERROR] Invalid hit count: ', Copy(Parts[3], 7, Length(Parts[3])));
           end
           else
           begin
@@ -648,12 +648,12 @@ begin
       begin
         if Length(Parts) < 2 then
         begin
-          WriteLn('[ERROR] Usage: enable <breakpoint_number>');
+          WriteLn(StdErr, '[ERROR] Usage: enable <breakpoint_number>');
           Exit;
         end;
         if not TryStrToInt(Parts[1], BpNum) then
         begin
-          WriteLn('[ERROR] Invalid breakpoint number: ', Parts[1]);
+          WriteLn(StdErr, '[ERROR] Invalid breakpoint number: ', Parts[1]);
           Exit;
         end;
         FEngine.EnableBreakpoint(BpNum);
@@ -663,12 +663,12 @@ begin
       begin
         if Length(Parts) < 2 then
         begin
-          WriteLn('[ERROR] Usage: disable <breakpoint_number>');
+          WriteLn(StdErr, '[ERROR] Usage: disable <breakpoint_number>');
           Exit;
         end;
         if not TryStrToInt(Parts[1], BpNum) then
         begin
-          WriteLn('[ERROR] Invalid breakpoint number: ', Parts[1]);
+          WriteLn(StdErr, '[ERROR] Invalid breakpoint number: ', Parts[1]);
           Exit;
         end;
         FEngine.DisableBreakpoint(BpNum);
@@ -678,13 +678,13 @@ begin
       begin
         if Length(Parts) < 2 then
         begin
-          WriteLn('[ERROR] Usage: delete <breakpoint_number>');
+          WriteLn(StdErr, '[ERROR] Usage: delete <breakpoint_number>');
           Exit;
         end;
 
         if not TryStrToInt(Parts[1], BpNum) then
         begin
-          WriteLn('[ERROR] Invalid breakpoint number: ', Parts[1]);
+          WriteLn(StdErr, '[ERROR] Invalid breakpoint number: ', Parts[1]);
           Exit;
         end;
 
@@ -696,13 +696,13 @@ begin
       begin
         if Length(Parts) < 2 then
         begin
-          WriteLn('[ERROR] Usage: condition <bp-num> [count=N | <expr>]');
+          WriteLn(StdErr, '[ERROR] Usage: condition <bp-num> [count=N | <expr>]');
           Exit;
         end;
 
         if not TryStrToInt(Parts[1], BpNum) then
         begin
-          WriteLn('[ERROR] Invalid breakpoint number: ', Parts[1]);
+          WriteLn(StdErr, '[ERROR] Invalid breakpoint number: ', Parts[1]);
           Exit;
         end;
 
@@ -715,7 +715,7 @@ begin
                (Limit > 0) then
               FEngine.SetBreakpointCondition(BpNum, bctHitCount, Limit)
             else
-              WriteLn('[ERROR] Invalid hit count: ', Copy(Parts[2], 7, Length(Parts[2])));
+              WriteLn(StdErr, '[ERROR] Invalid hit count: ', Copy(Parts[2], 7, Length(Parts[2])));
           end
           else
           begin
@@ -740,13 +740,13 @@ begin
       begin
         if Length(Parts) < 2 then
         begin
-          WriteLn('[ERROR] Usage: commands <bp-num>');
+          WriteLn(StdErr, '[ERROR] Usage: commands <bp-num>');
           Exit;
         end;
 
         if not TryStrToInt(Parts[1], BpNum) then
         begin
-          WriteLn('[ERROR] Invalid breakpoint number: ', Parts[1]);
+          WriteLn(StdErr, '[ERROR] Invalid breakpoint number: ', Parts[1]);
           Exit;
         end;
 
@@ -779,7 +779,7 @@ begin
         begin
           CallStack := FEngine.GetBreakpointList;
           if Length(CallStack) = 0 then
-            WriteLn('[INFO] No breakpoints set')
+            WriteLn(StdErr, '[INFO] No breakpoints set')
           else
           begin
             WriteLn('[BREAKPOINTS]');
@@ -792,7 +792,7 @@ begin
         begin
           CallStack := FEngine.GetDisplayList;
           if Length(CallStack) = 0 then
-            WriteLn('[INFO] No display expressions set')
+            WriteLn(StdErr, '[INFO] No display expressions set')
           else
           begin
             WriteLn('[DISPLAY]');
@@ -807,7 +807,7 @@ begin
         begin
           CallStack := FEngine.GetWatchpointList;
           if Length(CallStack) = 0 then
-            WriteLn('[INFO] No watchpoints set')
+            WriteLn(StdErr, '[INFO] No watchpoints set')
           else
           begin
             WriteLn('[WATCHPOINTS]');
@@ -820,7 +820,7 @@ begin
                  (LowerCase(Parts[1]) = 'reg')) then
         begin
           if FEngine.State <> dsPaused then
-            WriteLn('[ERROR] Process is not paused')
+            WriteLn(StdErr, '[ERROR] Process is not paused')
           else
           begin
             if FProcessController.GetRegisters(Regs) then
@@ -845,11 +845,11 @@ begin
               {$ENDIF}
             end
             else
-              WriteLn('[ERROR] Failed to read registers');
+              WriteLn(StdErr, '[ERROR] Failed to read registers');
           end;
         end
         else
-          WriteLn('[ERROR] Usage: info breakpoints | info display | info watchpoints | info registers');
+          WriteLn(StdErr, '[ERROR] Usage: info breakpoints | info display | info watchpoints | info registers');
       end;
 
     'callstack', 'cs':
@@ -862,8 +862,8 @@ begin
         begin
           if not TryStrToInt(Parts[1], Limit) or (Limit < 0) then
           begin
-            WriteLn('[ERROR] Invalid limit: ', Parts[1]);
-            WriteLn('[INFO] Usage: callstack [n] where n >= 0 (0 = no limit)');
+            WriteLn(StdErr, '[ERROR] Invalid limit: ', Parts[1]);
+            WriteLn(StdErr, '[INFO] Usage: callstack [n] where n >= 0 (0 = no limit)');
             Exit;
           end;
         end;
@@ -873,7 +873,7 @@ begin
 
         if Length(CallStack) = 0 then
         begin
-          WriteLn('[INFO] No call stack available');
+          WriteLn(StdErr, '[INFO] No call stack available');
         end
         else
         begin
@@ -892,14 +892,14 @@ begin
           LocalVars := FEngine.GetLocalVariables;
 
         if Length(LocalVars) = 0 then
-          WriteLn('[INFO] No local variables in current scope')
+          WriteLn(StdErr, '[INFO] No local variables in current scope')
         else
           for I := 0 to High(LocalVars) do
           begin
             if LocalVars[I].IsValid then
               WriteLn(LocalVars[I].Name, ' = ', LocalVars[I].Value)
             else
-              WriteLn('[WARN] ', LocalVars[I].Name, ': ', LocalVars[I].Value);
+              WriteLn(StdErr, '[WARN] ', LocalVars[I].Name, ': ', LocalVars[I].Value);
           end;
       end;
 
@@ -907,14 +907,14 @@ begin
       begin
         LocalVars := FEngine.GetGlobalVariables;
         if Length(LocalVars) = 0 then
-          WriteLn('[INFO] No global variables found')
+          WriteLn(StdErr, '[INFO] No global variables found')
         else
           for I := 0 to High(LocalVars) do
           begin
             if LocalVars[I].IsValid then
               WriteLn(LocalVars[I].Name, ' = ', LocalVars[I].Value)
             else
-              WriteLn('[WARN] ', LocalVars[I].Name, ': ', LocalVars[I].Value);
+              WriteLn(StdErr, '[WARN] ', LocalVars[I].Name, ': ', LocalVars[I].Value);
           end;
       end;
 
@@ -922,14 +922,14 @@ begin
       begin
         if Length(Parts) < 2 then
         begin
-          WriteLn('[ERROR] Usage: inspect <variable>');
+          WriteLn(StdErr, '[ERROR] Usage: inspect <variable>');
           Exit;
         end;
 
         CallStack := FEngine.GetInspectLines(Parts[1]);
 
         if Length(CallStack) = 0 then
-          WriteLn('[INFO] No information available for: ', Parts[1])
+          WriteLn(StdErr, '[INFO] No information available for: ', Parts[1])
         else
           for I := 0 to High(CallStack) do
             WriteLn(CallStack[I]);
@@ -940,13 +940,13 @@ begin
         { Format: set VarName = Value }
         if Length(Parts) < 4 then
         begin
-          WriteLn('[ERROR] Usage: set <variable> = <value>');
+          WriteLn(StdErr, '[ERROR] Usage: set <variable> = <value>');
           Exit;
         end;
 
         if Parts[2] <> '=' then
         begin
-          WriteLn('[ERROR] Usage: set <variable> = <value>');
+          WriteLn(StdErr, '[ERROR] Usage: set <variable> = <value>');
           Exit;
         end;
 
@@ -970,7 +970,7 @@ begin
       begin
         if Length(Parts) < 2 then
         begin
-          WriteLn('[ERROR] Usage: display <expression>');
+          WriteLn(StdErr, '[ERROR] Usage: display <expression>');
           Exit;
         end;
         FEngine.AddDisplay(Parts[1]);
@@ -988,7 +988,7 @@ begin
       begin
         if Length(Parts) < 2 then
         begin
-          WriteLn('[ERROR] Usage: watch <variable>');
+          WriteLn(StdErr, '[ERROR] Usage: watch <variable>');
           Exit;
         end;
         FEngine.SetWatch(Parts[1], wtWrite);
@@ -998,7 +998,7 @@ begin
       begin
         if Length(Parts) < 2 then
         begin
-          WriteLn('[ERROR] Usage: ', Cmd, ' <variable>');
+          WriteLn(StdErr, '[ERROR] Usage: ', Cmd, ' <variable>');
           Exit;
         end;
         FEngine.SetWatch(Parts[1], wtReadWrite);
@@ -1008,7 +1008,7 @@ begin
       begin
         if Length(Parts) < 2 then
         begin
-          WriteLn('[ERROR] Usage: unwatch <variable>');
+          WriteLn(StdErr, '[ERROR] Usage: unwatch <variable>');
           Exit;
         end;
         FEngine.RemoveWatch(Parts[1]);
@@ -1017,13 +1017,13 @@ begin
     'catch':
       begin
         FEngine.CatchExceptions := True;
-        WriteLn('[INFO] Break on exception enabled');
+        WriteLn(StdErr, '[INFO] Break on exception enabled');
       end;
 
     'nocatch':
       begin
         FEngine.CatchExceptions := False;
-        WriteLn('[INFO] Break on exception disabled');
+        WriteLn(StdErr, '[INFO] Break on exception disabled');
       end;
 
     'verbose', 'v':
@@ -1032,16 +1032,16 @@ begin
            ((LowerCase(Parts[1]) = 'off') or (LowerCase(Parts[1]) = 'false') or (Parts[1] = '0')) then
         begin
           gVerbose := False;
-          WriteLn('[INFO] Verbose mode off');
+          WriteLn(StdErr, '[INFO] Verbose mode off');
         end
         else if (Length(Parts) > 1) and
                 ((LowerCase(Parts[1]) = 'on') or (LowerCase(Parts[1]) = 'true') or (Parts[1] = '1')) then
         begin
           gVerbose := True;
-          WriteLn('[INFO] Verbose mode on');
+          WriteLn(StdErr, '[INFO] Verbose mode on');
         end
         else
-          WriteLn('[INFO] Verbose mode is ', BoolToStr(gVerbose, 'on', 'off'),
+          WriteLn(StdErr, '[INFO] Verbose mode is ', BoolToStr(gVerbose, 'on', 'off'),
                   '. Use: verbose on|off');
       end;
 
@@ -1059,7 +1059,7 @@ begin
           if TryStrToInt64(Parts[1], SliceLow) then
             FEngine.ForceReturn(SliceLow, True)
           else
-            WriteLn('[ERROR] Invalid return value: ', Parts[1]);
+            WriteLn(StdErr, '[ERROR] Invalid return value: ', Parts[1]);
         end
         else
           FEngine.ForceReturn(0, False);
@@ -1069,7 +1069,7 @@ begin
       begin
         if Length(Parts) < 2 then
         begin
-          WriteLn('[ERROR] Usage: source <filename>');
+          WriteLn(StdErr, '[ERROR] Usage: source <filename>');
           Exit;
         end;
         if not ExecuteScript(Parts[1]) then
@@ -1077,7 +1077,7 @@ begin
       end;
 
   else
-    WriteLn('[ERROR] Unknown command: ', Cmd);
+    WriteLn(StdErr, '[ERROR] Unknown command: ', Cmd);
     WriteLn('Type "help" for available commands');
   end;
 end;
@@ -1115,22 +1115,22 @@ begin
   // Create architecture adapter with process controller
   {$IFDEF CPUX86_64}
   if gVerbose then
-    WriteLn('[INFO] Detected architecture: x86_64');
+    WriteLn(StdErr, '[INFO] Detected architecture: x86_64');
   FArchAdapter := TArchX86_64Adapter.Create(FProcessController);
   {$ENDIF}
   {$IFDEF CPUI386}
   if gVerbose then
-    WriteLn('[INFO] Detected architecture: i386');
+    WriteLn(StdErr, '[INFO] Detected architecture: i386');
   FArchAdapter := TArchX86Adapter.Create(FProcessController);
   {$ENDIF}
   {$IFDEF CPUAARCH64}
   if gVerbose then
-    WriteLn('[INFO] Detected architecture: AArch64');
+    WriteLn(StdErr, '[INFO] Detected architecture: AArch64');
   FArchAdapter := TArchAArch64Adapter.Create(FProcessController);
   {$ENDIF}
   {$IFDEF CPUARM}
   if gVerbose then
-    WriteLn('[INFO] Detected architecture: ARM');
+    WriteLn(StdErr, '[INFO] Detected architecture: ARM');
   FArchAdapter := TArchARMAdapter.Create(FProcessController);
   {$ENDIF}
 
@@ -1140,7 +1140,7 @@ begin
   // Load program
   if not FEngine.LoadProgram(BinaryPath) then
   begin
-    WriteLn('[ERROR] Failed to load program');
+    WriteLn(StdErr, '[ERROR] Failed to load program');
     Halt(1);
   end;
 
@@ -1149,10 +1149,10 @@ begin
   begin
     FEngine.SetCommandLineArgs(FCommandLineArgs);
     if not FQuiet then
-      WriteLn('[INFO] Command-line arguments set: ', String.Join(' ', FCommandLineArgs));
+      WriteLn(StdErr, '[INFO] Command-line arguments set: ', String.Join(' ', FCommandLineArgs));
   end;
 
-  if not FQuiet then
+  if not (FQuiet or FNonInteractive) then
     WriteLn;
 
   // Only auto-run if arguments were provided at CLI startup
@@ -1160,17 +1160,17 @@ begin
   if Length(FCommandLineArgs) > 0 then
   begin
     if not FQuiet then
-      WriteLn('[INFO] Starting program...');
+      WriteLn(StdErr, '[INFO] Starting program...');
     if not FEngine.Run then
     begin
-      WriteLn('[ERROR] Failed to start program');
+      WriteLn(StdErr, '[ERROR] Failed to start program');
       Halt(1);
     end;
   end
   else
   begin
     if not FQuiet then
-      WriteLn('[INFO] No arguments provided. Use "args" command to set them, then "run"');
+      WriteLn(StdErr, '[INFO] No arguments provided. Use "args" command to set them, then "run"');
   end;
 
   // Execute source files (--source)
@@ -1283,7 +1283,7 @@ begin
       end
       else
       begin
-        WriteLn('[ERROR] -ex requires a command argument');
+        WriteLn(StdErr, '[ERROR] -ex requires a command argument');
         Halt(1);
       end;
       Continue;
@@ -1299,7 +1299,7 @@ begin
       end
       else
       begin
-        WriteLn('[ERROR] --source requires a filename argument');
+        WriteLn(StdErr, '[ERROR] --source requires a filename argument');
         Halt(1);
       end;
       Continue;
@@ -1346,7 +1346,7 @@ begin
 
   if not FileExists(BinaryPath) then
   begin
-    WriteLn('[ERROR] Binary file not found: ', BinaryPath);
+    WriteLn(StdErr, '[ERROR] Binary file not found: ', BinaryPath);
     Halt(1);
   end;
 

@@ -99,14 +99,14 @@ begin
 
   if not Assigned(FProcessController) then
   begin
-    WriteLn('[ERROR] Process controller not assigned');
+    WriteLn(StdErr, '[ERROR] Process controller not assigned');
     Exit;
   end;
 
   // Read 8 bytes (64-bit pointer)
   if not FProcessController.ReadMemory(Address, SizeOf(QWord), Buffer) then
   begin
-    WriteLn('[ERROR] Failed to read pointer from address $', IntToHex(Address, 16));
+    WriteLn(StdErr, '[ERROR] Failed to read pointer from address $', IntToHex(Address, 16));
     Exit;
   end;
 
@@ -142,14 +142,14 @@ begin
 
   if not Assigned(FProcessController) then
   begin
-    WriteLn('[ERROR] Process controller not assigned');
+    WriteLn(StdErr, '[ERROR] Process controller not assigned');
     Exit;
   end;
 
   // Read 4 bytes (32-bit pointer)
   if not FProcessController.ReadMemory(Address, SizeOf(Cardinal), Buffer) then
   begin
-    WriteLn('[ERROR] Failed to read pointer from address $', IntToHex(Address, 8));
+    WriteLn(StdErr, '[ERROR] Failed to read pointer from address $', IntToHex(Address, 8));
     Exit;
   end;
 
@@ -185,13 +185,13 @@ begin
 
   if not Assigned(FProcessController) then
   begin
-    WriteLn('[ERROR] Process controller not assigned');
+    WriteLn(StdErr, '[ERROR] Process controller not assigned');
     Exit;
   end;
 
   if not FProcessController.ReadMemory(Address, SizeOf(QWord), Buffer) then
   begin
-    WriteLn('[ERROR] Failed to read pointer from address $', IntToHex(Address, 16));
+    WriteLn(StdErr, '[ERROR] Failed to read pointer from address $', IntToHex(Address, 16));
     Exit;
   end;
 
@@ -226,13 +226,13 @@ begin
 
   if not Assigned(FProcessController) then
   begin
-    WriteLn('[ERROR] Process controller not assigned');
+    WriteLn(StdErr, '[ERROR] Process controller not assigned');
     Exit;
   end;
 
   if not FProcessController.ReadMemory(Address, SizeOf(Cardinal), Buffer) then
   begin
-    WriteLn('[ERROR] Failed to read pointer from address $', IntToHex(Address, 8));
+    WriteLn(StdErr, '[ERROR] Failed to read pointer from address $', IntToHex(Address, 8));
     Exit;
   end;
 

@@ -1873,7 +1873,7 @@ begin
     begin
       ComputedVarInfo.Address := RBP + VarInfo.LocationData;
       if gVerbose then
-        WriteLn('[DEBUG] Computed address for ', VarInfo.Name, ': RBP=$',
+        WriteLn(StdErr, '[DEBUG] Computed address for ', VarInfo.Name, ': RBP=$',
                 IntToHex(RBP, 16), ' + ', VarInfo.LocationData, ' = $',
                 IntToHex(ComputedVarInfo.Address, 16));
     end;
@@ -1889,7 +1889,7 @@ begin
       begin
         ComputedVarInfo.Address := ParentRBP + VarInfo.LocationData;
         if gVerbose then
-          WriteLn('[DEBUG] Computed parent frame address for ', VarInfo.Name,
+          WriteLn(StdErr, '[DEBUG] Computed parent frame address for ', VarInfo.Name,
                   ': ParentRBP=$', IntToHex(ParentRBP, 16), ' + ', VarInfo.LocationData,
                   ' = $', IntToHex(ComputedVarInfo.Address, 16));
       end;
@@ -1909,7 +1909,7 @@ begin
       begin
         ComputedVarInfo.Address := ParentRBP;
         if gVerbose then
-          WriteLn('[DEBUG] Computed indirect address for ', VarInfo.Name,
+          WriteLn(StdErr, '[DEBUG] Computed indirect address for ', VarInfo.Name,
                   ': *(RBP+', VarInfo.LocationData, ') = $',
                   IntToHex(ComputedVarInfo.Address, 16));
       end;
@@ -1922,7 +1922,7 @@ begin
     begin
       ComputedVarInfo.Address := ParentRBP + QWord(Int64(VarInfo.LocationData));
       if gVerbose then
-        WriteLn('[DEBUG] Computed TLS address for ', VarInfo.Name,
+        WriteLn(StdErr, '[DEBUG] Computed TLS address for ', VarInfo.Name,
                 ': TLSBase=$', IntToHex(ParentRBP, 16), ' + ', VarInfo.LocationData,
                 ' = $', IntToHex(ComputedVarInfo.Address, 16));
     end;
@@ -1938,7 +1938,7 @@ begin
       ComputedVarInfo.Address := RBP + VarInfo.LocationData;
       ComputedVarInfo.CompanionAddr := RBP + QWord(Int64(VarInfo.CompanionData));
       if gVerbose then
-        WriteLn('[DEBUG] Computed open-array for ', VarInfo.Name,
+        WriteLn(StdErr, '[DEBUG] Computed open-array for ', VarInfo.Name,
                 ': data=$', IntToHex(ComputedVarInfo.Address, 16),
                 ' high-slot=$', IntToHex(ComputedVarInfo.CompanionAddr, 16));
     end;

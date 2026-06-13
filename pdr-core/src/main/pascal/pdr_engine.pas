@@ -228,21 +228,21 @@ begin
 
   if not FileExists(BinaryPath) then
   begin
-    WriteLn('[ERROR] Binary file not found: ', BinaryPath);
+    WriteLn(StdErr, '[ERROR] Binary file not found: ', BinaryPath);
     Exit;
   end;
 
-  WriteLn('[INFO] Loading program: ', BinaryPath);
+  WriteLn(StdErr, '[INFO] Loading program: ', BinaryPath);
 
   // Load debug information
   if not FDebugInfoReader.Load(BinaryPath) then
   begin
-    WriteLn('[ERROR] Failed to load debug information');
+    WriteLn(StdErr, '[ERROR] Failed to load debug information');
     Exit;
   end;
 
   FBinaryPath := BinaryPath;
-  WriteLn('[INFO] Program loaded successfully');
+  WriteLn(StdErr, '[INFO] Program loaded successfully');
   Result := True;
 end;
 
@@ -257,22 +257,22 @@ begin
 
   if FState <> dsIdle then
   begin
-    WriteLn('[ERROR] Already attached to a process');
+    WriteLn(StdErr, '[ERROR] Already attached to a process');
     Exit;
   end;
 
-  WriteLn('[INFO] Attaching to process ', PID, '...');
+  WriteLn(StdErr, '[INFO] Attaching to process ', PID, '...');
 
   if not FProcessController.Attach(PID) then
   begin
-    WriteLn('[ERROR] Failed to attach to process');
+    WriteLn(StdErr, '[ERROR] Failed to attach to process');
     Exit;
   end;
 
   FAttachedPID := PID;
   FState := dsPaused;
 
-  WriteLn('[INFO] Attached to process ', PID);
+  WriteLn(StdErr, '[INFO] Attached to process ', PID);
   Result := True;
 end;
 
@@ -282,16 +282,16 @@ begin
 
   if FState = dsIdle then
   begin
-    WriteLn('[ERROR] Not attached to any process');
+    WriteLn(StdErr, '[ERROR] Not attached to any process');
     Exit;
   end;
 
   if gVerbose then
-    WriteLn('[INFO] Detaching from process ', FAttachedPID, '...');
+    WriteLn(StdErr, '[INFO] Detaching from process ', FAttachedPID, '...');
 
   if not FProcessController.Detach then
   begin
-    WriteLn('[ERROR] Failed to detach from process');
+    WriteLn(StdErr, '[ERROR] Failed to detach from process');
     Exit;
   end;
 
@@ -299,7 +299,7 @@ begin
   FState := dsIdle;
 
   if gVerbose then
-    WriteLn('[INFO] Detached successfully');
+    WriteLn(StdErr, '[INFO] Detached successfully');
   Result := True;
 end;
 
@@ -317,22 +317,22 @@ begin
 
   if FState <> dsIdle then
   begin
-    WriteLn('[ERROR] Process already running or attached');
+    WriteLn(StdErr, '[ERROR] Process already running or attached');
     Exit;
   end;
 
   if FBinaryPath = '' then
   begin
-    WriteLn('[ERROR] No binary loaded. Use LoadProgram first');
+    WriteLn(StdErr, '[ERROR] No binary loaded. Use LoadProgram first');
     Exit;
   end;
 
-  WriteLn('[INFO] Running program: ', FBinaryPath);
+  WriteLn(StdErr, '[INFO] Running program: ', FBinaryPath);
 
   // Launch the program under debugger control
   if not FProcessController.Launch(FBinaryPath) then
   begin
-    WriteLn('[ERROR] Failed to launch program');
+    WriteLn(StdErr, '[ERROR] Failed to launch program');
     Exit;
   end;
 
@@ -349,18 +349,18 @@ begin
       Slide := LoadBase;
       FDebugInfoReader.SetSlide(Slide);
       if gVerbose then
-        WriteLn('[DEBUG] PIE binary detected — slide set to $', HexStr(Slide, 16));
+        WriteLn(StdErr, '[DEBUG] PIE binary detected — slide set to $', HexStr(Slide, 16));
     end
     else
     begin
       if gVerbose then
-        WriteLn('[DEBUG] PIE binary detected but could not determine load base');
+        WriteLn(StdErr, '[DEBUG] PIE binary detected but could not determine load base');
     end;
   end
   else
   begin
     if gVerbose then
-      WriteLn('[DEBUG] Non-PIE binary — no slide needed');
+      WriteLn(StdErr, '[DEBUG] Non-PIE binary — no slide needed');
   end;
 
   { Set internal breakpoint on fpc_raiseexception for exception catching.
@@ -376,7 +376,7 @@ begin
     if FProcessController.SetBreakpoint(FRaiseBreakpointAddr) then
     begin
       if gVerbose then
-        WriteLn('[DEBUG] Exception breakpoint set at $', HexStr(FRaiseBreakpointAddr, 16));
+        WriteLn(StdErr, '[DEBUG] Exception breakpoint set at $', HexStr(FRaiseBreakpointAddr, 16));
     end
     else
       FRaiseBreakpointAddr := 0;
@@ -384,13 +384,13 @@ begin
   else
   begin
     if gVerbose then
-      WriteLn('[DEBUG] fpc_raiseexception not found in symbol table — exception catching disabled');
+      WriteLn(StdErr, '[DEBUG] fpc_raiseexception not found in symbol table — exception catching disabled');
   end;
 
   ApplyPendingBreakpoints;
 
-  WriteLn('[INFO] Program started and paused at entry point');
-  WriteLn('[INFO] You can now set breakpoints and use "continue" to start execution');
+  WriteLn(StdErr, '[INFO] Program started and paused at entry point');
+  WriteLn(StdErr, '[INFO] You can now set breakpoints and use "continue" to start execution');
   Result := True;
 end;
 
@@ -408,17 +408,17 @@ begin
 
   if FState <> dsPaused then
   begin
-    WriteLn('[ERROR] Process is not paused');
+    WriteLn(StdErr, '[ERROR] Process is not paused');
     Exit;
   end;
 
   if gVerbose then
-    WriteLn('[INFO] Continuing process...');
+    WriteLn(StdErr, '[INFO] Continuing process...');
 
   repeat
     if not FProcessController.Continue then
     begin
-      WriteLn('[ERROR] Failed to continue process');
+      WriteLn(StdErr, '[ERROR] Failed to continue process');
       Exit;
     end;
 
@@ -426,7 +426,7 @@ begin
     if FProcessController.GetCurrentAddress = 0 then
     begin
       if gVerbose then
-        WriteLn('[INFO] Process terminated');
+        WriteLn(StdErr, '[INFO] Process terminated');
       FState := dsTerminated;
       Result := True;
       Exit;
@@ -441,7 +441,7 @@ begin
         if FWatchpoints[Idx].Active and (FWatchpoints[Idx].Slot = WatchSlot) then
         begin
           NewValue := EvaluateExpression(FWatchpoints[Idx].VarName);
-          WriteLn('[INFO] Watchpoint hit: ', FWatchpoints[Idx].VarName);
+          WriteLn(StdErr, '[INFO] Watchpoint hit: ', FWatchpoints[Idx].VarName);
           WriteLn('  Old value: ', FWatchpoints[Idx].VarName, ' = ', FWatchpoints[Idx].OldValue);
           if NewValue.IsValid then
           begin
@@ -454,7 +454,7 @@ begin
         end;
 
       if gVerbose then
-        WriteLn('[INFO] Process stopped and ready for commands');
+        WriteLn(StdErr, '[INFO] Process stopped and ready for commands');
       Result := True;
       Exit;
     end;
@@ -474,7 +474,7 @@ begin
       begin
         { Exception catching disabled — silently resume }
         if gVerbose then
-          WriteLn('[DEBUG] Exception raised but catching disabled — continuing');
+          WriteLn(StdErr, '[DEBUG] Exception raised but catching disabled — continuing');
         ConditionMet := False;
       end;
     end;
@@ -493,14 +493,14 @@ begin
             begin
               ConditionMet := False;
               if gVerbose then
-                WriteLn('[DEBUG] Breakpoint #', FBreakpoints[Idx].Handle,
+                WriteLn(StdErr, '[DEBUG] Breakpoint #', FBreakpoints[Idx].Handle,
                         ' hit count: ', FBreakpoints[Idx].CurrentHitCount,
                         '/', FBreakpoints[Idx].HitCount, ' - continuing');
             end
             else
             begin
               if gVerbose then
-                WriteLn('[DEBUG] Breakpoint #', FBreakpoints[Idx].Handle,
+                WriteLn(StdErr, '[DEBUG] Breakpoint #', FBreakpoints[Idx].Handle,
                         ' hit count reached: ', FBreakpoints[Idx].CurrentHitCount);
             end;
           end;
@@ -511,14 +511,14 @@ begin
             if not ConditionMet then
             begin
               if gVerbose then
-                WriteLn('[DEBUG] Breakpoint #', FBreakpoints[Idx].Handle,
+                WriteLn(StdErr, '[DEBUG] Breakpoint #', FBreakpoints[Idx].Handle,
                         ' condition false (hits: ', FBreakpoints[Idx].CurrentHitCount,
                         ') - continuing');
             end
             else
             begin
               if gVerbose then
-                WriteLn('[DEBUG] Breakpoint #', FBreakpoints[Idx].Handle,
+                WriteLn(StdErr, '[DEBUG] Breakpoint #', FBreakpoints[Idx].Handle,
                         ' condition true (hits: ', FBreakpoints[Idx].CurrentHitCount, ')');
             end;
           end;
@@ -536,7 +536,7 @@ begin
   end;
 
   if gVerbose then
-    WriteLn('[INFO] Process stopped and ready for commands');
+    WriteLn(StdErr, '[INFO] Process stopped and ready for commands');
   Result := True;
 end;
 
@@ -546,19 +546,19 @@ begin
 
   if FState <> dsPaused then
   begin
-    WriteLn('[ERROR] Process is not paused');
+    WriteLn(StdErr, '[ERROR] Process is not paused');
     Exit;
   end;
 
-  if gVerbose then WriteLn('[INFO] Stepping...');
+  if gVerbose then WriteLn(StdErr, '[INFO] Stepping...');
 
   if not FProcessController.Step then
   begin
-    WriteLn('[ERROR] Failed to step');
+    WriteLn(StdErr, '[ERROR] Failed to step');
     Exit;
   end;
 
-  if gVerbose then WriteLn('[INFO] Step complete');
+  if gVerbose then WriteLn(StdErr, '[INFO] Step complete');
   Result := True;
 end;
 
@@ -581,7 +581,7 @@ begin
 
   if FState <> dsPaused then
   begin
-    WriteLn('[ERROR] Process is not paused');
+    WriteLn(StdErr, '[ERROR] Process is not paused');
     Exit;
   end;
 
@@ -594,29 +594,29 @@ begin
 
   if CurrentAddr = 0 then
   begin
-    WriteLn('[ERROR] Failed to get current address');
+    WriteLn(StdErr, '[ERROR] Failed to get current address');
     Exit;
   end;
 
-  if gVerbose then WriteLn('[DEBUG] Current address: 0x', IntToHex(CurrentAddr, 16));
+  if gVerbose then WriteLn(StdErr, '[DEBUG] Current address: 0x', IntToHex(CurrentAddr, 16));
 
   // Find current source line
   if not FDebugInfoReader.FindLineByAddress(CurrentAddr, CurrentLine) then
   begin
-    WriteLn('[ERROR] No source line found for current address 0x', IntToHex(CurrentAddr, 16));
-    if gVerbose then WriteLn('[INFO] Use "step" for instruction-level stepping');
+    WriteLn(StdErr, '[ERROR] No source line found for current address 0x', IntToHex(CurrentAddr, 16));
+    if gVerbose then WriteLn(StdErr, '[INFO] Use "step" for instruction-level stepping');
     Exit;
   end;
 
   if gVerbose then
-    WriteLn('[INFO] Current line: ', CurrentLine.FileName, ':', CurrentLine.LineNumber,
+    WriteLn(StdErr, '[INFO] Current line: ', CurrentLine.FileName, ':', CurrentLine.LineNumber,
             ' (address: 0x', IntToHex(CurrentLine.Address, 16), ')');
 
   // Get all line entries for this file
   LineEntries := FDebugInfoReader.GetFileLineEntries(CurrentLine.FileName);
   if Length(LineEntries) = 0 then
   begin
-    WriteLn('[ERROR] No line information available for ', CurrentLine.FileName);
+    WriteLn(StdErr, '[ERROR] No line information available for ', CurrentLine.FileName);
     Exit;
   end;
 
@@ -626,22 +626,22 @@ begin
   if gVerbose then
   begin
     if HasScope then
-      WriteLn('[INFO] Step-over scope: ', CurrentScope.Name,
+      WriteLn(StdErr, '[INFO] Step-over scope: ', CurrentScope.Name,
               ' [0x', IntToHex(CurrentScope.LowPC, 1), '..0x', IntToHex(CurrentScope.HighPC, 1), ')')
     else
-      WriteLn('[INFO] Step-over scope: unknown, falling back to line-range limit');
+      WriteLn(StdErr, '[INFO] Step-over scope: unknown, falling back to line-range limit');
   end;
 
   // Find all addresses for lines AFTER the current line and within the current function scope.
   // NOTE: We must NOT use bare 'Continue;' in this loop because FPC resolves it
   // to TDebuggerEngine.Continue (the method) rather than the loop-control keyword.
   if gVerbose then
-    WriteLn('[DEBUG] StepLine: scanning ', Length(LineEntries), ' entries, currentLine=', CurrentLine.LineNumber);
+    WriteLn(StdErr, '[DEBUG] StepLine: scanning ', Length(LineEntries), ' entries, currentLine=', CurrentLine.LineNumber);
   SetLength(TempBreakpoints, 0);
   for I := 0 to High(LineEntries) do
   begin
     if gVerbose then
-      WriteLn('[DEBUG] entry[', I, ']: line=', LineEntries[I].LineNumber, ' addr=0x', IntToHex(LineEntries[I].Address, 1));
+      WriteLn(StdErr, '[DEBUG] entry[', I, ']: line=', LineEntries[I].LineNumber, ' addr=0x', IntToHex(LineEntries[I].Address, 1));
 
     // Only consider lines AFTER the current line
     if LineEntries[I].LineNumber > CurrentLine.LineNumber then
@@ -668,12 +668,12 @@ begin
         TempBreakpoints[High(TempBreakpoints)] := SetBreakpoint('0x' + IntToHex(LineEntries[I].Address, 1));
         if TempBreakpoints[High(TempBreakpoints)] = -1 then
         begin
-          WriteLn('[WARN] Failed to set temporary breakpoint at 0x', IntToHex(LineEntries[I].Address, 16));
+          WriteLn(StdErr, '[WARN] Failed to set temporary breakpoint at 0x', IntToHex(LineEntries[I].Address, 16));
         end
         else
         begin
           if gVerbose then
-            WriteLn('[DEBUG] Set temp breakpoint at line ', LineEntries[I].LineNumber,
+            WriteLn(StdErr, '[DEBUG] Set temp breakpoint at line ', LineEntries[I].LineNumber,
                     ' (0x', IntToHex(LineEntries[I].Address, 16), ')');
         end;
       end;
@@ -682,17 +682,17 @@ begin
 
   if Length(TempBreakpoints) = 0 then
   begin
-    WriteLn('[ERROR] No subsequent lines found (might be at end of program)');
-    WriteLn('[INFO] Current line ', CurrentLine.LineNumber, ' appears to be the last line with debug info');
+    WriteLn(StdErr, '[ERROR] No subsequent lines found (might be at end of program)');
+    WriteLn(StdErr, '[INFO] Current line ', CurrentLine.LineNumber, ' appears to be the last line with debug info');
     Exit;
   end;
 
-  if gVerbose then WriteLn('[INFO] Stepping to next line...');
+  if gVerbose then WriteLn(StdErr, '[INFO] Stepping to next line...');
 
   // Continue until we hit one of the temporary breakpoints
   if not FProcessController.Continue then
   begin
-    WriteLn('[ERROR] Failed to continue');
+    WriteLn(StdErr, '[ERROR] Failed to continue');
     // Clean up temporary breakpoints only if still attached
     if FState = dsPaused then
     begin
@@ -706,7 +706,7 @@ begin
   // Check if process exited during continue
   if FProcessController.GetCurrentAddress = 0 then
   begin
-    WriteLn('[INFO] Process terminated during step');
+    WriteLn(StdErr, '[INFO] Process terminated during step');
     FState := dsTerminated;
     // Don't try to clean up breakpoints - process is dead
     Exit(True);
@@ -745,7 +745,7 @@ begin
 
   if FState <> dsPaused then
   begin
-    WriteLn('[ERROR] Process is not paused');
+    WriteLn(StdErr, '[ERROR] Process is not paused');
     Exit;
   end;
 
@@ -757,7 +757,7 @@ begin
 
   if StartAddr = 0 then
   begin
-    WriteLn('[ERROR] Failed to get current address');
+    WriteLn(StdErr, '[ERROR] Failed to get current address');
     Exit;
   end;
 
@@ -766,13 +766,13 @@ begin
   begin
     // No line info at this address — fall back to a raw instruction step
     if gVerbose then
-      WriteLn('[INFO] StepInto: no source line, falling back to instruction step');
+      WriteLn(StdErr, '[INFO] StepInto: no source line, falling back to instruction step');
     Result := FProcessController.Step;
     Exit;
   end;
 
   if gVerbose then
-    WriteLn('[INFO] StepInto from: ', StartLine.FileName, ':', StartLine.LineNumber);
+    WriteLn(StdErr, '[INFO] StepInto from: ', StartLine.FileName, ':', StartLine.LineNumber);
 
   // Single-step instructions until the source line changes.
   // A change means we either entered a called function or advanced to the next line.
@@ -780,7 +780,7 @@ begin
   repeat
     if not FProcessController.Step then
     begin
-      WriteLn('[ERROR] Failed to single-step');
+      WriteLn(StdErr, '[ERROR] Failed to single-step');
       Exit;
     end;
 
@@ -788,7 +788,7 @@ begin
     CurrentAddr := FProcessController.GetCurrentAddress;
     if CurrentAddr = 0 then
     begin
-      WriteLn('[INFO] Process terminated during step');
+      WriteLn(StdErr, '[INFO] Process terminated during step');
       FState := dsTerminated;
       Exit(True);
     end;
@@ -808,7 +808,7 @@ begin
     Dec(MaxSteps);
   until MaxSteps <= 0;
 
-  WriteLn('[WARN] StepInto: reached instruction limit without a source-line change');
+  WriteLn(StdErr, '[WARN] StepInto: reached instruction limit without a source-line change');
   Result := True;
 end;
 
@@ -834,13 +834,13 @@ begin
 
   if FState <> dsPaused then
   begin
-    WriteLn('[ERROR] Process is not paused');
+    WriteLn(StdErr, '[ERROR] Process is not paused');
     Exit;
   end;
 
   if not FProcessController.GetRegisters(Regs) then
   begin
-    WriteLn('[ERROR] Failed to read registers');
+    WriteLn(StdErr, '[ERROR] Failed to read registers');
     Exit;
   end;
 
@@ -853,7 +853,7 @@ begin
   begin
     if not FProcessController.ReadMemory(Regs.RSP, 8, ReturnAddr) then
     begin
-      WriteLn('[ERROR] Failed to read return address from stack');
+      WriteLn(StdErr, '[ERROR] Failed to read return address from stack');
       Exit;
     end;
   end
@@ -861,7 +861,7 @@ begin
   begin
     if not FProcessController.ReadMemory(Regs.RBP + 8, 8, ReturnAddr) then
     begin
-      WriteLn('[ERROR] Failed to read return address from stack');
+      WriteLn(StdErr, '[ERROR] Failed to read return address from stack');
       Exit;
     end;
   end;
@@ -875,7 +875,7 @@ begin
   begin
     if not FProcessController.ReadMemory(Regs.ESP, 4, ReturnAddr) then
     begin
-      WriteLn('[ERROR] Failed to read return address from stack');
+      WriteLn(StdErr, '[ERROR] Failed to read return address from stack');
       Exit;
     end;
   end
@@ -883,25 +883,25 @@ begin
   begin
     if not FProcessController.ReadMemory(Regs.EBP + 4, 4, ReturnAddr) then
     begin
-      WriteLn('[ERROR] Failed to read return address from stack');
+      WriteLn(StdErr, '[ERROR] Failed to read return address from stack');
       Exit;
     end;
   end;
   {$ENDIF}
 
   if gVerbose then
-    WriteLn('[DEBUG] StepOut: return address = 0x', IntToHex(ReturnAddr, 1));
+    WriteLn(StdErr, '[DEBUG] StepOut: return address = 0x', IntToHex(ReturnAddr, 1));
 
   TempBp := SetBreakpoint('0x' + IntToHex(ReturnAddr, 1));
   if TempBp = -1 then
   begin
-    WriteLn('[ERROR] Failed to set breakpoint at return address');
+    WriteLn(StdErr, '[ERROR] Failed to set breakpoint at return address');
     Exit;
   end;
 
   if not FProcessController.Continue then
   begin
-    WriteLn('[ERROR] Failed to continue');
+    WriteLn(StdErr, '[ERROR] Failed to continue');
     if FState = dsPaused then
       RemoveBreakpoint(TempBp);
     Exit;
@@ -909,7 +909,7 @@ begin
 
   if FProcessController.GetCurrentAddress = 0 then
   begin
-    WriteLn('[INFO] Process terminated during step-out');
+    WriteLn(StdErr, '[INFO] Process terminated during step-out');
     FState := dsTerminated;
     Result := True;
     Exit;
@@ -933,7 +933,7 @@ begin
   Result := False;
   if FState <> dsRunning then
   begin
-    WriteLn('[ERROR] Process is not running');
+    WriteLn(StdErr, '[ERROR] Process is not running');
     Exit;
   end;
   Result := FProcessController.SendInterrupt;
@@ -951,26 +951,26 @@ begin
 
   if FState <> dsPaused then
   begin
-    WriteLn('[ERROR] Process is not paused');
+    WriteLn(StdErr, '[ERROR] Process is not paused');
     Exit;
   end;
 
   if not FProcessController.GetRegisters(Regs) then
   begin
-    WriteLn('[ERROR] Failed to read registers');
+    WriteLn(StdErr, '[ERROR] Failed to read registers');
     Exit;
   end;
 
   {$IFDEF CPUX86_64}
   if not FProcessController.ReadMemory(Regs.RBP, 8, SavedRBP) then
   begin
-    WriteLn('[ERROR] Failed to read saved RBP from stack');
+    WriteLn(StdErr, '[ERROR] Failed to read saved RBP from stack');
     Exit;
   end;
 
   if not FProcessController.ReadMemory(Regs.RBP + 8, 8, ReturnAddr) then
   begin
-    WriteLn('[ERROR] Failed to read return address from stack');
+    WriteLn(StdErr, '[ERROR] Failed to read return address from stack');
     Exit;
   end;
 
@@ -984,13 +984,13 @@ begin
   {$IFDEF CPUI386}
   if not FProcessController.ReadMemory(Regs.EBP, 4, SavedRBP) then
   begin
-    WriteLn('[ERROR] Failed to read saved EBP from stack');
+    WriteLn(StdErr, '[ERROR] Failed to read saved EBP from stack');
     Exit;
   end;
 
   if not FProcessController.ReadMemory(Regs.EBP + 4, 4, ReturnAddr) then
   begin
-    WriteLn('[ERROR] Failed to read return address from stack');
+    WriteLn(StdErr, '[ERROR] Failed to read return address from stack');
     Exit;
   end;
 
@@ -1004,12 +1004,12 @@ begin
 
   if not FProcessController.SetRegisters(Regs) then
   begin
-    WriteLn('[ERROR] Failed to set registers');
+    WriteLn(StdErr, '[ERROR] Failed to set registers');
     Exit;
   end;
 
   if gVerbose then
-    WriteLn('[DEBUG] ForceReturn: RIP=0x', IntToHex(ReturnAddr, 1),
+    WriteLn(StdErr, '[DEBUG] ForceReturn: RIP=0x', IntToHex(ReturnAddr, 1),
             ' RBP=0x', IntToHex(SavedRBP, 1));
 
   if FDebugInfoReader.FindLineByAddress(ReturnAddr, CurrentLine) then
@@ -1046,13 +1046,13 @@ begin
       if FDebugInfoReader.FindAddressByLine(FileName, LineNum, Address) then
       begin
         Result := True;
-        if gVerbose then WriteLn('[INFO] Resolved ', FileName, ':', LineNum, ' to address 0x', IntToHex(Address, 8));
+        if gVerbose then WriteLn(StdErr, '[INFO] Resolved ', FileName, ':', LineNum, ' to address 0x', IntToHex(Address, 8));
         Exit;
       end
       else
       begin
-        WriteLn('[ERROR] No code found at ', FileName, ':', LineNum);
-        WriteLn('[INFO] Make sure the binary was compiled with -g and OPDF file has line information');
+        WriteLn(StdErr, '[ERROR] No code found at ', FileName, ':', LineNum);
+        WriteLn(StdErr, '[INFO] Make sure the binary was compiled with -g and OPDF file has line information');
         Exit;
       end;
     end;
@@ -1083,7 +1083,7 @@ begin
     Address := FuncInfo.LowPC;
     Result := True;
     if gVerbose then
-      WriteLn('[INFO] Resolved function ', FuncInfo.Name, ' to address 0x', IntToHex(Address, 8));
+      WriteLn(StdErr, '[INFO] Resolved function ', FuncInfo.Name, ' to address 0x', IntToHex(Address, 8));
     Exit;
   end;
 
@@ -1097,8 +1097,8 @@ begin
   end;
 
   // Could not parse location
-  WriteLn('[ERROR] Could not resolve location: ', Location);
-  WriteLn('[INFO] Location can be: file:line, hex address (0xNNNN), function name, or variable name');
+  WriteLn(StdErr, '[ERROR] Could not resolve location: ', Location);
+  WriteLn(StdErr, '[INFO] Location can be: file:line, hex address (0xNNNN), function name, or variable name');
 end;
 
 function TDebuggerEngine.FindBreakpointByHandle(Handle: TBreakpointHandle): Integer;
@@ -1148,16 +1148,16 @@ begin
           FBreakpoints[I].Address := Address;
           FBreakpoints[I].Active := True;
           if gVerbose then
-            WriteLn('[INFO] Breakpoint #', FBreakpoints[I].Handle,
+            WriteLn(StdErr, '[INFO] Breakpoint #', FBreakpoints[I].Handle,
                     ' resolved at 0x', IntToHex(Address, 16),
                     ' (', FBreakpoints[I].Location, ')');
         end
         else
-          WriteLn('[WARNING] Breakpoint #', FBreakpoints[I].Handle,
+          WriteLn(StdErr, '[WARNING] Breakpoint #', FBreakpoints[I].Handle,
                   ' could not be set at 0x', IntToHex(Address, 16));
       end
       else
-        WriteLn('[WARNING] Breakpoint #', FBreakpoints[I].Handle,
+        WriteLn(StdErr, '[WARNING] Breakpoint #', FBreakpoints[I].Handle,
                 ' could not resolve: ', FBreakpoints[I].Location);
     end;
   end;
@@ -1189,7 +1189,7 @@ begin
   { Read registers to get exception object (RDI) and raise address (RSI) }
   if not FProcessController.GetRegisters(Regs) then
   begin
-    WriteLn('[INFO] Exception raised (could not read registers)');
+    WriteLn(StdErr, '[INFO] Exception raised (could not read registers)');
     Exit;
   end;
 
@@ -1198,13 +1198,13 @@ begin
   RaiseAddr := Regs.RSI;
   {$ELSE}
   { On i386, parameters are on the stack — not implemented yet }
-  WriteLn('[INFO] Exception raised (i386 parameter reading not implemented)');
+  WriteLn(StdErr, '[INFO] Exception raised (i386 parameter reading not implemented)');
   Exit;
   {$ENDIF}
 
   if ObjPtr = 0 then
   begin
-    WriteLn('[INFO] Exception raised (nil object)');
+    WriteLn(StdErr, '[INFO] Exception raised (nil object)');
     Exit;
   end;
 
@@ -1341,7 +1341,7 @@ begin
   begin
     if FBinaryPath = '' then
     begin
-      WriteLn('[ERROR] No program loaded');
+      WriteLn(StdErr, '[ERROR] No program loaded');
       Exit;
     end;
 
@@ -1359,7 +1359,7 @@ begin
     FBreakpoints[High(FBreakpoints)] := Entry;
     Result := FNextHandle;
     Inc(FNextHandle);
-    WriteLn('[INFO] Breakpoint #', Result, ' (pending) at ', Location, ' — will resolve on run');
+    WriteLn(StdErr, '[INFO] Breakpoint #', Result, ' (pending) at ', Location, ' — will resolve on run');
     Exit;
   end;
 
@@ -1373,7 +1373,7 @@ begin
   begin
     if FBreakpoints[Idx].Active then
     begin
-      if gVerbose then WriteLn('[INFO] Breakpoint already set at ', Location);
+      if gVerbose then WriteLn(StdErr, '[INFO] Breakpoint already set at ', Location);
       Result := FBreakpoints[Idx].Handle;
       Exit;
     end
@@ -1385,7 +1385,7 @@ begin
         FBreakpoints[Idx].Active := True;
         FBreakpoints[Idx].Enabled := True;
         Result := FBreakpoints[Idx].Handle;
-        if gVerbose then WriteLn('[INFO] Breakpoint #', Result, ' reactivated at 0x', IntToHex(Address, 16));
+        if gVerbose then WriteLn(StdErr, '[INFO] Breakpoint #', Result, ' reactivated at 0x', IntToHex(Address, 16));
       end;
       Exit;
     end;
@@ -1394,7 +1394,7 @@ begin
   // Set new breakpoint
   if not FProcessController.SetBreakpoint(Address) then
   begin
-    WriteLn('[ERROR] Failed to set breakpoint at 0x', IntToHex(Address, 16));
+    WriteLn(StdErr, '[ERROR] Failed to set breakpoint at 0x', IntToHex(Address, 16));
     Exit;
   end;
 
@@ -1416,7 +1416,7 @@ begin
   Result := FNextHandle;
   Inc(FNextHandle);
 
-  if gVerbose then WriteLn('[INFO] Breakpoint #', Result, ' set at 0x', IntToHex(Address, 16), ' (', Location, ')');
+  if gVerbose then WriteLn(StdErr, '[INFO] Breakpoint #', Result, ' set at 0x', IntToHex(Address, 16), ' (', Location, ')');
 end;
 
 function TDebuggerEngine.RemoveBreakpoint(Handle: TBreakpointHandle): Boolean;
@@ -1427,7 +1427,7 @@ begin
 
   if FState = dsIdle then
   begin
-    WriteLn('[ERROR] Not attached to a process');
+    WriteLn(StdErr, '[ERROR] Not attached to a process');
     Exit;
   end;
 
@@ -1435,14 +1435,14 @@ begin
   Idx := FindBreakpointByHandle(Handle);
   if Idx < 0 then
   begin
-    WriteLn('[ERROR] Breakpoint #', Handle, ' not found');
+    WriteLn(StdErr, '[ERROR] Breakpoint #', Handle, ' not found');
     Exit;
   end;
 
   // Check if already inactive
   if not FBreakpoints[Idx].Active then
   begin
-    if gVerbose then WriteLn('[INFO] Breakpoint #', Handle, ' already removed');
+    if gVerbose then WriteLn(StdErr, '[INFO] Breakpoint #', Handle, ' already removed');
     Result := True;
     Exit;
   end;
@@ -1450,7 +1450,7 @@ begin
   // Remove breakpoint from process
   if not FProcessController.RemoveBreakpoint(FBreakpoints[Idx].Address) then
   begin
-    WriteLn('[ERROR] Failed to remove breakpoint #', Handle);
+    WriteLn(StdErr, '[ERROR] Failed to remove breakpoint #', Handle);
     Exit;
   end;
 
@@ -1459,7 +1459,7 @@ begin
   Result := True;
 
   if gVerbose then
-    WriteLn('[INFO] Breakpoint #', Handle, ' removed from 0x',
+    WriteLn(StdErr, '[INFO] Breakpoint #', Handle, ' removed from 0x',
             IntToHex(FBreakpoints[Idx].Address, 16));
 end;
 
@@ -1475,7 +1475,7 @@ begin
   Idx := FindBreakpointByHandle(Handle);
   if Idx < 0 then
   begin
-    WriteLn('[ERROR] Breakpoint #', Handle, ' not found');
+    WriteLn(StdErr, '[ERROR] Breakpoint #', Handle, ' not found');
     Exit;
   end;
 
@@ -1484,9 +1484,9 @@ begin
   FBreakpoints[Idx].CurrentHitCount := 0;
 
   if CondType = bctHitCount then
-    WriteLn('[INFO] Breakpoint #', Handle, ' condition set: count=', Count)
+    WriteLn(StdErr, '[INFO] Breakpoint #', Handle, ' condition set: count=', Count)
   else
-    WriteLn('[INFO] Breakpoint #', Handle, ' condition removed');
+    WriteLn(StdErr, '[INFO] Breakpoint #', Handle, ' condition removed');
 
   Result := True;
 end;
@@ -1503,7 +1503,7 @@ begin
   Idx := FindBreakpointByHandle(Handle);
   if Idx < 0 then
   begin
-    WriteLn('[ERROR] Breakpoint #', Handle, ' not found');
+    WriteLn(StdErr, '[ERROR] Breakpoint #', Handle, ' not found');
     Exit;
   end;
 
@@ -1515,7 +1515,7 @@ begin
     except
       on E: EExprParseError do
       begin
-        WriteLn('[ERROR] Invalid condition expression: ', E.Message);
+        WriteLn(StdErr, '[ERROR] Invalid condition expression: ', E.Message);
         Exit;
       end;
     end;
@@ -1526,7 +1526,7 @@ begin
   FBreakpoints[Idx].ConditionType := bctExpression;
   FBreakpoints[Idx].ConditionExpr := Expr;
   FBreakpoints[Idx].CurrentHitCount := 0;
-  WriteLn('[INFO] Breakpoint #', Handle, ' condition set: if ', Expr);
+  WriteLn(StdErr, '[INFO] Breakpoint #', Handle, ' condition set: if ', Expr);
   Result := True;
 end;
 
@@ -1538,7 +1538,7 @@ begin
   Idx := FindBreakpointByHandle(Handle);
   if Idx < 0 then
   begin
-    WriteLn('[ERROR] Breakpoint #', Handle, ' not found');
+    WriteLn(StdErr, '[ERROR] Breakpoint #', Handle, ' not found');
     Exit;
   end;
 
@@ -1547,9 +1547,9 @@ begin
     FBreakpoints[Idx].Commands[I] := Cmds[I];
 
   if Length(Cmds) = 0 then
-    WriteLn('[INFO] Breakpoint #', Handle, ' commands cleared')
+    WriteLn(StdErr, '[INFO] Breakpoint #', Handle, ' commands cleared')
   else
-    WriteLn('[INFO] Breakpoint #', Handle, ': ', Length(Cmds), ' command(s) attached');
+    WriteLn(StdErr, '[INFO] Breakpoint #', Handle, ': ', Length(Cmds), ' command(s) attached');
 end;
 
 function TDebuggerEngine.GetHitBreakpointCommands: TStringArray;
@@ -1574,13 +1574,13 @@ begin
   Idx := FindBreakpointByHandle(Handle);
   if Idx < 0 then
   begin
-    WriteLn('[ERROR] Breakpoint #', Handle, ' not found');
+    WriteLn(StdErr, '[ERROR] Breakpoint #', Handle, ' not found');
     Exit;
   end;
 
   if FBreakpoints[Idx].Enabled then
   begin
-    WriteLn('[INFO] Breakpoint #', Handle, ' already enabled');
+    WriteLn(StdErr, '[INFO] Breakpoint #', Handle, ' already enabled');
     Result := True;
     Exit;
   end;
@@ -1589,14 +1589,14 @@ begin
   begin
     if not FProcessController.SetBreakpoint(FBreakpoints[Idx].Address) then
     begin
-      WriteLn('[ERROR] Failed to re-insert breakpoint at 0x',
+      WriteLn(StdErr, '[ERROR] Failed to re-insert breakpoint at 0x',
               IntToHex(FBreakpoints[Idx].Address, 16));
       Exit;
     end;
   end;
 
   FBreakpoints[Idx].Enabled := True;
-  WriteLn('[INFO] Breakpoint #', Handle, ' enabled');
+  WriteLn(StdErr, '[INFO] Breakpoint #', Handle, ' enabled');
   Result := True;
 end;
 
@@ -1608,13 +1608,13 @@ begin
   Idx := FindBreakpointByHandle(Handle);
   if Idx < 0 then
   begin
-    WriteLn('[ERROR] Breakpoint #', Handle, ' not found');
+    WriteLn(StdErr, '[ERROR] Breakpoint #', Handle, ' not found');
     Exit;
   end;
 
   if not FBreakpoints[Idx].Enabled then
   begin
-    WriteLn('[INFO] Breakpoint #', Handle, ' already disabled');
+    WriteLn(StdErr, '[INFO] Breakpoint #', Handle, ' already disabled');
     Result := True;
     Exit;
   end;
@@ -1623,7 +1623,7 @@ begin
     FProcessController.RemoveBreakpoint(FBreakpoints[Idx].Address);
 
   FBreakpoints[Idx].Enabled := False;
-  WriteLn('[INFO] Breakpoint #', Handle, ' disabled');
+  WriteLn(StdErr, '[INFO] Breakpoint #', Handle, ' disabled');
   Result := True;
 end;
 
@@ -1691,14 +1691,14 @@ begin
   for I := 0 to High(FDisplayList) do
     if LowerCase(FDisplayList[I]) = LowerCase(Expr) then
     begin
-      WriteLn('[INFO] Already displaying: ', Expr);
+      WriteLn(StdErr, '[INFO] Already displaying: ', Expr);
       Result := False;
       Exit;
     end;
 
   SetLength(FDisplayList, Length(FDisplayList) + 1);
   FDisplayList[High(FDisplayList)] := Expr;
-  WriteLn('[INFO] Display added: ', Expr);
+  WriteLn(StdErr, '[INFO] Display added: ', Expr);
   Result := True;
 end;
 
@@ -1712,17 +1712,17 @@ begin
       for J := I to High(FDisplayList) - 1 do
         FDisplayList[J] := FDisplayList[J + 1];
       SetLength(FDisplayList, Length(FDisplayList) - 1);
-      WriteLn('[INFO] Display removed: ', Expr);
+      WriteLn(StdErr, '[INFO] Display removed: ', Expr);
       Exit;
     end;
 
-  WriteLn('[ERROR] Not in display list: ', Expr);
+  WriteLn(StdErr, '[ERROR] Not in display list: ', Expr);
 end;
 
 procedure TDebuggerEngine.ClearDisplay;
 begin
   SetLength(FDisplayList, 0);
-  WriteLn('[INFO] All display entries removed');
+  WriteLn(StdErr, '[INFO] All display entries removed');
 end;
 
 function TDebuggerEngine.GetDisplayList: TStringArray;
@@ -1769,7 +1769,7 @@ begin
 
   if FState = dsIdle then
   begin
-    WriteLn('[ERROR] Not attached to process');
+    WriteLn(StdErr, '[ERROR] Not attached to process');
     Exit;
   end;
 
@@ -1778,13 +1778,13 @@ begin
 
   if not FDebugInfoReader.FindVariableWithScope(VarName, RIP, VarInfo) then
   begin
-    WriteLn('[ERROR] Variable not found: ', VarName);
+    WriteLn(StdErr, '[ERROR] Variable not found: ', VarName);
     Exit;
   end;
 
   if not FDebugInfoReader.FindType(VarInfo.TypeID, TypeInfo) then
   begin
-    WriteLn('[ERROR] Type not found for: ', VarName);
+    WriteLn(StdErr, '[ERROR] Type not found for: ', VarName);
     Exit;
   end;
 
@@ -1818,7 +1818,7 @@ begin
 
   if Addr = 0 then
   begin
-    WriteLn('[ERROR] Cannot determine address for: ', VarName);
+    WriteLn(StdErr, '[ERROR] Cannot determine address for: ', VarName);
     Exit;
   end;
 
@@ -1833,7 +1833,7 @@ begin
     WatchSize := 8
   else
   begin
-    WriteLn('[ERROR] Variable too large for hardware watchpoint (', TypeInfo.Size, ' bytes, max 8)');
+    WriteLn(StdErr, '[ERROR] Variable too large for hardware watchpoint (', TypeInfo.Size, ' bytes, max 8)');
     Exit;
   end;
 
@@ -1844,7 +1844,7 @@ begin
   Slot := FProcessController.SetWatchpoint(Addr, WatchSize, WatchType);
   if Slot < 0 then
   begin
-    WriteLn('[ERROR] Cannot set watchpoint (all 4 hardware slots in use)');
+    WriteLn(StdErr, '[ERROR] Cannot set watchpoint (all 4 hardware slots in use)');
     Exit;
   end;
 
@@ -1862,7 +1862,7 @@ begin
   SetLength(FWatchpoints, Length(FWatchpoints) + 1);
   FWatchpoints[High(FWatchpoints)] := Entry;
 
-  WriteLn('[INFO] Watchpoint set on ', VarName, ' at $', HexStr(Addr, 16), ' (slot ', Slot, ')');
+  WriteLn(StdErr, '[INFO] Watchpoint set on ', VarName, ' at $', HexStr(Addr, 16), ' (slot ', Slot, ')');
   Result := True;
 end;
 
@@ -1876,12 +1876,12 @@ begin
     begin
       FProcessController.ClearWatchpoint(FWatchpoints[I].Slot);
       FWatchpoints[I].Active := False;
-      WriteLn('[INFO] Watchpoint removed: ', VarName);
+      WriteLn(StdErr, '[INFO] Watchpoint removed: ', VarName);
       Result := True;
       Exit;
     end;
   if not Result then
-    WriteLn('[ERROR] No watchpoint on variable: ', VarName);
+    WriteLn(StdErr, '[ERROR] No watchpoint on variable: ', VarName);
 end;
 
 function TDebuggerEngine.GetWatchpointList: TStringArray;
@@ -2427,25 +2427,25 @@ begin
 
   if not FDebugInfoReader.FindVariableWithScope(VarName, RIP, VarInfo) then
   begin
-    WriteLn('[ERROR] Variable not found: ', VarName);
+    WriteLn(StdErr, '[ERROR] Variable not found: ', VarName);
     Exit;
   end;
 
   if not FDebugInfoReader.FindType(VarInfo.TypeID, TypeInfo) then
   begin
-    WriteLn('[ERROR] Type not found for: ', VarName);
+    WriteLn(StdErr, '[ERROR] Type not found for: ', VarName);
     Exit;
   end;
 
   if TypeInfo.Category <> tcArray then
   begin
-    WriteLn('[ERROR] Variable is not an array: ', VarName);
+    WriteLn(StdErr, '[ERROR] Variable is not an array: ', VarName);
     Exit;
   end;
 
   if not FDebugInfoReader.FindType(TypeInfo.ElementTypeID, ElemTypeInfo) then
   begin
-    WriteLn('[ERROR] Element type not found');
+    WriteLn(StdErr, '[ERROR] Element type not found');
     Exit;
   end;
 
@@ -2459,7 +2459,7 @@ begin
     { Static array: bounds come from the debug info. }
     if Length(TypeInfo.Bounds) = 0 then
     begin
-      WriteLn('[ERROR] Array has no bounds info');
+      WriteLn(StdErr, '[ERROR] Array has no bounds info');
       Exit;
     end;
     LowerBound := TypeInfo.Bounds[0].LowerBound;
@@ -2528,7 +2528,7 @@ begin
       DynPtr := 0;
     if DynPtr = 0 then
     begin
-      WriteLn('[INFO] Array is nil');
+      WriteLn(StdErr, '[INFO] Array is nil');
       Exit;
     end;
     FillChar(LenBuf, SizeOf(LenBuf), 0);
@@ -2536,7 +2536,7 @@ begin
          RBP + QWord(Int64(VarInfo.CompanionData)),
          FDebugInfoReader.GetPointerSize, LenBuf) then
     begin
-      WriteLn('[ERROR] Failed to read open-array length');
+      WriteLn(StdErr, '[ERROR] Failed to read open-array length');
       Exit;
     end;
     if FDebugInfoReader.GetPointerSize = 4 then
@@ -2556,7 +2556,7 @@ begin
       DynPtr := 0;
     if DynPtr = 0 then
     begin
-      WriteLn('[INFO] Array is nil');
+      WriteLn(StdErr, '[INFO] Array is nil');
       Exit;
     end;
     FillChar(LenBuf, SizeOf(LenBuf), 0);
@@ -2565,7 +2565,7 @@ begin
       { [refcount: Int32][length: Int32] header — length at data - 4. }
       if not FProcessController.ReadMemory(DynPtr - 4, 4, LenBuf) then
       begin
-        WriteLn('[ERROR] Failed to read dynamic array length');
+        WriteLn(StdErr, '[ERROR] Failed to read dynamic array length');
         Exit;
       end;
       UpperBound := PLongInt(@LenBuf)^ - 1;
@@ -2577,7 +2577,7 @@ begin
            DynPtr - FDebugInfoReader.GetPointerSize,
            FDebugInfoReader.GetPointerSize, LenBuf) then
       begin
-        WriteLn('[ERROR] Failed to read dynamic array length');
+        WriteLn(StdErr, '[ERROR] Failed to read dynamic array length');
         Exit;
       end;
       if FDebugInfoReader.GetPointerSize = 4 then
@@ -2591,12 +2591,12 @@ begin
   { Clamp slice indices to actual bounds with warnings }
   if LowIndex < LowerBound then
   begin
-    WriteLn('[WARN] Low index clamped from ', LowIndex, ' to ', LowerBound);
+    WriteLn(StdErr, '[WARN] Low index clamped from ', LowIndex, ' to ', LowerBound);
     LowIndex := LowerBound;
   end;
   if HighIndex > UpperBound then
   begin
-    WriteLn('[WARN] High index clamped from ', HighIndex, ' to ', UpperBound);
+    WriteLn(StdErr, '[WARN] High index clamped from ', HighIndex, ' to ', UpperBound);
     HighIndex := UpperBound;
   end;
 
@@ -2632,7 +2632,7 @@ begin
 
   if FState = dsIdle then
   begin
-    WriteLn('[ERROR] Not attached to process');
+    WriteLn(StdErr, '[ERROR] Not attached to process');
     Exit;
   end;
 
@@ -2646,13 +2646,13 @@ begin
 
   if not FDebugInfoReader.FindVariableWithScope(VarName, RIP, VarInfo) then
   begin
-    WriteLn('[ERROR] Variable not found: ', VarName);
+    WriteLn(StdErr, '[ERROR] Variable not found: ', VarName);
     Exit;
   end;
 
   if not FDebugInfoReader.FindType(VarInfo.TypeID, TypeInfo) then
   begin
-    WriteLn('[ERROR] Type not found for: ', VarName);
+    WriteLn(StdErr, '[ERROR] Type not found for: ', VarName);
     Exit;
   end;
 
@@ -2696,7 +2696,7 @@ begin
 
   if Addr = 0 then
   begin
-    WriteLn('[ERROR] Cannot determine address for: ', VarName);
+    WriteLn(StdErr, '[ERROR] Cannot determine address for: ', VarName);
     Exit;
   end;
 
@@ -2727,7 +2727,7 @@ begin
         Move(IntVal, Buffer[0], Min(TypeInfo.Size, SizeOf(IntVal)))
       else
       begin
-        WriteLn('[ERROR] Cannot parse value for primitive type: ', Value);
+        WriteLn(StdErr, '[ERROR] Cannot parse value for primitive type: ', Value);
         Exit;
       end;
 
@@ -2748,7 +2748,7 @@ begin
       { Fall back to ordinal }
       if (OrdVal = -1) and not TryStrToInt64(Value, OrdVal) then
       begin
-        WriteLn('[ERROR] Unknown enum member or invalid ordinal: ', Value);
+        WriteLn(StdErr, '[ERROR] Unknown enum member or invalid ordinal: ', Value);
         Exit;
       end;
 
@@ -2757,14 +2757,14 @@ begin
     end;
 
   else
-    WriteLn('[ERROR] set: type not supported for assignment: ', TypeInfo.Name);
+    WriteLn(StdErr, '[ERROR] set: type not supported for assignment: ', TypeInfo.Name);
     Exit;
   end;
 
   if Result then
-    WriteLn('[INFO] ', VarName, ' set to ', Value)
+    WriteLn(StdErr, '[INFO] ', VarName, ' set to ', Value)
   else
-    WriteLn('[ERROR] Failed to write to address $', IntToHex(Addr, 16));
+    WriteLn(StdErr, '[ERROR] Failed to write to address $', IntToHex(Addr, 16));
 end;
 
 function TDebuggerEngine.GetCallStack(Limit: Integer = 0): TStringArray;
@@ -2791,7 +2791,7 @@ begin
   { Get current registers }
   if not FProcessController.GetRegisters(Regs) then
   begin
-    if gVerbose then WriteLn('[DEBUG] Failed to get registers for callstack');
+    if gVerbose then WriteLn(StdErr, '[DEBUG] Failed to get registers for callstack');
     Exit;
   end;
 
@@ -3074,7 +3074,7 @@ begin
   Val := EvaluateExpression(Expr);
   if not Val.IsValid then
   begin
-    WriteLn('[WARNING] Condition evaluation failed: ', Val.Value, ' — stopping');
+    WriteLn(StdErr, '[WARNING] Condition evaluation failed: ', Val.Value, ' — stopping');
     Result := True;
     Exit;
   end;
@@ -3105,7 +3105,7 @@ begin
 
   if FState <> dsPaused then
   begin
-    WriteLn('[ERROR] Process is not paused');
+    WriteLn(StdErr, '[ERROR] Process is not paused');
     Exit;
   end;
 
@@ -3113,7 +3113,7 @@ begin
 
   if (Index < 0) or (Index >= Length(FFrameRBPs)) then
   begin
-    WriteLn('[ERROR] Frame ', Index, ' out of range (', Length(FFrameRBPs), ' frames available)');
+    WriteLn(StdErr, '[ERROR] Frame ', Index, ' out of range (', Length(FFrameRBPs), ' frames available)');
     Exit;
   end;
 
@@ -3139,7 +3139,7 @@ begin
   BuildFrameCache;
   if FSelectedFrameIndex + 1 >= Length(FFrameRBPs) then
   begin
-    WriteLn('[ERROR] Already at outermost frame');
+    WriteLn(StdErr, '[ERROR] Already at outermost frame');
     Result := False;
     Exit;
   end;
@@ -3150,7 +3150,7 @@ function TDebuggerEngine.FrameDown: Boolean;
 begin
   if FSelectedFrameIndex <= 0 then
   begin
-    WriteLn('[ERROR] Already at innermost frame');
+    WriteLn(StdErr, '[ERROR] Already at innermost frame');
     Result := False;
     Exit;
   end;
