@@ -1,0 +1,3 @@
+WorkingDays = [Mon, Tue, Wed, Thu, Fri]
+Weekend = [Sat, Sun]
+EmptySet = []

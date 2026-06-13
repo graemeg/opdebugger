@@ -1,0 +1,3 @@
+DynIntArray = array of Integer (Length=5) = [100, 200, 300, 400, 500]
+DynStringArray = array of Utf8String (Length=3) = ['First', 'Second', 'Third']
+NilArray = nil

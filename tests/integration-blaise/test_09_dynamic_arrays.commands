@@ -1,0 +1,7 @@
+run
+break test_09_dynamic_arrays.pas:27
+continue
+print DynIntArray
+print DynStringArray
+print NilArray
+quit

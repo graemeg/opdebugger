@@ -1,0 +1,9 @@
+run
+break test_08_static_arrays.pas:33
+continue
+print IntArray
+print StringArray
+print TwoDArray
+print TwoDArray[0]
+print TwoDArray[1]
+quit
