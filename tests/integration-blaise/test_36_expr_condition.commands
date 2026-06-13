@@ -1,0 +1,11 @@
+run
+break test_36_expr_condition.pas:14 if Idx = 5
+continue
+print Idx
+print Total
+condition 1 Idx > 8
+continue
+print Idx
+print Total
+continue
+quit

@@ -1,0 +1,6 @@
+FWidth = 30     [Integer, offset +8]
+FHeight = 20     [Integer, offset +12]
+Increment = <method>
+GetValue = <method>
+Counter = nil
+Counter = ICounter(<ptr>)

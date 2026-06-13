@@ -1,0 +1,20 @@
+run
+break test_35_expressions.pas:26
+continue
+print IntA + IntB
+print IntA * IntB
+print IntA - IntB
+print IntA div IntB
+print IntA mod IntB
+print IntA + IntB * 2
+print (IntA + IntB) * 2
+print -IntA
+print IntA > IntB
+print IntA = IntB
+print IntA <> IntB
+print BoolFlag and True
+print not BoolFlag
+print IntA shl 2
+print Arr[2]
+print Length(MyStr)
+quit

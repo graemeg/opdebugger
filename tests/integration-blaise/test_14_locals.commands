@@ -1,0 +1,5 @@
+run
+break test_14_locals.pas:17
+continue
+locals
+quit

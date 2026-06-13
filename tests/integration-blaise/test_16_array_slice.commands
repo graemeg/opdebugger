@@ -1,0 +1,6 @@
+run
+break test_16_array_slice.pas:14
+continue
+print BigArray[2..4]
+print BigArray[8..11]
+quit

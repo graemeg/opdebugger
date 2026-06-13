@@ -1,0 +1,10 @@
+run
+break test_18_inspect_class_intf.pas:51
+break test_18_inspect_class_intf.pas:55
+continue
+inspect Box
+inspect Counter
+print Counter
+continue
+print Counter
+quit

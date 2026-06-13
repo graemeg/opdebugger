@@ -1,0 +1,6 @@
+Rect.TopLeft.XPos = 10
+Rect.TopLeft.YPos = 20
+Rect.BottomRight.XPos = 100
+Rect.BottomRight.YPos = 200
+Obj.Name = 'MyOuter'
+Obj.Inner.Value = 42

@@ -1,0 +1,6 @@
+run
+break test_05_properties.pas:74
+continue
+print Instance
+print BaseInstance
+quit

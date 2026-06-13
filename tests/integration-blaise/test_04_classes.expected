@@ -1,0 +1,2 @@
+MyInstance = TMyClass(@$000077886E3D0058) { FInteger: 42, FBoolean: True, FAnsiString: 'Hello from a class' }
+MyNilInstance = nil

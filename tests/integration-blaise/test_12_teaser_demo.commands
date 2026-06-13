@@ -1,0 +1,5 @@
+run
+break test_12_teaser_demo.pas:33
+continue
+print ParentVar
+quit
