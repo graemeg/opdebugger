@@ -46,8 +46,9 @@ type
     Name: String;           // Variable name
     TypeID: TTypeID;        // Type identifier
     ScopeID: Cardinal;      // Function scope ID
-    LocationExpr: Byte;     // Location expression type (1=RBP-relative)
+    LocationExpr: Byte;     // Location expression type (1=RBP-relative, 5=open-array)
     LocationData: SmallInt; // RBP offset (signed)
+    CompanionData: SmallInt;// Open-array (LocationExpr=5): companion _high slot offset
     DeclIndex: Word;        // Declaration order in parent scope
   end;
   PLocalVariableInfo = ^TLocalVariableInfo;
@@ -591,6 +592,7 @@ var
   FileName: String;
   FunctionName: String;
   LocationData: SmallInt;
+  CompanionData: SmallInt;
   PType: PTypeInfo;
   PVar: PVariableInfo;
   PLine: PLineInfo;
@@ -890,7 +892,7 @@ begin
 
       recLocalVar:
         begin
-          if FReader.ReadLocalVar(DefLocalVar, LocationData, VarName) then
+          if FReader.ReadLocalVar(DefLocalVar, LocationData, CompanionData, VarName) then
           begin
             { Get or create local variables list for this scope }
             LocalList := TFPList(FLocalVariables.Find(IntToStr(DefLocalVar.ScopeID)));
@@ -907,6 +909,7 @@ begin
             PLocal^.ScopeID := DefLocalVar.ScopeID;
             PLocal^.LocationExpr := DefLocalVar.LocationExpr;
             PLocal^.LocationData := LocationData;
+            PLocal^.CompanionData := CompanionData;
             PLocal^.DeclIndex := DefLocalVar.DeclIndex;
 
             LocalList.Add(PLocal);
@@ -945,7 +948,12 @@ begin
               PType^.Category := tcArray;
               PType^.MaxLength := 0;
               PType^.ElementTypeID := DefArray.ElementTypeID;
+              { The 'IsDynamic' byte is really an ArrayKind: 0=static, 1=dynamic,
+                2=open-array.  Open arrays are pointer-based like dynamic arrays
+                but carry no heap header — their length comes from a companion
+                slot, handled by TOpenArrayEvaluator. }
               PType^.IsDynamic := DefArray.IsDynamic <> 0;
+              PType^.IsOpenArray := DefArray.IsDynamic = 2;
               PType^.Dimensions := DefArray.Dimensions;
 
               { Read bounds for static arrays }
@@ -1328,6 +1336,7 @@ begin
         VarInfo.Address := 0; { Will be computed from RBP + LocationData }
         VarInfo.LocationExpr := LocalVar.LocationExpr;
         VarInfo.LocationData := LocalVar.LocationData;
+        VarInfo.CompanionData := LocalVar.CompanionData;
         Result := True;
         if gVerbose then
           WriteLn('[DEBUG] Found local var: ', LocalVar.Name, ' LocationExpr=', LocalVar.LocationExpr,
@@ -1662,6 +1671,7 @@ begin
     Result[I].Address := 0;
     Result[I].LocationExpr := Locals[I].LocationExpr;
     Result[I].LocationData := Locals[I].LocationData;
+    Result[I].CompanionData := Locals[I].CompanionData;
 
     if gVerbose then
     begin

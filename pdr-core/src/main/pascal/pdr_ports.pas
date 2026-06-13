@@ -207,7 +207,8 @@ type
     ClassInfo: PDebuggerClass; // For classes: pointer to detailed class info
     // Array-specific
     ElementTypeID: TTypeID;  // Type of array elements
-    IsDynamic: Boolean;      // True for dynamic arrays (pointer-based)
+    IsDynamic: Boolean;      // True for dynamic arrays (pointer-based) and open arrays
+    IsOpenArray: Boolean;    // True for open-array params (length from companion slot, no header)
     Dimensions: Byte;        // Number of dimensions (1-4)
     Bounds: TArrayBounds;    // Array bounds for each dimension
     // Enum-specific
@@ -225,8 +226,10 @@ type
     Name: String;
     TypeID: TTypeID;
     Address: QWord;
-    LocationExpr: Byte;      // For stack-based: 0=global, 1=RBP-relative
+    LocationExpr: Byte;      // For stack-based: 0=global, 1=RBP-relative, 5=open-array
     LocationData: SmallInt;  // For stack-based: RBP offset
+    CompanionData: SmallInt; // Open-array (LocationExpr=5): companion _high slot RBP offset
+    CompanionAddr: QWord;    // Open-array: resolved absolute address of the _high slot
   end;
 
   { Variable value (evaluated) }

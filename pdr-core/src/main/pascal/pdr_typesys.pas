@@ -89,6 +89,16 @@ type
     function CanHandle(const TypeInfo: TTypeInfo): Boolean;
   end;
 
+  { Open Array Type Evaluator - open-array parameters carry no heap header;
+    the element count comes from the companion '_high' slot (VarInfo.CompanionAddr)
+    and the data pointer is read from VarInfo.Address. }
+  TOpenArrayEvaluator = class(TInterfacedObject, ITypeEvaluator)
+  public
+    function Evaluate(const VarInfo: TVariableInfo; const TypeInfo: TTypeInfo;
+      ProcessController: IProcessController; TypeSystem: TTypeSystem): TVariableValue;
+    function CanHandle(const TypeInfo: TTypeInfo): Boolean;
+  end;
+
   { Float Type Evaluator - handles Single, Double, Extended }
   TFloatEvaluator = class(TInterfacedObject, ITypeEvaluator)
   public
@@ -813,7 +823,8 @@ end;
 
 function TDynamicArrayEvaluator.CanHandle(const TypeInfo: TTypeInfo): Boolean;
 begin
-  Result := (TypeInfo.Category = tcArray) and TypeInfo.IsDynamic;
+  Result := (TypeInfo.Category = tcArray) and TypeInfo.IsDynamic
+            and not TypeInfo.IsOpenArray;
 end;
 
 function TDynamicArrayEvaluator.Evaluate(const VarInfo: TVariableInfo;
@@ -919,6 +930,107 @@ begin
 
     if I > 0 then ElementOutput := ElementOutput + ', ';
 
+    ElementValue := TypeSystem.EvaluateVariableInfo(ElementVarInfo);
+    ElementOutput := ElementOutput + ElementValue.Value;
+  end;
+
+  if ArrayLength > MaxElements then
+    ElementOutput := ElementOutput + ', ...';
+
+  Result.Value := 'array of ' + ElementTypeInfo.Name + ' (Length=' +
+                  IntToStr(ArrayLength) + ') = [' + ElementOutput + ']';
+  Result.IsValid := True;
+end;
+
+{ TOpenArrayEvaluator }
+
+function TOpenArrayEvaluator.CanHandle(const TypeInfo: TTypeInfo): Boolean;
+begin
+  Result := (TypeInfo.Category = tcArray) and TypeInfo.IsOpenArray;
+end;
+
+function TOpenArrayEvaluator.Evaluate(const VarInfo: TVariableInfo;
+  const TypeInfo: TTypeInfo; ProcessController: IProcessController;
+  TypeSystem: TTypeSystem): TVariableValue;
+var
+  PointerBuf: array[0..7] of Byte;
+  HighBuf: array[0..7] of Byte;
+  ArrayPtr: QWord;
+  ArrayLength: LongInt;
+  PtrSize: Byte;
+  I, MaxElements: Integer;
+  ElementSize: Cardinal;
+  ElementTypeInfo: TTypeInfo;
+  ElementVarInfo: TVariableInfo;
+  ElementValue: TVariableValue;
+  ElementOutput: String;
+begin
+  Result.Name := TFPCDemangler.Demangle(VarInfo.Name);
+  Result.TypeName := TypeInfo.Name;
+  Result.Address := VarInfo.Address;
+  Result.IsValid := False;
+
+  PtrSize := TypeSystem.FDebugInfoReader.GetPointerSize;
+  if PtrSize = 0 then PtrSize := 8;
+
+  { Open-array: the data slot (VarInfo.Address) holds the data pointer.
+    There is NO heap header — the element count is High+1, read from the
+    companion '_high' slot at VarInfo.CompanionAddr. }
+  FillChar(PointerBuf, SizeOf(PointerBuf), 0);
+  if not ProcessController.ReadMemory(VarInfo.Address, PtrSize, PointerBuf) then
+  begin
+    Result.Value := '<error: failed to read open-array pointer>';
+    Exit;
+  end;
+  if PtrSize = 4 then
+    ArrayPtr := PDWord(@PointerBuf)^
+  else
+    ArrayPtr := PQWord(@PointerBuf)^;
+
+  if ArrayPtr = 0 then
+  begin
+    Result.Value := 'nil';
+    Result.IsValid := True;
+    Exit;
+  end;
+
+  { High index from the companion slot. }
+  FillChar(HighBuf, SizeOf(HighBuf), 0);
+  if (VarInfo.CompanionAddr = 0) or
+     (not ProcessController.ReadMemory(VarInfo.CompanionAddr, PtrSize, HighBuf)) then
+  begin
+    Result.Value := '<error: failed to read open-array length>';
+    Exit;
+  end;
+  if PtrSize = 4 then
+    ArrayLength := PLongInt(@HighBuf)^ + 1
+  else
+    ArrayLength := LongInt(PInt64(@HighBuf)^ + 1);
+  if ArrayLength < 0 then ArrayLength := 0;
+
+  if not TypeSystem.FDebugInfoReader.FindType(TypeInfo.ElementTypeID, ElementTypeInfo) then
+  begin
+    Result.Value := '<error: element type not found>';
+    Exit;
+  end;
+
+  ElementSize := ElementTypeInfo.Size;
+  if ElementSize = 0 then ElementSize := 1;
+
+  MaxElements := 10;
+  if ArrayLength < MaxElements then
+    MaxElements := ArrayLength;
+
+  ElementOutput := '';
+  for I := 0 to MaxElements - 1 do
+  begin
+    ElementVarInfo.Name := 'Element' + IntToStr(I);
+    ElementVarInfo.TypeID := TypeInfo.ElementTypeID;
+    ElementVarInfo.Address := ArrayPtr + (I * ElementSize);
+    ElementVarInfo.LocationExpr := 0;
+    ElementVarInfo.LocationData := 0;
+
+    if I > 0 then ElementOutput := ElementOutput + ', ';
     ElementValue := TypeSystem.EvaluateVariableInfo(ElementVarInfo);
     ElementOutput := ElementOutput + ElementValue.Value;
   end;
@@ -1813,6 +1925,22 @@ begin
         WriteLn('[DEBUG] Computed TLS address for ', VarInfo.Name,
                 ': TLSBase=$', IntToHex(ParentRBP, 16), ' + ', VarInfo.LocationData,
                 ' = $', IntToHex(ComputedVarInfo.Address, 16));
+    end;
+  end
+  else if (VarInfo.LocationExpr = 5) then { open-array parameter }
+  begin
+    { The data-pointer slot is at RBP+LocationData (resolved like =1).  The
+      element count comes from the companion '_high' slot at RBP+CompanionData,
+      whose absolute address is stashed for TOpenArrayEvaluator. }
+    RBP := GetEffectiveRBP;
+    if RBP <> 0 then
+    begin
+      ComputedVarInfo.Address := RBP + VarInfo.LocationData;
+      ComputedVarInfo.CompanionAddr := RBP + QWord(Int64(VarInfo.CompanionData));
+      if gVerbose then
+        WriteLn('[DEBUG] Computed open-array for ', VarInfo.Name,
+                ': data=$', IntToHex(ComputedVarInfo.Address, 16),
+                ' high-slot=$', IntToHex(ComputedVarInfo.CompanionAddr, 16));
     end;
   end;
 

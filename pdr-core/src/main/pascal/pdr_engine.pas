@@ -201,6 +201,7 @@ begin
   FTypeSystem.RegisterEvaluator(TUnicodeStringEvaluator.Create);
   FTypeSystem.RegisterEvaluator(TClassEvaluator.Create);
   FTypeSystem.RegisterEvaluator(TStaticArrayEvaluator.Create);
+  FTypeSystem.RegisterEvaluator(TOpenArrayEvaluator.Create);
   FTypeSystem.RegisterEvaluator(TDynamicArrayEvaluator.Create);
   FTypeSystem.RegisterEvaluator(TPointerEvaluator.Create);
   FTypeSystem.RegisterEvaluator(TRecordEvaluator.Create);
@@ -2500,10 +2501,52 @@ begin
     else
       BaseAddr := 0;
   end
+  else if VarInfo.LocationExpr = 5 then
+  begin
+    { Open-array parameter: the data slot holds the data pointer (no heap
+      header); the element count is High+1, read from the companion
+      '_high' slot at RBP + CompanionData. }
+    if FTypeSystem.OverrideRBP <> 0 then
+      RBP := FTypeSystem.OverrideRBP
+    else
+    begin
+      RBP := FProcessController.GetLastBreakpointRBP;
+      if RBP = 0 then RBP := FProcessController.GetFrameBasePointer;
+    end;
+    BaseAddr := RBP + VarInfo.LocationData;
+  end
   else
     BaseAddr := VarInfo.Address;
 
-  if TypeInfo.IsDynamic then
+  if VarInfo.LocationExpr = 5 then
+  begin
+    { Open array: BaseAddr is the data-pointer slot; dereference it for the
+      element base.  The length lives in the companion _high slot (High
+      index), NOT in a heap header — so do not subtract from the data ptr. }
+    if not ReadPointerValue(FProcessController, BaseAddr,
+         FDebugInfoReader.GetPointerSize, DynPtr) then
+      DynPtr := 0;
+    if DynPtr = 0 then
+    begin
+      WriteLn('[INFO] Array is nil');
+      Exit;
+    end;
+    FillChar(LenBuf, SizeOf(LenBuf), 0);
+    if not FProcessController.ReadMemory(
+         RBP + QWord(Int64(VarInfo.CompanionData)),
+         FDebugInfoReader.GetPointerSize, LenBuf) then
+    begin
+      WriteLn('[ERROR] Failed to read open-array length');
+      Exit;
+    end;
+    if FDebugInfoReader.GetPointerSize = 4 then
+      UpperBound := PLongInt(@LenBuf)^
+    else
+      UpperBound := PInt64(@LenBuf)^;
+    LowerBound := 0;
+    BaseAddr := DynPtr;
+  end
+  else if TypeInfo.IsDynamic then
   begin
     { Dynamic array: BaseAddr is the slot holding the data pointer.
       Dereference it, then take the element count from the Int32 at

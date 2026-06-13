@@ -350,7 +350,7 @@ end;
 
 === Array Type (recArray = 7)
 
-Static or dynamic array. The `IsDynamic` flag determines the runtime layout.
+Static, dynamic, or open array. The `ArrayKind` byte determines the runtime layout.
 
 [source,pascal]
 ----
@@ -358,10 +358,10 @@ TDefArray = packed record
   TypeID: TTypeID;        // 4 bytes
   ElementTypeID: TTypeID; // 4 bytes — type of each element
   Dimensions: Byte;       // 1 byte — number of dimensions
-  IsDynamic: Byte;        // 1 byte — 1=dynamic, 0=static
+  ArrayKind: Byte;        // 1 byte — 0=static, 1=dynamic, 2=open-array
   NameLen: TNameLen;      // 2 bytes
   // Followed by: Name (NameLen bytes)
-  // If IsDynamic=0: followed by Dimensions × TArrayBound records
+  // If ArrayKind=0 (static): followed by Dimensions × TArrayBound records
 end;
 // Fixed part: 12 bytes
 
@@ -370,6 +370,27 @@ TArrayBound = record
   UpperBound: Int64;  // 8 bytes
 end;
 // Size: 16 bytes per dimension
+----
+
+[NOTE]
+====
+The `ArrayKind` byte occupies the position historically named `IsDynamic`
+(values 0 and 1 are unchanged), so older readers that treat it as a boolean
+still classify static and dynamic arrays correctly; they merely fail to
+recognise `ArrayKind=2` as a distinct kind.
+
+`ArrayKind = 2` (open array) is a *Blaise extension* to the OPDF format.
+FPC's `dbgopdf.pas` has no concept of an open-array parameter: it classifies
+the parameter's array def with `is_dynamic_array`, which is false for an open
+array, so FPC emits it as a *static* array with bogus bounds taken from the
+def's (sentinel) `highrange`. The Blaise compiler instead emits `ArrayKind=2`
+and pairs it with an open-array location expression (`LocationExpr = 5`) on the
+variable record (see <<location-expressions>>), because an open array is a
+`(data pointer, high index)` pair on the stack with no heap header — its length
+cannot be read from `data − 4` the way a dynamic array's can.
+====
+
+[source,pascal]
 ----
 
 .Static array runtime layout
@@ -407,6 +428,22 @@ derives them from the live header rather than from `TArrayBound`
 records, which are present only for static arrays.
 
 A nil dynamic array has Pointer = 0.
+
+.Open array runtime layout (`ArrayKind = 2`)
+
+An open-array parameter (`procedure P(a: array of T)`) is *not* a heap
+object. It is passed as two adjacent stack slots — a data pointer and a high
+index — with no reference-count/length header:
+
+----
+Data slot:      [Pointer: 8 bytes]  -> Element 0, Element 1, ... (raw, no header)
+Companion slot: [High index: SizeInt] — Length = High + 1
+----
+
+Because there is no header, the length cannot be read from `data − 4`. The
+companion slot's location is recorded on the variable via the open-array
+location expression (`LocationExpr = 5`); see <<location-expressions>>. The
+effective bounds are `[0, High]`. A nil open array has Pointer = 0.
 
 === Record Type (recRecord = 8)
 
@@ -853,6 +890,7 @@ Rules within a record must be sorted by `CodeOffset` in ascending order. The deb
 
 If no `recUnwindInfo` record covers a given address, the debugger falls back to classic frame-pointer chain walking (`[RBP]` = saved RBP, `[RBP+8]` = return address).
 
+[[location-expressions]]
 == Location Expressions
 
 Location expressions encode where a variable resides at runtime. The `LocationExpr` byte in `recLocalVar` selects the expression type; the bytes that follow are the expression operands.
@@ -881,7 +919,11 @@ Location expressions encode where a variable resides at runtime. The `LocationEx
 |TLS-relative (thread-local)
 |`SmallInt` (2 bytes): signed offset from the thread-local storage base
 
-|`5..255`
+|`5`
+|Open-array (current frame)
+|Two `SmallInt` (4 bytes): the data-pointer slot offset, then the companion `_high` slot offset
+
+|`6..255`
 |Reserved
 |Reserved for register-based, multi-level nesting, or complex expressions
 |===
@@ -927,6 +969,25 @@ effective_address = tls_base + SignExtend(LocationData)
 ----
 
 NOTE: The TLS base retrieval is platform-specific. On Linux x86_64, it is read via `PTRACE_PEEKUSER` at the `fs_base` offset. Other platforms require platform-specific implementations.
+
+.Open-array addressing (`LocationExpr = 5`)
+Emitted for open-array parameters (`array of T`), paired with an array type
+record whose `ArrayKind = 2`. The location carries two `SmallInt` operands:
+the data-pointer slot offset (`LocationData`) and the companion `_high` slot
+offset (`CompanionData`). The data slot holds a pointer to the raw elements
+(no heap header); the companion slot holds the high index:
+
+----
+data_slot         = RBP + SignExtend(LocationData)
+high_slot         = RBP + SignExtend(CompanionData)
+effective_address = *(data_slot)        // base of element 0
+length            = *(high_slot) + 1
+----
+
+The debugger must read the length from the companion slot, *not* from
+`*(data_slot) − 4`: an open array has no reference-count/length header. This
+is the one location expression whose record carries two offset operands rather
+than one (4 trailing bytes instead of 2).
 
 == Platform-Specific Details
 

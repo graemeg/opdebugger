@@ -263,13 +263,26 @@ procedure DumpLocalVar(Stream: TStream);
 var
   Def: TDefLocalVar;
   LocData: SmallInt;
+  Companion: SmallInt;
   Name: String;
 begin
   Stream.Read(Def, SizeOf(Def));
   Stream.Read(LocData, 2);
-  Name := ReadString(Stream, Def.NameLen);
-  WriteLn(Format('    TypeID=%d ScopeID=0x%x LocExpr=%d DeclIdx=%d LocData=%d Name="%s"',
-    [Def.TypeID, Def.ScopeID, Def.LocationExpr, Def.DeclIndex, LocData, Name]));
+  { LocationExpr=5 (open-array): a trailing SmallInt holds the companion
+    '_high' slot RBP offset.  Read it so the stream stays aligned. }
+  if Def.LocationExpr = 5 then
+  begin
+    Stream.Read(Companion, 2);
+    Name := ReadString(Stream, Def.NameLen);
+    WriteLn(Format('    TypeID=%d ScopeID=0x%x LocExpr=%d DeclIdx=%d LocData=%d Companion=%d Name="%s"',
+      [Def.TypeID, Def.ScopeID, Def.LocationExpr, Def.DeclIndex, LocData, Companion, Name]));
+  end
+  else
+  begin
+    Name := ReadString(Stream, Def.NameLen);
+    WriteLn(Format('    TypeID=%d ScopeID=0x%x LocExpr=%d DeclIdx=%d LocData=%d Name="%s"',
+      [Def.TypeID, Def.ScopeID, Def.LocationExpr, Def.DeclIndex, LocData, Name]));
+  end;
 end;
 
 procedure DumpParameter(Stream: TStream);
