@@ -40,6 +40,12 @@ type
 
     FQuiet: Boolean;
     FBatch: Boolean;
+    { True when output is being consumed by a machine rather than shown to a
+      person: --batch, or a --source script driving the session.  In this mode
+      the startup banner and the '(pdr) ' prompt are suppressed (matching GDB's
+      batch mode), so captured/piped output carries only command results.  Use
+      'pdr --version' to stamp the version into a log. }
+    FNonInteractive: Boolean;
 
     { Pending input lines for the current driver (a --source script).  When
       non-empty, NextInputLine pulls from here so that multi-line sub-blocks
@@ -350,7 +356,8 @@ begin
       Line := Trim(Line);
       if (Line = '') or (Line[1] = '#') then
         Continue;
-      WriteLn('(pdr) ', Line);
+      if not FNonInteractive then
+        WriteLn('(pdr) ', Line);
       if not ProcessCommand(Line) then
       begin
         Result := False;
@@ -1081,7 +1088,11 @@ var
   CmdLine: String;
   I: Integer;
 begin
-  if not FQuiet then
+  { Batch mode, or a --source script driving the session, is non-interactive:
+    suppress banner and prompt so captured output is just command results. }
+  FNonInteractive := FBatch or (Length(SourceFiles) > 0);
+
+  if not (FQuiet or FNonInteractive) then
   begin
     WriteLn('PDR (Pascal Debug Reference) ', PDR_VERSION);
     WriteLn('Copyright (c) 2025-2026 Graeme Geldenhuys');
@@ -1175,7 +1186,8 @@ begin
   // Execute -ex commands
   for I := 0 to High(ExCommands) do
   begin
-    WriteLn('(pdr) ', ExCommands[I]);
+    if not FNonInteractive then
+      WriteLn('(pdr) ', ExCommands[I]);
     if not ProcessCommand(ExCommands[I]) then
     begin
       if FBatch then
@@ -1187,7 +1199,7 @@ begin
   if FBatch then
     Exit;
 
-  if not FQuiet then
+  if not (FQuiet or FNonInteractive) then
   begin
     WriteLn;
     WriteLn('Type "help" for available commands');
