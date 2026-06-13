@@ -1,0 +1,5 @@
+OpenArr = array of Integer (Length=3) = [1, 2, 3]
+OpenArr[0] = 1
+OpenArr[1] = 2
+OpenArr[2] = 3
+DynArr = array of Integer (Length=3) = [1, 2, 3]

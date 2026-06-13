@@ -1,0 +1,61 @@
+= PDR Blaise Integration Tests
+
+Launch-mode integration tests whose programs are compiled with the *Blaise*
+compiler (`--backend native --debug-opdf`), the companion to `../integration`
+(the FPC suite).
+
+== Why two suites
+
+The two directories test different things:
+
+`integration-blaise/` (this suite):: Verifies the *toolchain works* —
+Blaise compiles, emits OPDF, and pdr debugs the result.  This is where new
+OPDF features are tested.  It is the primary, growing suite, and it dogfoods
+the native backend + OPDF emitter + debugger on every run.
+
+`../integration/` (FPC suite):: Frozen *interop conformance backstop*.  It
+verifies pdr can still debug *FPC-compiled* binaries, including the legacy
+type zoo Blaise deliberately dropped — `ShortString`, `AnsiString`,
+`WideString`, `UnicodeString`, stack-based objects.  Those types have no
+Blaise expression, so they cannot be ported here; they stay in the FPC suite
+to keep the FPC-shaped reader paths (e.g. the `DynArrayLen32`-clear length
+convention) under test.
+
+The split is structural on purpose: one suite asserts "the toolchain works",
+the other asserts "the reader still speaks legacy OPDF".
+
+== Test format
+
+Each test is a triple sharing a base name:
+
+`<name>.pas`:: A Blaise program.  Mind the dialect: 0-based strings and
+indexing, a single UTF-8 string type, no inline `var`, `Self.Method` for
+recursion.  Use *multi-character* variable names — the shared output filter
+drops single-letter names to skip incidental `WriteLn` output.
+
+`<name>.commands`:: pdr commands piped on stdin (e.g. `break`, `continue`,
+`print`).
+
+`<name>.expected`:: The filtered, address-normalised baseline.  These are
+written for Blaise semantics and are *not* copies of the FPC suite's
+baselines — 0-based indexing and the single string type change the printed
+output even for an otherwise-equivalent program.
+
+== Running
+
+----
+bash run_tests.sh                    # all tests
+bash run_tests.sh test_01_open_array # one test
+----
+
+The compiler is located via `$BLAISE` or `$BLAISE_ROOT` (default
+`/data/devel/new-pascal-compiler`).  Build it first if needed:
+
+----
+pasbuild compile -m blaise-compiler --compiler compiler/target/blaise
+----
+
+== Regenerating a baseline
+
+Run the test once without an `.expected` file; the harness writes
+`<name>.actual`.  Review it, then copy it to `<name>.expected`.

@@ -1,0 +1,9 @@
+run
+break test_01_open_array.pas:20
+continue
+print OpenArr
+print OpenArr[0]
+print OpenArr[1]
+print OpenArr[2]
+print DynArr
+quit
