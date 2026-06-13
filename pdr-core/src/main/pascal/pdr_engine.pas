@@ -2449,7 +2449,9 @@ begin
     Exit;
   end;
 
-  ElemSize := ElemTypeInfo.Size;
+  { A nested static-array element reports Size=0; compute its true storage
+    size (bounds × element) so multi-dimensional subscripts stride correctly. }
+  ElemSize := FTypeSystem.TypeStorageSize(ElemTypeInfo);
   if ElemSize = 0 then ElemSize := 1;
 
   LowerBound := 0;

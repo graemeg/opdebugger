@@ -170,6 +170,13 @@ type
     constructor Create(AProcessController: IProcessController; ADebugInfoReader: IDebugInfoReader);
     destructor Destroy; override;
 
+    { Byte size of a type's storage when it is an element of an enclosing
+      aggregate.  Most types carry a fixed Size; a STATIC array reports
+      Size=0 (the recArray record stores no size), so compute it from its
+      bounds × element size, recursing for nested static arrays.  Dynamic /
+      open arrays are pointer-sized.  Returns 0 for variable/unsized types. }
+    function TypeStorageSize(const TypeInfo: TTypeInfo): Cardinal;
+
     { Register a type evaluator }
     procedure RegisterEvaluator(Evaluator: ITypeEvaluator);
 
@@ -792,7 +799,9 @@ begin
   BoundsStr := '[' + IntToStr(TypeInfo.Bounds[0].LowerBound) + '..' +
                IntToStr(TypeInfo.Bounds[0].UpperBound) + ']';
 
-  ElementSize := ElementTypeInfo.Size;
+  { Element stride: a static-array element (nested array) reports Size=0, so
+    compute its true storage size from bounds × element. }
+  ElementSize := TypeSystem.TypeStorageSize(ElementTypeInfo);
   if ElementSize = 0 then ElementSize := 1;
 
   { Read and format elements }
@@ -1404,6 +1413,36 @@ begin
   FEvalDepth := 0;
   FOverrideRBP := 0;
   FOverrideRIP := 0;
+end;
+
+function TTypeSystem.TypeStorageSize(const TypeInfo: TTypeInfo): Cardinal;
+var
+  ElemInfo: TTypeInfo;
+  Count: Int64;
+begin
+  { Dynamic / open arrays are pointer-sized in their enclosing storage. }
+  if (TypeInfo.Category = tcArray) and TypeInfo.IsDynamic then
+  begin
+    Result := FDebugInfoReader.GetPointerSize;
+    if Result = 0 then Result := 8;
+    Exit;
+  end;
+
+  { Static array: bounds[0] count × element storage size (recurses for
+    nested static arrays, e.g. array[a,b] => array of array). }
+  if (TypeInfo.Category = tcArray) and (Length(TypeInfo.Bounds) > 0) then
+  begin
+    Count := TypeInfo.Bounds[0].UpperBound - TypeInfo.Bounds[0].LowerBound + 1;
+    if Count < 0 then Count := 0;
+    if FDebugInfoReader.FindType(TypeInfo.ElementTypeID, ElemInfo) then
+      Result := Cardinal(Count) * TypeStorageSize(ElemInfo)
+    else
+      Result := 0;
+    Exit;
+  end;
+
+  { Scalars, records, etc. carry a fixed size. }
+  Result := TypeInfo.Size;
 end;
 
 function TTypeSystem.GetEffectiveRBP: QWord;
