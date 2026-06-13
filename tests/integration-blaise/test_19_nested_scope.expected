@@ -1,0 +1,4 @@
+SeenByBar = 1
+BarLocal = 2
+SeenByBar = 1
+NotSeenByBar = 99

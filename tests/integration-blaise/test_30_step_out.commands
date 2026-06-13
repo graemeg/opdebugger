@@ -1,0 +1,6 @@
+run
+break test_30_step_out.pas:16
+continue
+step
+finish
+quit

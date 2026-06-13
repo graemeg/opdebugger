@@ -1,0 +1,5 @@
+run
+break test_27_step_into.pas:16
+continue
+step
+quit

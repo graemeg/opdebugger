@@ -1,0 +1,8 @@
+LocalInner = 45
+#1  Outer at test_32_frame_navigation.pas:16
+LocalOuter = 15
+#2  main at test_32_frame_navigation.pas:20
+#1  Outer at test_32_frame_navigation.pas:16
+LocalOuter = 15
+#0  Inner at test_32_frame_navigation.pas:8
+LocalInner = 45

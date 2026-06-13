@@ -63,6 +63,7 @@ filter_output() {
     sed -E 's/ \(0x[0-9A-Fa-f ]+\)//' | \
     sed -E 's/\(\$[0-9A-Fa-f]+\)/(<ptr>)/' | \
     grep -E '^(([A-Za-z(][A-Za-z0-9_.]+(\[[0-9]+\])? = |[-A-Za-z(][A-Za-z0-9_.]+[A-Za-z0-9_. +*/()<>-]*= (-?[0-9]|True|False|nil|'"'"'|\$))|(\[INFO\] )?[Ss]tepped to line:|(\[INFO\] )?[Rr]eturned to:|\[CALLSTACK\]|#[0-9]+ |Exception: [A-Za-z]+ —|(=>|  ) +[0-9]+($|  ))' | \
+    grep -v '<unknown>' | \
     sed 's/^\[INFO\] //' || true
 }
 
