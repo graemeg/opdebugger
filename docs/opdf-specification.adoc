@@ -604,16 +604,33 @@ FPC packs sets into one of two physical layouts depending on the element ordinal
 |===
 | `SizeInBytes` | Form | Bit-to-ordinal mapping
 
-| 1, 2 or 4
-| **Small set.** Storage is shifted so bit 0 of byte 0 corresponds to ordinal `LowerBound`. Used when the element range fits in 32 bits after shifting.
+| 1, 2, 4 or 8
+| **Small set.** Storage is a single 1/2/4/8-byte machine word, shifted so bit 0 of byte 0 corresponds to ordinal `LowerBound`. Used when the element range fits in the word after shifting.
 | Bit `B` ↔ ordinal `LowerBound + B`
 
-| 32
-| **Big set.** Storage is a flat 256-bit field where bit `N` corresponds to raw ordinal `N`. Bits below `LowerBound` are reserved and must be ignored. Used whenever any element ordinal is ≥ 32 or the shifted range exceeds 32 bits.
+| > 8 (up to 32)
+| **Big set.** Storage is a flat byte-array bitmap where bit `N` corresponds to raw ordinal `N`. Bits below `LowerBound` are reserved and must be ignored. Used whenever the element range cannot fit a machine word. The byte length is exactly the value of `SizeInBytes` — consumers must read that many bytes and must NOT assume a fixed 32 (the producer may emit the minimal `ceil(maxOrdinal+1 / 8)` rounded up).
 | Bit `B` ↔ ordinal `B` (raw); `LowerBound` is metadata only
 |===
 
 In both forms, bit position `B` is counted from the least significant bit of byte 0, ascending through the bytes of the storage. Member names are obtained by looking up the resolved ordinal in the base enum type's `recEnum` record.
+
+NOTE: A consumer must always size its read of a set *value* by this record's
+`SizeInBytes`, not by a machine word.  A big set value can occupy up to 32 bytes;
+reading a fixed 8 bytes would truncate it.
+
+[NOTE]
+.Blaise producer specifics
+====
+The Blaise compiler emits set types as follows (see `uDebugOPDF.EmitSet`):
+
+* `SizeInBytes` is the type's `RawSize()`: 4 for ≤32 members, 8 for 33–64
+  members, and `ceil(N/8)` rounded up to 8 for 65–256 members ("jumbo" sets,
+  e.g. 16 bytes for an 80-member enum, 32 for 256).  It is therefore a big set
+  for any value > 8, not only 32.
+* `LowerBound` is always 0 — Blaise does not apply the small-set base shift;
+  bit `N` maps to raw ordinal `N` in every form.
+====
 
 .Example 1: small set — `TDaySet = set of TDays` where `TDays = (Mon, Tue, Wed, Thu, Fri, Sat, Sun)`
 

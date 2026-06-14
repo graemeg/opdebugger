@@ -1282,10 +1282,11 @@ function TSetEvaluator.Evaluate(const VarInfo: TVariableInfo;
   const TypeInfo: TTypeInfo; ProcessController: IProcessController;
   TypeSystem: TTypeSystem): TVariableValue;
 var
-  { FPC packs sets into 1, 2, 4 or 32 bytes depending on the element
-    ordinal range. Allocate dynamically to cover the 32-byte "big set"
-    form used when the lower bound is non-zero or element values reach
-    or exceed 32. }
+  { Sets are packed into a small machine word (1/2/4/8 bytes) or, for a wider
+    element range, a flat byte-array bitmap of up to 32 bytes ("big set").
+    FPC uses 1/2/4 or 32; Blaise uses 4/8 or the minimal ceil(N/8)-rounded
+    byte count (e.g. 16 for an 80-member enum).  The buffer is sized from
+    TypeInfo.Size (the recSet SizeInBytes), so both producers are handled. }
   Buffer: array of Byte;
   BaseTypeInfo: TTypeInfo;
   HasBaseEnum: Boolean;
@@ -1331,10 +1332,13 @@ begin
     BitIdx  := BitNum mod 8;
     if (Buffer[ByteIdx] and (1 shl BitIdx)) <> 0 then
     begin
-      { FPC stores small sets (1/2/4 bytes) shifted so bit 0 = LowerBound,
-        but big sets (32 bytes) store the raw ordinal as the bit index
-        with bits below LowerBound left unused. }
-      if TypeInfo.Size >= 32 then
+      { Small sets (a single 1/2/4/8-byte word) are shifted so bit 0 =
+        LowerBound; big sets (a byte-array bitmap, any size > 8 bytes) store
+        the raw ordinal as the bit index with bits below LowerBound unused.
+        The threshold is "> 8 bytes", not "= 32": a Blaise jumbo set emits the
+        minimal ceil(N/8)-rounded byte count (e.g. 16 for an 80-member enum),
+        so big sets are not always exactly 32 bytes. }
+      if TypeInfo.Size > 8 then
         OrdValue := BitNum
       else
         OrdValue := TypeInfo.SetLowerBound + BitNum;
