@@ -523,7 +523,8 @@ begin
 end;
 
 function FormatInjectedReturnValue(RetVal: QWord; TypeID: TTypeID;
-  IsManaged: Boolean; ProcessController: IProcessController;
+  IsManaged: Boolean; RetIsDirectPtr: Boolean;
+  ProcessController: IProcessController;
   TypeSystem: TTypeSystem): String;
 var
   PropTypeInfo: TTypeInfo;
@@ -539,10 +540,19 @@ begin
   if not TypeSystem.FDebugInfoReader.FindType(TypeID, PropTypeInfo) then
     Exit;
 
-  if IsManaged and (PropTypeInfo.Category = tcAnsiString) then
+  if IsManaged and (PropTypeInfo.Category in
+       [tcAnsiString, tcUtf8String, tcUnicodeString]) then
   begin
-    { RetVal is the address of the result buffer, read the AnsiString pointer from it }
-    if not ReadPointerValue(ProcessController, RetVal,
+    { Resolve the string DATA POINTER.  Two ABIs (see ResolveClassProperty):
+        * RetIsDirectPtr (Blaise tcUtf8String): RetVal IS the data pointer
+          (returned in %rax) — use it directly.
+        * otherwise (FPC AnsiString/UnicodeString sret): RetVal is the address
+          of the result buffer; read the pointer FROM it.
+      All three categories then share the same header layout (length at the
+      compiler-supplied StrLengthOffset). }
+    if RetIsDirectPtr then
+      StringPtr := RetVal
+    else if not ReadPointerValue(ProcessController, RetVal,
          TypeSystem.FDebugInfoReader.GetPointerSize, StringPtr) then
       Exit;
     if StringPtr = 0 then
@@ -1154,7 +1164,10 @@ begin
     if TargetValue.IsValid then
       Result.Value := '^' + TargetValue.Value + ' (@$' + IntToHex(PtrValue, 16) + ')'
     else
-      Result.Value := '@$' + IntToHex(PtrValue, 16);
+    begin
+      Result.Value := '<error: unreadable memory at @$' + IntToHex(PtrValue, 16) + '>';
+      Exit;
+    end;
   end
   else
     Result.Value := '@$' + IntToHex(PtrValue, 16);
@@ -1495,6 +1508,7 @@ var
   PropVarInfo: TVariableInfo;
   FuncInfo: TFunctionInfo;
   IsManaged: Boolean;
+  RetIsDirectPtr: Boolean;
   RetVal: QWord;
 begin
   Result.IsValid := False;
@@ -1528,14 +1542,35 @@ begin
               if (Prop.ReadMethodName <> '') and
                  FDebugInfoReader.FindFunctionByName(Prop.ReadMethodName, FuncInfo) then
               begin
+                { Two distinct managed-return ABIs, chosen by category:
+
+                  * FPC AnsiString/UnicodeString return through an implicit
+                    result-buffer (sret) pointer in %rsi.  InjectCall must
+                    allocate that buffer (ManagedReturn=True) and hands back its
+                    address; FormatInjectedReturnValue reads the string pointer
+                    FROM the buffer.
+
+                  * Blaise UTF-8 string (tcUtf8String) returns the DATA POINTER
+                    directly in %rax — no sret buffer.  Pass ManagedReturn=False
+                    (capture %rax) and FormatInjectedReturnValue treats RetVal
+                    AS the string pointer.  Forcing the FPC sret path here read
+                    back an empty string (the Blaise callee never writes the
+                    buffer). }
                 IsManaged := False;
+                RetIsDirectPtr := False;
                 if FDebugInfoReader.FindType(Prop.TypeID, PropTypeInfo) then
-                  IsManaged := PropTypeInfo.Category in [tcAnsiString, tcUnicodeString, tcArray];
-                if FProcessController.InjectCall(FuncInfo.LowPC, InstancePtr, IsManaged, RetVal) then
+                begin
+                  IsManaged := PropTypeInfo.Category in
+                    [tcAnsiString, tcUtf8String, tcUnicodeString, tcArray];
+                  RetIsDirectPtr := PropTypeInfo.Category in
+                    [tcUtf8String, tcArray];
+                end;
+                if FProcessController.InjectCall(FuncInfo.LowPC, InstancePtr,
+                     IsManaged and not RetIsDirectPtr, RetVal) then
                 begin
                   Result.IsValid := True;
                   Result.Value := FormatInjectedReturnValue(RetVal, Prop.TypeID,
-                    IsManaged, FProcessController, Self);
+                    IsManaged, RetIsDirectPtr, FProcessController, Self);
                 end
                 else
                 begin
