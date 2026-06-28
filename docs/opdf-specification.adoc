@@ -203,7 +203,8 @@ TOPDFRecordType = (
   recClassVar      = 21,  // Class variable (static field)
   recClassConst    = 22,  // Class constant (embedded value)
   recUtf8Str       = 23,  // UTF-8 string (Blaise-specific)
-  recUnwindInfo    = 24   // Per-function unwind rules for stack walking
+  recUnwindInfo    = 24,  // Per-function unwind rules for stack walking
+  recRuntimeHelper = 25   // RTL entry point the debugger may inject
 );
 ----
 
@@ -906,6 +907,32 @@ return addr = [CFA - 8]         (uwRetAddr_CFA, operand=-8)
 Rules within a record must be sorted by `CodeOffset` in ascending order. The debugger applies all rules whose `CodeOffset` ≤ current instruction offset, with later rules overriding earlier ones. This handles the prologue/epilogue transitions where the CFA register changes from RSP to RBP and back.
 
 If no `recUnwindInfo` record covers a given address, the debugger falls back to classic frame-pointer chain walking (`[RBP]` = saved RBP, `[RBP+8]` = return address).
+
+=== Runtime Helper (recRuntimeHelper = 25)
+
+Names a single RTL entry point that the debugger may inject a call to, identified by a stable `Kind` ordinal plus its link-time address. This exists because the debugger sometimes injects RTL calls of its own — for example, releasing a `+1` reference-counted transient that an injected property getter allocated. The producer emits at most one record per kind, once per binary (the program object), and the helpers are global RTL symbols rather than per-unit.
+
+[source,pascal]
+----
+TRuntimeHelperKind = (
+  rhkStringRelease   = 0,  // void _StringRelease(ptr)   — release a +1 string transient
+  rhkDynArrayRelease = 1   // void _DynArrayRelease(ptr)  — release a +1 dynarray transient
+);
+
+TDefRuntimeHelper = packed record
+  Kind: Byte;     // 1 byte — TRuntimeHelperKind
+  Address: QWord; // 8 bytes — link-time entry-point address
+end;
+// Total: 9 bytes
+----
+
+`Address` is subject to the same ASLR/PIE slide as every other OPDF address: the runtime address is `Address + Slide`.
+
+The keying is deliberately by `Kind` ordinal rather than by the mangled symbol name. This keeps the debug-info contract stable across a rename of the underlying RTL routine, and — unlike modelling the helpers as `recFunctionScope` records — keeps them out of the function namespace so they never appear as breakpoint or call-stack targets (the debugger only ever *injects* them, never breaks on them).
+
+Each helper takes a single pointer argument in the first integer-argument register (`RDI` on x86_64) and returns nothing. To release a transient, the debugger injects a call with the transient's pointer as that argument.
+
+A reader that finds no matching `recRuntimeHelper` (an older producer) must degrade gracefully: skip the injected release, accepting that the transient leaks in the debuggee's leak report, while the value displayed to the user remains correct.
 
 [[location-expressions]]
 == Location Expressions

@@ -99,6 +99,12 @@ type
     FLocalVariables: TFPHashList;   // ScopeID -> TList of TLocalVariableInfo
     FConstants: TFPHashList;         // Constant name -> TConstantInfo
     FUnwindInfos: TFPList;           // List of PUnwindInfoEntry (sorted by LowPC)
+    { RTL-helper address table, indexed by Ord(TRuntimeHelperKind).  A small
+      fixed set keyed by ordinal — the producer emits at most one record per
+      kind.  FRuntimeHelperSet[k] is True once a recRuntimeHelper for kind k
+      has been loaded; the address is slide-adjusted in SetSlide. }
+    FRuntimeHelperAddr: array[TRuntimeHelperKind] of QWord;
+    FRuntimeHelperSet: array[TRuntimeHelperKind] of Boolean;
     FLoaded: Boolean;
     FSlide: QWord;
 
@@ -147,6 +153,8 @@ type
     function FindTypeByName(const Name: String; out TypeInfo: TTypeInfo): Boolean;
     procedure SetSlide(ASlide: QWord);
     function FindUnwindEntry(Address: QWord; out Entry: TUnwindEntry): Boolean;
+    function FindRuntimeHelper(Kind: TRuntimeHelperKind;
+      out Address: QWord): Boolean;
   end;
 
 implementation
@@ -352,6 +360,10 @@ begin
   for I := 0 to FUnwindInfos.Count - 1 do
     Dispose(PUnwindInfoEntry(FUnwindInfos[I]));
   FUnwindInfos.Clear;
+
+  // Reset RTL-helper table
+  FillChar(FRuntimeHelperAddr, SizeOf(FRuntimeHelperAddr), 0);
+  FillChar(FRuntimeHelperSet, SizeOf(FRuntimeHelperSet), 0);
 
   SetLength(FCollisionRemap, 0);
   FCollisionCount := 0;
@@ -574,6 +586,7 @@ var
   DefUnwindInfo: TDefUnwindInfo;
   UnwindRules: TUnwindRuleArray;
   PUnwind: PUnwindInfoEntry;
+  DefRuntimeHelper: TDefRuntimeHelper;
   ConstBytes: TBytes;
   ConstName: String;
   PConst: PConstantInfo;
@@ -1225,6 +1238,17 @@ begin
             PUnwind^.HighPC := DefUnwindInfo.HighPC;
             PUnwind^.Rules := UnwindRules;
             FUnwindInfos.Add(PUnwind);
+          end;
+        end;
+
+      recRuntimeHelper:
+        begin
+          if FReader.ReadRuntimeHelper(DefRuntimeHelper) and
+             (DefRuntimeHelper.Kind <= Ord(High(TRuntimeHelperKind))) then
+          begin
+            FRuntimeHelperAddr[TRuntimeHelperKind(DefRuntimeHelper.Kind)] :=
+              DefRuntimeHelper.Address;
+            FRuntimeHelperSet[TRuntimeHelperKind(DefRuntimeHelper.Kind)] := True;
           end;
         end;
 
@@ -1885,6 +1909,7 @@ var
   PScope: PFunctionScope;
   PVar: PVariableInfo;
   Delta: QWord;
+  HK: TRuntimeHelperKind;
 begin
   if ASlide = FSlide then
     Exit;
@@ -1930,6 +1955,11 @@ begin
     PUnwindInfoEntry(FUnwindInfos[I])^.HighPC :=
       PUnwindInfoEntry(FUnwindInfos[I])^.HighPC + Delta;
   end;
+
+  { Adjust RTL-helper addresses }
+  for HK := Low(TRuntimeHelperKind) to High(TRuntimeHelperKind) do
+    if FRuntimeHelperSet[HK] then
+      FRuntimeHelperAddr[HK] := FRuntimeHelperAddr[HK] + Delta;
 end;
 
 function TOPDFReaderAdapter.FindUnwindEntry(Address: QWord;
@@ -1990,6 +2020,15 @@ begin
       Exit;
     end;
   end;
+end;
+
+function TOPDFReaderAdapter.FindRuntimeHelper(Kind: TRuntimeHelperKind;
+  out Address: QWord): Boolean;
+begin
+  Address := 0;
+  Result := FLoaded and FRuntimeHelperSet[Kind];
+  if Result then
+    Address := FRuntimeHelperAddr[Kind];
 end;
 
 end.

@@ -180,6 +180,7 @@ type
                             out Name: String): Boolean;
     function ReadUnwindInfo(out Def: TDefUnwindInfo;
                             out Rules: TUnwindRuleArray): Boolean;
+    function ReadRuntimeHelper(out Def: TDefRuntimeHelper): Boolean;
 
     { Skip current record (for unsupported types) }
     procedure SkipRecord(const RecHeader: TOPDFRecordHeader);
@@ -1469,6 +1470,15 @@ begin
   for I := 0 to Def.RuleCount - 1 do
     FStream.Read(Rules[I], SizeOf(TUnwindRule));
 
+  Result := True;
+end;
+
+function TOPDFReader.ReadRuntimeHelper(out Def: TDefRuntimeHelper): Boolean;
+begin
+  Result := False;
+  if FStream.Position + SizeOf(TDefRuntimeHelper) > FStream.Size then
+    Exit;
+  FStream.Read(Def, SizeOf(Def));
   Result := True;
 end;
 

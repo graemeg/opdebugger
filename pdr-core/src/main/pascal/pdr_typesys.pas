@@ -166,6 +166,13 @@ type
     { Resolve a property name on a class instance, walking the inheritance chain }
     function ResolveClassProperty(const ClassTypeInfo: TTypeInfo;
       InstancePtr: QWord; const PropName: String): TVariableValue;
+
+    { Inject a call to the RTL release routine for a +1 transient an injected
+      property getter returned (direct-ptr managed return).  Maps the property
+      category to a TRuntimeHelperKind, resolves the routine's address from the
+      OPDF, and injects release(Ptr).  A no-op when the binary carries no
+      matching recRuntimeHelper. }
+    procedure ReleaseInjectedTransient(Category: TTypeCategory; Ptr: QWord);
   public
     constructor Create(AProcessController: IProcessController; ADebugInfoReader: IDebugInfoReader);
     destructor Destroy; override;
@@ -1497,6 +1504,30 @@ begin
   FEvaluators.Add(Evaluator);
 end;
 
+procedure TTypeSystem.ReleaseInjectedTransient(Category: TTypeCategory;
+  Ptr: QWord);
+var
+  Kind: TRuntimeHelperKind;
+  HelperAddr: QWord;
+  Dummy: QWord;
+begin
+  case Category of
+    tcUtf8String: Kind := rhkStringRelease;
+    tcArray:      Kind := rhkDynArrayRelease;
+  else
+    Exit;  { not a managed direct-ptr category }
+  end;
+
+  if not FDebugInfoReader.FindRuntimeHelper(Kind, HelperAddr) then
+    Exit;  { older binary without the helper table — leave the transient }
+  if HelperAddr = 0 then
+    Exit;
+
+  { release(Ptr): the routine takes its single pointer argument in %rdi, which
+    is exactly where InjectCall puts SelfPtr.  Void return (ManagedReturn=False). }
+  FProcessController.InjectCall(HelperAddr, Ptr, False, Dummy);
+end;
+
 function TTypeSystem.ResolveClassProperty(const ClassTypeInfo: TTypeInfo;
   InstancePtr: QWord; const PropName: String): TVariableValue;
 var
@@ -1571,6 +1602,16 @@ begin
                   Result.IsValid := True;
                   Result.Value := FormatInjectedReturnValue(RetVal, Prop.TypeID,
                     IsManaged, RetIsDirectPtr, FProcessController, Self);
+                  { Release the +1 transient the injected getter allocated.
+                    A direct-ptr (Blaise managed) getter returns a freshly
+                    retained string/dynarray in %rax that the debuggee never
+                    releases — without this it survives to the leak report,
+                    a leak the program itself never incurred.  The release
+                    routine's address comes from the OPDF recRuntimeHelper
+                    table; on older binaries that lack it the call is skipped
+                    (the transient leaks, as before, but display is correct). }
+                  if RetIsDirectPtr and (RetVal <> 0) then
+                    ReleaseInjectedTransient(PropTypeInfo.Category, RetVal);
                 end
                 else
                 begin

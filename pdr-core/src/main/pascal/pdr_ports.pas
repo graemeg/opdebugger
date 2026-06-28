@@ -457,6 +457,13 @@ type
       IsValid=False if no unwind info covers this address (caller should
       fall back to frame-pointer-based walking). }
     function FindUnwindEntry(Address: QWord; out Entry: TUnwindEntry): Boolean;
+
+    { Find the runtime address of an RTL helper the debugger may inject (e.g.
+      _StringRelease).  Returns False when the producer emitted no matching
+      recRuntimeHelper record (older binaries) — callers must degrade
+      gracefully.  The returned address already has the ASLR slide applied. }
+    function FindRuntimeHelper(Kind: TRuntimeHelperKind;
+      out Address: QWord): Boolean;
   end;
 
   { Architecture Adapter Port - Architecture-specific operations }

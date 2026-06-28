@@ -81,7 +81,18 @@ type
     recClassVar      = 21, // Class variable (static field) — owner class TypeID + global address
     recClassConst    = 22, // Class constant — owner class TypeID + embedded value
     recUtf8Str       = 23, // UTF-8 string — data-pointer layout, no code-page or element-size fields
-    recUnwindInfo    = 24  // Per-function unwind rules for stack walking without frame pointers
+    recUnwindInfo    = 24, // Per-function unwind rules for stack walking without frame pointers
+    recRuntimeHelper = 25  // RTL entry point the debugger may inject (e.g. string release)
+  );
+
+  { Runtime-helper kind — identifies which RTL entry point a recRuntimeHelper
+    record names.  Keyed by a stable ordinal rather than the mangled symbol so
+    the debug-info contract survives a rename of the underlying RTL routine.
+    The debugger injects these (it never breaks on them); they are NOT user
+    functions and deliberately stay out of the recFunctionScope namespace. }
+  TRuntimeHelperKind = (
+    rhkStringRelease   = 0,  // void _StringRelease(ptr)   — release a +1 string transient
+    rhkDynArrayRelease = 1   // void _DynArrayRelease(ptr)  — release a +1 dynarray transient
   );
 
   { Constant value kind }
@@ -443,6 +454,15 @@ type
 
   TUnwindRuleArray = array of TUnwindRule;
 
+  { Runtime Helper Definition (recRuntimeHelper = 25)
+    Names a single RTL entry point the debugger may inject a call to, by a
+    stable kind ordinal plus its link-time address.  The address is subject to
+    the same ASLR/PIE slide as every other OPDF address. }
+  TDefRuntimeHelper = packed record
+    Kind: Byte;     // 1 byte — TRuntimeHelperKind
+    Address: QWord; // 8 bytes — link-time entry-point address
+  end;
+
   TEnumMemberArray = array of TEnumMember;
   TInterfaceMethodDescriptorArray = array of TInterfaceMethodDescriptor;
 
@@ -499,6 +519,7 @@ begin
     recClassVar:      Result := 'ClassVar';
     recClassConst:    Result := 'ClassConst';
     recUnwindInfo:    Result := 'UnwindInfo';
+    recRuntimeHelper: Result := 'RuntimeHelper';
     else              Result := 'Unknown';
   end;
 end;

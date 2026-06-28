@@ -25,7 +25,7 @@ uses
 
 const
   OPDF_DUMP_VERSION = {$I version.inc};
-  MAX_REC_TYPE = 24;
+  MAX_REC_TYPE = 25;
 
 type
   TRecordCounts = array[0..MAX_REC_TYPE] of Cardinal;
@@ -94,6 +94,7 @@ begin
   if LName = 'classconst' then Exit(22);
   if LName = 'utf8string' then Exit(23);
   if LName = 'unwindinfo' then Exit(24);
+  if LName = 'runtimehelper' then Exit(25);
   Result := -1;
 end;
 
@@ -469,6 +470,21 @@ begin
   end;
 end;
 
+procedure DumpRuntimeHelper(Stream: TStream);
+var
+  Def: TDefRuntimeHelper;
+  KindStr: String;
+begin
+  Stream.Read(Def, SizeOf(Def));
+  case Def.Kind of
+    Ord(rhkStringRelease):   KindStr := 'StringRelease';
+    Ord(rhkDynArrayRelease): KindStr := 'DynArrayRelease';
+  else
+    KindStr := 'Unknown(' + IntToStr(Def.Kind) + ')';
+  end;
+  WriteLn(Format('    Kind=%s Address=0x%x', [KindStr, Def.Address]));
+end;
+
 procedure DumpUnitDirectory(Stream: TStream);
 var
   UnitCnt: Word;
@@ -663,6 +679,7 @@ begin
           recClassVar:      DumpClassVar(Stream);
           recClassConst:    DumpClassConst(Stream);
           recUnwindInfo:    DumpUnwindInfo(Stream);
+          recRuntimeHelper: DumpRuntimeHelper(Stream);
         else
           { Unknown record type — skip }
         end;
@@ -747,7 +764,8 @@ begin
   WriteLn('  UnicodeString, Pointer, Array, Record, Class, Property,');
   WriteLn('  Method, LocalVar, Parameter, LineInfo, FunctionScope,');
   WriteLn('  Interface, Enum, Set, UnitDirectory, Constant,');
-  WriteLn('  ClassVar, ClassConst, Utf8String, UnwindInfo');
+  WriteLn('  ClassVar, ClassConst, Utf8String, UnwindInfo,');
+  WriteLn('  RuntimeHelper');
 end;
 
 procedure ParseArgs;
