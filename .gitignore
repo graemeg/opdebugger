@@ -54,3 +54,4 @@ backup/
 Thumbs.db
 .directory
 .gstack/
+.ide/

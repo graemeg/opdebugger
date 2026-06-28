@@ -153,6 +153,9 @@ const
 { External ptrace function }
 function ptrace(request: cInt; pid: TPid; addr: Pointer; data: Pointer): cLong; cdecl; external 'c' name 'ptrace';
 
+{ C errno — ptrace is linked from libc, so it sets the C errno, not FPC's internal one }
+function __errno_location: PLongInt; cdecl; external 'c' name '__errno_location';
+
 { External setpgid function }
 function c_setpgid(pid: TPid; pgid: TPid): cInt; cdecl; external 'c' name 'setpgid';
 
@@ -695,12 +698,13 @@ begin
   while Offset < Size do
   begin
     // Read a word from the process memory
+    __errno_location^ := 0;
     Data := ptrace(PTRACE_PEEKDATA, FPID, Pointer(PtrUInt(Address + Offset)), nil);
 
-    if (Data = -1) and (fpgeterrno <> 0) then
+    if (Data = -1) and (__errno_location^ <> 0) then
     begin
       WriteLn(StdErr, '[ERROR] Failed to read memory at $', IntToHex(Address + Offset, 16),
-              ': ', SysErrorMessage(fpgeterrno));
+              ': ', SysErrorMessage(__errno_location^));
       Exit;
     end;
 
@@ -742,10 +746,11 @@ begin
     if Offset + SizeOf(cLong) > Size then
     begin
       // Read existing data
+      __errno_location^ := 0;
       Data := ptrace(PTRACE_PEEKDATA, FPID, Pointer(PtrUInt(Address + Offset)), nil);
-      if (Data = -1) and (fpgeterrno <> 0) then
+      if (Data = -1) and (__errno_location^ <> 0) then
       begin
-        WriteLn(StdErr, '[ERROR] Failed to read memory for partial write: ', SysErrorMessage(fpgeterrno));
+        WriteLn(StdErr, '[ERROR] Failed to read memory for partial write: ', SysErrorMessage(__errno_location^));
         Exit;
       end;
 
@@ -762,7 +767,7 @@ begin
     if ptrace(PTRACE_POKEDATA, FPID, Pointer(PtrUInt(Address + Offset)), Pointer(Data)) = -1 then
     begin
       WriteLn(StdErr, '[ERROR] Failed to write memory at $', IntToHex(Address + Offset, 16),
-              ': ', SysErrorMessage(fpgeterrno));
+              ': ', SysErrorMessage(__errno_location^));
       Exit;
     end;
 
