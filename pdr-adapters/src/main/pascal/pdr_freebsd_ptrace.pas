@@ -7,9 +7,10 @@
 
   Platform-specific process control implementation for FreeBSD using ptrace.
 
-  NOTE: This implementation is currently UNTESTED. It has been written based
-  on FreeBSD kernel documentation and header files. Issues will be addressed
-  once Blaise supports FreeBSD as a compilation target.
+  NOTE: First bring-up in progress on FreeBSD 14.3 (amd64), compiled with
+  FPC.  Memory access and breakpoint patching use PT_IO (arbitrary-length
+  transfers); FreeBSD's PT_READ_D/PT_WRITE_D operate on 4-byte ints and are
+  not used.  The i386 code paths remain untested.
 }
 unit pdr_freebsd_ptrace;
 
@@ -25,7 +26,7 @@ uses
 type
   TBreakpointInfo = record
     Address: QWord;
-    OriginalData: cLong;
+    OriginalData: Byte;   // Original first instruction byte (replaced by INT3)
     Active: Boolean;
   end;
 
@@ -46,11 +47,14 @@ type
     FWatchSlots: array[0..3] of TWatchSlotInfo;
     FLastFiredWatchpoint: Integer;
     FPendingSignal: Integer;
+    FRedirectChildIO: Boolean;     // Redirect child stdin/stdout/stderr to /dev/null
 
     function IsStopSignal(Sig: Integer): Boolean;
     function SignalName(Sig: Integer): String;
     function FindBreakpoint(Address: QWord): Integer;
     function HandleBreakpointHit: Boolean;
+    function ReadCodeByte(Address: QWord; out Value: Byte): Boolean;
+    function WriteCodeByte(Address: QWord; Value: Byte): Boolean;
     function ReadDebugRegister(RegIndex: Integer): QWord;
     function WriteDebugRegister(RegIndex: Integer; Value: QWord): Boolean;
   public
@@ -85,6 +89,7 @@ type
 
     property PID: Integer read FPID;
     property IsAttached: Boolean read FAttached;
+    property RedirectChildIO: Boolean read FRedirectChildIO write FRedirectChildIO;
   end;
 
 {$ENDIF}
@@ -110,6 +115,22 @@ const
   PT_SETREGS    = 34;
   PT_GETDBREGS  = 37;
   PT_SETDBREGS  = 38;
+  { amd64 machine-dependent request: PT_FIRSTMACH (64) + 7, machine/ptrace.h }
+  PT_GETFSBASE  = 71;
+
+  { PT_IO operation codes (struct ptrace_io_desc, sys/ptrace.h) }
+  PIOD_READ_D   = 1;
+  PIOD_WRITE_D  = 2;
+
+  { sysctl MIB for the process VM map (kern.proc.vmmap.<pid>) }
+  CTL_KERN        = 1;
+  KERN_PROC       = 14;
+  KERN_PROC_VMMAP = 32;
+
+  { PATH_MAX on FreeBSD; kve_path is the final field of kinfo_vmentry }
+  FBSD_PATH_MAX = 1024;
+
+  INT3_OPCODE = $CC;
 
   { Signal numbers (FreeBSD — same as POSIX) }
   SIGHUP    = 1;
@@ -191,11 +212,39 @@ type
   end;
   {$ENDIF}
 
-function ptrace(request: cInt; pid: TPid; addr: Pointer; data: cInt): cLong;
+{$PACKRECORDS C}
+type
+  { struct ptrace_io_desc (sys/ptrace.h).  C alignment inserts 4 pad bytes
+    after piod_op on amd64; PACKRECORDS C reproduces that. }
+  TPtraceIODesc = record
+    piod_op: cInt;        { PIOD_READ_D / PIOD_WRITE_D }
+    piod_offs: Pointer;   { child (tracee) address }
+    piod_addr: Pointer;   { parent (tracer) buffer }
+    piod_len: PtrUInt;    { in: requested length; out: bytes transferred }
+  end;
+{$PACKRECORDS DEFAULT}
+
+{ FreeBSD libc: int ptrace(int request, pid_t pid, caddr_t addr, int data).
+  The return type is int — unlike Linux where ptrace returns long.  All
+  memory transfers go through PT_IO, so no caller needs a word-sized result. }
+function ptrace(request: cInt; pid: TPid; addr: Pointer; data: cInt): cInt;
   cdecl; external 'c' name 'ptrace';
 
 function c_setpgid(pid: TPid; pgid: TPid): cInt;
   cdecl; external 'c' name 'setpgid';
+
+function c_sysctl(name: pcint; namelen: cuint; oldp: Pointer;
+  var oldlenp: PtrUInt; newp: Pointer; newlen: PtrUInt): cInt;
+  cdecl; external 'c' name 'sysctl';
+
+{ C errno — ptrace is linked from libc, so it sets the C errno, not FPC's
+  internal one.  FreeBSD libc exposes it via __error (glibc: __errno_location). }
+function __error: PLongInt; cdecl; external 'c' name '__error';
+
+function LibcErrno: LongInt;
+begin
+  Result := __error()^;
+end;
 
 var
   gWaitingPID: TPid = -1;
@@ -221,6 +270,7 @@ begin
   FLastBreakpointAddr := 0;
   FLastFiredWatchpoint := -1;
   FPendingSignal := 0;
+  FRedirectChildIO := False;
   for I := 0 to 3 do
     FWatchSlots[I].Active := False;
 
@@ -276,6 +326,7 @@ var
   Status: cInt;
   Args: array of PChar;
   I: Integer;
+  NullFD: cInt;
 begin
   Result := False;
 
@@ -305,6 +356,19 @@ begin
   if ChildPID = 0 then
   begin
     c_setpgid(0, 0);
+
+    if FRedirectChildIO then
+    begin
+      NullFD := FpOpen('/dev/null', O_RDWR);
+      if NullFD >= 0 then
+      begin
+        FpDup2(NullFD, 0);
+        FpDup2(NullFD, 1);
+        FpDup2(NullFD, 2);
+        if NullFD > 2 then
+          FpClose(NullFD);
+      end;
+    end;
 
     { FreeBSD uses PT_TRACE_ME; addr and data are ignored }
     if ptrace(PT_TRACE_ME, 0, nil, 0) = -1 then
@@ -373,7 +437,7 @@ begin
 
   if ptrace(PT_ATTACH, FPID, nil, 0) = -1 then
   begin
-    WriteLn(StdErr, '[ERROR] Failed to attach to process ', PID, ': ', SysErrorMessage(fpgeterrno));
+    WriteLn(StdErr, '[ERROR] Failed to attach to process ', PID, ': ', SysErrorMessage(LibcErrno));
     FPID := -1;
     Exit;
   end;
@@ -418,7 +482,7 @@ begin
   { FreeBSD PT_DETACH: addr=1 (resume at current PC), data=signal to deliver }
   if ptrace(PT_DETACH, FPID, Pointer(1), 0) = -1 then
   begin
-    WriteLn(StdErr, '[ERROR] Failed to detach from process: ', SysErrorMessage(fpgeterrno));
+    WriteLn(StdErr, '[ERROR] Failed to detach from process: ', SysErrorMessage(LibcErrno));
     Exit;
   end;
 
@@ -464,7 +528,7 @@ begin
     { FreeBSD PT_CONTINUE: addr=1 means resume at current PC, data=signal }
     if ptrace(PT_CONTINUE, FPID, Pointer(1), DataSignal) = -1 then
     begin
-      WriteLn(StdErr, '[ERROR] Failed to continue process: ', SysErrorMessage(fpgeterrno));
+      WriteLn(StdErr, '[ERROR] Failed to continue process: ', SysErrorMessage(LibcErrno));
       Exit;
     end;
 
@@ -591,7 +655,7 @@ begin
     { FreeBSD PT_STEP: addr=1 means resume at current PC, data=signal }
     if ptrace(PT_STEP, FPID, Pointer(1), DataSignal) = -1 then
     begin
-      WriteLn(StdErr, '[ERROR] Failed to single step: ', SysErrorMessage(fpgeterrno));
+      WriteLn(StdErr, '[ERROR] Failed to single step: ', SysErrorMessage(LibcErrno));
       Exit;
     end;
 
@@ -662,13 +726,15 @@ begin
   end;
 end;
 
+{ Memory access uses PT_IO exclusively.  FreeBSD's PT_READ_D/PT_WRITE_D
+  transfer 4-byte ints (unlike Linux's word-sized PTRACE_PEEKDATA), so a
+  word-loop ported from Linux corrupts every transfer.  PT_IO takes an
+  arbitrary length and does the whole copy in one syscall. }
+
 function TFreeBSDPtraceAdapter.ReadMemory(Address: QWord; Size: Cardinal;
   out Buffer): Boolean;
 var
-  P: PByte;
-  Data: cLong;
-  BytesToCopy: Cardinal;
-  Offset: Cardinal;
+  IO: TPtraceIODesc;
 begin
   Result := False;
 
@@ -678,26 +744,27 @@ begin
     Exit;
   end;
 
-  P := @Buffer;
-  Offset := 0;
+  if Size = 0 then
+    Exit(True);
 
-  while Offset < Size do
+  FillChar(IO, SizeOf(IO), 0);
+  IO.piod_op := PIOD_READ_D;
+  IO.piod_offs := Pointer(PtrUInt(Address));
+  IO.piod_addr := @Buffer;
+  IO.piod_len := Size;
+
+  if ptrace(PT_IO, FPID, @IO, 0) = -1 then
   begin
-    Data := ptrace(PT_READ_D, FPID, Pointer(PtrUInt(Address + Offset)), 0);
+    WriteLn(StdErr, '[ERROR] Failed to read memory at $', IntToHex(Address, 16),
+            ': ', SysErrorMessage(LibcErrno));
+    Exit;
+  end;
 
-    if (Data = -1) and (fpgeterrno <> 0) then
-    begin
-      WriteLn(StdErr, '[ERROR] Failed to read memory at $', IntToHex(Address + Offset, 16),
-              ': ', SysErrorMessage(fpgeterrno));
-      Exit;
-    end;
-
-    BytesToCopy := SizeOf(cLong);
-    if Offset + BytesToCopy > Size then
-      BytesToCopy := Size - Offset;
-
-    Move(Data, P[Offset], BytesToCopy);
-    Inc(Offset, SizeOf(cLong));
+  if IO.piod_len <> Size then
+  begin
+    WriteLn(StdErr, '[ERROR] Short memory read at $', IntToHex(Address, 16),
+            ': got ', IO.piod_len, ' of ', Size, ' bytes');
+    Exit;
   end;
 
   Result := True;
@@ -706,9 +773,7 @@ end;
 function TFreeBSDPtraceAdapter.WriteMemory(Address: QWord; Size: Cardinal;
   const Buffer): Boolean;
 var
-  P: PByte;
-  Data: cLong;
-  Offset: Cardinal;
+  IO: TPtraceIODesc;
 begin
   Result := False;
 
@@ -718,36 +783,45 @@ begin
     Exit;
   end;
 
-  P := @Buffer;
-  Offset := 0;
+  if Size = 0 then
+    Exit(True);
 
-  while Offset < Size do
+  FillChar(IO, SizeOf(IO), 0);
+  IO.piod_op := PIOD_WRITE_D;
+  IO.piod_offs := Pointer(PtrUInt(Address));
+  IO.piod_addr := @Buffer;
+  IO.piod_len := Size;
+
+  if ptrace(PT_IO, FPID, @IO, 0) = -1 then
   begin
-    if Offset + SizeOf(cLong) > Size then
-    begin
-      Data := ptrace(PT_READ_D, FPID, Pointer(PtrUInt(Address + Offset)), 0);
-      if (Data = -1) and (fpgeterrno <> 0) then
-      begin
-        WriteLn(StdErr, '[ERROR] Failed to read memory for partial write: ',
-                SysErrorMessage(fpgeterrno));
-        Exit;
-      end;
-      Move(P[Offset], Data, Size - Offset);
-    end
-    else
-      Move(P[Offset], Data, SizeOf(cLong));
+    WriteLn(StdErr, '[ERROR] Failed to write memory at $', IntToHex(Address, 16),
+            ': ', SysErrorMessage(LibcErrno));
+    Exit;
+  end;
 
-    if ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(Address + Offset)), cInt(Data)) = -1 then
-    begin
-      WriteLn(StdErr, '[ERROR] Failed to write memory at $', IntToHex(Address + Offset, 16),
-              ': ', SysErrorMessage(fpgeterrno));
-      Exit;
-    end;
-
-    Inc(Offset, SizeOf(cLong));
+  if IO.piod_len <> Size then
+  begin
+    WriteLn(StdErr, '[ERROR] Short memory write at $', IntToHex(Address, 16),
+            ': wrote ', IO.piod_len, ' of ', Size, ' bytes');
+    Exit;
   end;
 
   Result := True;
+end;
+
+{ Single-byte code patching for INT3 breakpoints.  PT_IO writes through
+  read-only text mappings (proc_rwmem handles the protection), so these
+  are plain 1-byte transfers. }
+
+function TFreeBSDPtraceAdapter.ReadCodeByte(Address: QWord; out Value: Byte): Boolean;
+begin
+  Value := 0;
+  Result := ReadMemory(Address, 1, Value);
+end;
+
+function TFreeBSDPtraceAdapter.WriteCodeByte(Address: QWord; Value: Byte): Boolean;
+begin
+  Result := WriteMemory(Address, 1, Value);
 end;
 
 function TFreeBSDPtraceAdapter.GetRegisters(out Regs: TRegisters): Boolean;
@@ -767,7 +841,7 @@ begin
   { FreeBSD PT_GETREGS: addr is ignored, data points to struct reg }
   if ptrace(PT_GETREGS, FPID, @FreeBSDRegs, 0) = -1 then
   begin
-    WriteLn(StdErr, '[ERROR] Failed to get registers: ', SysErrorMessage(fpgeterrno));
+    WriteLn(StdErr, '[ERROR] Failed to get registers: ', SysErrorMessage(LibcErrno));
     Exit;
   end;
 
@@ -825,7 +899,7 @@ begin
   { Get current registers first to preserve segment registers etc. }
   if ptrace(PT_GETREGS, FPID, @FreeBSDRegs, 0) = -1 then
   begin
-    WriteLn(StdErr, '[ERROR] Failed to get current registers: ', SysErrorMessage(fpgeterrno));
+    WriteLn(StdErr, '[ERROR] Failed to get current registers: ', SysErrorMessage(LibcErrno));
     Exit;
   end;
 
@@ -865,7 +939,7 @@ begin
 
   if ptrace(PT_SETREGS, FPID, @FreeBSDRegs, 0) = -1 then
   begin
-    WriteLn(StdErr, '[ERROR] Failed to set registers: ', SysErrorMessage(fpgeterrno));
+    WriteLn(StdErr, '[ERROR] Failed to set registers: ', SysErrorMessage(LibcErrno));
     Exit;
   end;
 
@@ -880,7 +954,6 @@ var
   BreakpointAddr: QWord;
   Idx: Integer;
   Status: cInt;
-  OrigData, NewData: cLong;
 begin
   Result := False;
 
@@ -929,9 +1002,8 @@ begin
     Exit;
   end;
 
-  { Restore original instruction }
-  if ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(BreakpointAddr)),
-            cInt(FBreakpoints[Idx].OriginalData)) = -1 then
+  { Restore original instruction byte }
+  if not WriteCodeByte(BreakpointAddr, FBreakpoints[Idx].OriginalData) then
   begin
     WriteLn(StdErr, '[ERROR] Failed to restore original instruction');
     Exit;
@@ -953,9 +1025,7 @@ begin
   WriteDebugRegister(6, 0);
 
   { Re-insert the breakpoint }
-  OrigData := ptrace(PT_READ_D, FPID, Pointer(PtrUInt(BreakpointAddr)), 0);
-  NewData := OrigData and cLong($FFFFFFFFFFFFFF00) or $CC;
-  if ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(BreakpointAddr)), cInt(NewData)) = -1 then
+  if not WriteCodeByte(BreakpointAddr, INT3_OPCODE) then
   begin
     WriteLn(StdErr, '[ERROR] Failed to re-insert breakpoint');
     Exit;
@@ -978,9 +1048,7 @@ end;
 
 function TFreeBSDPtraceAdapter.SetBreakpoint(Address: QWord): Boolean;
 var
-  Data: cLong;
-  ModifiedData: cLong;
-  Trap: Byte;
+  OrigByte: Byte;
   Idx: Integer;
   BpInfo: TBreakpointInfo;
 begin
@@ -1002,13 +1070,9 @@ begin
     end
     else
     begin
-      Trap := $CC;
-      ModifiedData := FBreakpoints[Idx].OriginalData;
-      Move(Trap, ModifiedData, 1);
-
-      if ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(Address)), cInt(ModifiedData)) = -1 then
+      if not WriteCodeByte(Address, INT3_OPCODE) then
       begin
-        WriteLn(StdErr, '[ERROR] Failed to reactivate breakpoint: ', SysErrorMessage(fpgeterrno));
+        WriteLn(StdErr, '[ERROR] Failed to reactivate breakpoint at $', IntToHex(Address, 16));
         Exit(False);
       end;
 
@@ -1019,24 +1083,19 @@ begin
     end;
   end;
 
-  Data := ptrace(PT_READ_D, FPID, Pointer(PtrUInt(Address)), 0);
-  if (Data = -1) and (fpgeterrno <> 0) then
+  if not ReadCodeByte(Address, OrigByte) then
   begin
-    WriteLn(StdErr, '[ERROR] Failed to read memory for breakpoint: ', SysErrorMessage(fpgeterrno));
+    WriteLn(StdErr, '[ERROR] Failed to read memory for breakpoint at $', IntToHex(Address, 16));
     Exit;
   end;
 
   BpInfo.Address := Address;
-  BpInfo.OriginalData := Data;
+  BpInfo.OriginalData := OrigByte;
   BpInfo.Active := True;
 
-  ModifiedData := Data;
-  Trap := $CC;
-  Move(Trap, ModifiedData, 1);
-
-  if ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(Address)), cInt(ModifiedData)) = -1 then
+  if not WriteCodeByte(Address, INT3_OPCODE) then
   begin
-    WriteLn(StdErr, '[ERROR] Failed to set breakpoint: ', SysErrorMessage(fpgeterrno));
+    WriteLn(StdErr, '[ERROR] Failed to set breakpoint at $', IntToHex(Address, 16));
     Exit;
   end;
 
@@ -1073,10 +1132,9 @@ begin
     Exit(True);
   end;
 
-  if ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(Address)),
-            cInt(FBreakpoints[Idx].OriginalData)) = -1 then
+  if not WriteCodeByte(Address, FBreakpoints[Idx].OriginalData) then
   begin
-    WriteLn(StdErr, '[ERROR] Failed to remove breakpoint: ', SysErrorMessage(fpgeterrno));
+    WriteLn(StdErr, '[ERROR] Failed to remove breakpoint at $', IntToHex(Address, 16));
     Exit;
   end;
 
@@ -1308,7 +1366,7 @@ const
 var
   SavedRegs, NewRegs, RetRegs: TRegisters;
   SentinelAddr: QWord;
-  OrigData: cLong;
+  OrigByte: Byte;
   NewRSP, ResultBufAddr: QWord;
   ReturnAddr: QWord;
   ZeroBuf: QWord;
@@ -1334,15 +1392,13 @@ begin
 
   SentinelAddr := SavedRegs.RIP;
 
-  OrigData := ptrace(PT_READ_D, FPID, Pointer(PtrUInt(SentinelAddr)), 0);
-  if (OrigData = -1) and (fpgeterrno <> 0) then
+  if not ReadCodeByte(SentinelAddr, OrigByte) then
   begin
     WriteLn(StdErr, '[ERROR] InjectCall: failed to read memory at sentinel');
     Exit;
   end;
 
-  if ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(SentinelAddr)),
-            cInt(OrigData and cLong($FFFFFFFFFFFFFF00) or $CC)) = -1 then
+  if not WriteCodeByte(SentinelAddr, INT3_OPCODE) then
   begin
     WriteLn(StdErr, '[ERROR] InjectCall: failed to write INT3 sentinel');
     Exit;
@@ -1359,7 +1415,7 @@ begin
     if not WriteMemory(ResultBufAddr, 8, ZeroBuf) then
     begin
       WriteLn(StdErr, '[ERROR] InjectCall: failed to zero result buffer');
-      ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(SentinelAddr)), cInt(OrigData));
+      WriteCodeByte(SentinelAddr, OrigByte);
       Exit;
     end;
   end;
@@ -1368,7 +1424,7 @@ begin
   if not WriteMemory(NewRSP, 8, ReturnAddr) then
   begin
     WriteLn(StdErr, '[ERROR] InjectCall: failed to write return address');
-    ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(SentinelAddr)), cInt(OrigData));
+    WriteCodeByte(SentinelAddr, OrigByte);
     Exit;
   end;
 
@@ -1382,7 +1438,7 @@ begin
   if not SetRegisters(NewRegs) then
   begin
     WriteLn(StdErr, '[ERROR] InjectCall: failed to set registers');
-    ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(SentinelAddr)), cInt(OrigData));
+    WriteCodeByte(SentinelAddr, OrigByte);
     Exit;
   end;
 
@@ -1437,13 +1493,11 @@ begin
                 IntToHex(StoppedAddr, 16), ' — stepping past');
       RetRegs.RIP := StoppedAddr;
       SetRegisters(RetRegs);
-      ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(StoppedAddr)),
-             cInt(FBreakpoints[BpIdx].OriginalData));
+      WriteCodeByte(StoppedAddr, FBreakpoints[BpIdx].OriginalData);
       ptrace(PT_STEP, FPID, Pointer(1), 0);
       FpWaitPid(FPID, @Status, 0);
       WriteDebugRegister(6, 0);
-      ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(StoppedAddr)),
-             cInt(FBreakpoints[BpIdx].OriginalData and cLong($FFFFFFFFFFFFFF00) or $CC));
+      WriteCodeByte(StoppedAddr, INT3_OPCODE);
     end
     else
     begin
@@ -1456,9 +1510,9 @@ begin
   until Iterations >= MAX_ITERATIONS;
 
   if Iterations >= MAX_ITERATIONS then
-    WriteLn(StdErr, '[ERROR] InjectCall: timeout — iteration limit reached');
+    WriteLn(StdErr, '[ERROR] InjectCall: timeout - iteration limit reached');
 
-  ptrace(PT_WRITE_D, FPID, Pointer(PtrUInt(SentinelAddr)), cInt(OrigData));
+  WriteCodeByte(SentinelAddr, OrigByte);
   SetRegisters(SavedRegs);
 
   if gVerbose and Result then
@@ -1481,12 +1535,34 @@ begin
   Result := True;
 end;
 
+{ Load base discovery.  The engine only calls GetLoadBase for ET_DYN (PIE)
+  binaries — a static ET_EXEC (the Blaise default on FreeBSD) never reaches
+  here because its OPDF addresses are absolute and need no slide.
+
+  Primary path is the kern.proc.vmmap sysctl, which works whether or not
+  procfs is mounted (FreeBSD does not mount /proc by default).  The vmmap
+  returns a packed array of kinfo_vmentry records; each record's actual
+  length is its leading kve_structsize field.  We use only the fields whose
+  offsets have been stable since FreeBSD 10 (kve_start at +8, kve_offset at
+  +24) and locate kve_path relative to the record END (it is the final
+  char[PATH_MAX] field), which is robust against middle-field additions.
+  The load base is the lowest mapping of the binary with file offset 0. }
+
 function TFreeBSDPtraceAdapter.GetLoadBase(const BinaryPath: String): QWord;
+const
+  KVE_START_OFS = 8;
+  KVE_OFFSET_OFS = 24;
 var
+  Mib: array[0..3] of LongInt;
+  Buf: array of Byte;
+  Len: PtrUInt;
+  P: PtrUInt;
+  StructSize: LongInt;
+  KStart, KOffset: QWord;
+  EntryPath, BinaryBaseName: String;
   MapsFile: TextFile;
-  Line, BinaryBaseName: String;
+  Line, AddrStr: String;
   SpacePos: Integer;
-  AddrStr: String;
 begin
   Result := 0;
 
@@ -1495,7 +1571,54 @@ begin
 
   BinaryBaseName := ExtractFileName(BinaryPath);
 
-  { FreeBSD procfs: /proc/<pid>/map (NOTE: untested — format differs from Linux) }
+  Mib[0] := CTL_KERN;
+  Mib[1] := KERN_PROC;
+  Mib[2] := KERN_PROC_VMMAP;
+  Mib[3] := FPID;
+
+  Len := 0;
+  if (c_sysctl(@Mib[0], 4, nil, Len, nil, 0) = 0) and (Len > 0) then
+  begin
+    { The map can grow between the size probe and the fetch; pad generously. }
+    SetLength(Buf, Len + Len div 2 + 4096);
+    Len := Length(Buf);
+    if c_sysctl(@Mib[0], 4, @Buf[0], Len, nil, 0) = 0 then
+    begin
+      P := 0;
+      while P + 32 <= Len do
+      begin
+        StructSize := PLongInt(@Buf[P])^;
+        if (StructSize <= 0) or (P + PtrUInt(StructSize) > Len) then
+          Break;
+        if StructSize > FBSD_PATH_MAX then
+        begin
+          KStart := PQWord(@Buf[P + KVE_START_OFS])^;
+          KOffset := PQWord(@Buf[P + KVE_OFFSET_OFS])^;
+          { kve_path is the final char[PATH_MAX] field of the record }
+          EntryPath := PChar(@Buf[P + PtrUInt(StructSize) - FBSD_PATH_MAX]);
+          if (KOffset = 0) and (EntryPath <> '') and
+             (ExtractFileName(EntryPath) = BinaryBaseName) then
+          begin
+            Result := KStart;
+            Break;
+          end;
+        end;
+        Inc(P, PtrUInt(StructSize));
+      end;
+    end;
+  end;
+
+  if Result <> 0 then
+  begin
+    if gVerbose then
+      WriteLn(StdErr, '[DEBUG] Load base from kern.proc.vmmap: $', IntToHex(Result, 16));
+    Exit;
+  end;
+
+  { Fallback: procfs text map, if the user has procfs mounted.  Line format:
+    0x<start> 0x<end> resident privres obj perms ... vnode /path/to/file ...
+    Entries are sorted by address; the first line naming the binary is its
+    lowest mapping. }
   {$PUSH}{$I-}
   AssignFile(MapsFile, '/proc/' + IntToStr(FPID) + '/map');
   Reset(MapsFile);
@@ -1508,13 +1631,13 @@ begin
     if IOResult <> 0 then
       Break;
 
-    if (Pos(BinaryBaseName, Line) > 0) and (Pos('r-x', Line) > 0) then
+    if Pos('/' + BinaryBaseName, Line) > 0 then
     begin
       SpacePos := Pos(' ', Line);
-      if SpacePos > 1 then
+      if (SpacePos > 3) and (Copy(Line, 1, 2) = '0x') then
       begin
         AddrStr := Copy(Line, 3, SpacePos - 3);
-        Result := StrToQWord('$' + AddrStr);
+        Result := StrToQWordDef('$' + AddrStr, 0);
         Break;
       end;
     end;
@@ -1528,11 +1651,32 @@ begin
 end;
 
 function TFreeBSDPtraceAdapter.GetTLSBase: QWord;
+{$IFDEF CPUX86_64}
+var
+  Base: QWord;
 begin
-  { TODO: Use sysarch(AMD64_GET_FSBASE) or ptrace(PT_GETFSBASE) on FreeBSD
-    to read the thread-local storage base address — untested. }
+  Result := 0;
+  if (FPID <= 0) or (not FAttached) then
+    Exit;
+  Base := 0;
+  { PT_GETFSBASE stores the tracee's %fs base into the addr operand }
+  if ptrace(PT_GETFSBASE, FPID, @Base, 0) = -1 then
+  begin
+    if gVerbose then
+      WriteLn(StdErr, '[DEBUG] PT_GETFSBASE failed: ', SysErrorMessage(LibcErrno));
+    Exit;
+  end;
+  Result := Base;
+  if gVerbose then
+    WriteLn(StdErr, '[DEBUG] TLS base (fsbase): $', IntToHex(Result, 16));
+end;
+{$ELSE}
+begin
+  { i386: the TLS base lives in %gs; PT_GETGSBASE exists but the i386 code
+    paths of this adapter are untested — not implemented yet. }
   Result := 0;
 end;
+{$ENDIF}
 
 {$ENDIF} { FREEBSD }
 

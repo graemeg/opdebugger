@@ -17,7 +17,22 @@ uses
   {$ENDIF}
   Classes, SysUtils,
   opdf_types, pdr_ports, pdr_engine, pdr_typesys, pdr_symbols,
-  pdr_linux_ptrace, pdr_arch_adapters, pdr_opdf_adapter;
+  {$IFDEF FREEBSD}
+  pdr_freebsd_ptrace,
+  {$ELSE}
+  pdr_linux_ptrace,
+  {$ENDIF}
+  pdr_arch_adapters, pdr_opdf_adapter;
+
+type
+  { Platform process-controller selection.  Both adapters expose the same
+    surface (IProcessController plus a RedirectChildIO property), so the
+    construction code below stays platform-agnostic via this alias. }
+  {$IFDEF FREEBSD}
+  TPlatformPtraceAdapter = TFreeBSDPtraceAdapter;
+  {$ELSE}
+  TPlatformPtraceAdapter = TLinuxPtraceAdapter;
+  {$ENDIF}
 
 {$IFDEF UNIX}
 function c_isatty(fd: LongInt): LongInt; cdecl; external 'c' name 'isatty';
@@ -1105,10 +1120,10 @@ begin
     Move(Args[0], FCommandLineArgs[0], Length(Args) * SizeOf(String));
 
   // Create platform-specific adapters
-  FProcessController := TLinuxPtraceAdapter.Create;
+  FProcessController := TPlatformPtraceAdapter.Create;
   {$IFDEF UNIX}
   if c_isatty(0) = 0 then
-    (FProcessController as TLinuxPtraceAdapter).RedirectChildIO := True;
+    (FProcessController as TPlatformPtraceAdapter).RedirectChildIO := True;
   {$ENDIF}
   FDebugInfoReader := TOPDFReaderAdapter.Create;
 

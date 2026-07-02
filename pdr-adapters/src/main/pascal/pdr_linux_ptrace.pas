@@ -13,6 +13,8 @@ unit pdr_linux_ptrace;
 
 interface
 
+{$IFDEF LINUX}
+
 uses
   SysUtils, BaseUnix, Unix, pdr_ports;
 
@@ -108,7 +110,11 @@ type
     property RedirectChildIO: Boolean read FRedirectChildIO write FRedirectChildIO;
   end;
 
+{$ENDIF}
+
 implementation
+
+{$IFDEF LINUX}
 
 const
   { ptrace request codes }
@@ -1776,5 +1782,7 @@ begin
     or parsing /proc/<pid>/status — not yet implemented }
   {$ENDIF}
 end;
+
+{$ENDIF} { LINUX }
 
 end.
