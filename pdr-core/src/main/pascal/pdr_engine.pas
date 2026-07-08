@@ -738,6 +738,8 @@ var
   CurrentAddr: QWord;
   CurrentLine: TLineInfo;
   MaxSteps: Integer;
+  MainFunc: TFunctionInfo;
+  TempBp: TBreakpointHandle;
 begin
   Result := False;
   FLastException.IsValid := False;
@@ -764,10 +766,86 @@ begin
   // Resolve the starting source line
   if not FDebugInfoReader.FindLineByAddress(StartAddr, StartLine) then
   begin
-    // No line info at this address — fall back to a raw instruction step
+    // No line info at this address — we are still in CRT/dynamic-linker
+    // startup before any user code has run.  Software single-stepping
+    // through this (potentially hundreds of thousands of instructions,
+    // much of it in ld.so) is far too slow, so jump straight to the
+    // program's entry function via a temporary hardware breakpoint,
+    // exactly as `break main.pas:N; continue` already does manually.
+    if FDebugInfoReader.FindFunctionByName('main', MainFunc) and (MainFunc.LowPC <> 0) and
+       (StartAddr < MainFunc.LowPC) then
+    begin
+      WriteLn(StdErr, '[INFO] No source line at current address — running to program entry...');
+      TempBp := SetBreakpoint('0x' + IntToHex(MainFunc.LowPC, 1));
+      if TempBp = -1 then
+      begin
+        WriteLn(StdErr, '[ERROR] Failed to set temporary breakpoint at program entry');
+        Exit;
+      end;
+      SetTemporary(TempBp);
+
+      if not FProcessController.Continue then
+      begin
+        WriteLn(StdErr, '[ERROR] Failed to continue to program entry');
+        Exit;
+      end;
+
+      CurrentAddr := FProcessController.GetLastBreakpointAddress;
+      if CurrentAddr = 0 then
+        CurrentAddr := FProcessController.GetCurrentAddress;
+      if CurrentAddr = 0 then
+      begin
+        WriteLn(StdErr, '[INFO] Process terminated before reaching program entry');
+        FState := dsTerminated;
+        Exit(True);
+      end;
+
+      if FDebugInfoReader.FindLineByAddress(CurrentAddr, CurrentLine) then
+        WriteLn('[INFO] Stepped to line: ', CurrentLine.FileName, ':', CurrentLine.LineNumber)
+      else
+        WriteLn(StdErr, '[INFO] Reached program entry at 0x', IntToHex(CurrentAddr, 16),
+                ' (function prologue — no line info yet; try "step" again or "next")');
+      Result := True;
+      Exit;
+    end;
+
+    // Either no 'main' scope was found (e.g. debugging a bare unit), or we're
+    // already past program entry — most likely still inside runtime/unit
+    // init code that runs before the user's first line-mapped statement.
+    // Single-step a bounded number of instructions until source info appears.
+    // The cap is generous (RTL + stdlib unit init can be tens of thousands
+    // of instructions before the first user statement) rather than the
+    // short 10000-instruction budget StepLine/StepInto use once already
+    // inside mapped user code.
+    MaxSteps := 2000000;
+    repeat
+      if not FProcessController.Step then
+      begin
+        WriteLn(StdErr, '[ERROR] Failed to single-step');
+        Exit;
+      end;
+
+      CurrentAddr := FProcessController.GetCurrentAddress;
+      if CurrentAddr = 0 then
+      begin
+        WriteLn(StdErr, '[INFO] Process terminated during step');
+        FState := dsTerminated;
+        Exit(True);
+      end;
+
+      if FDebugInfoReader.FindLineByAddress(CurrentAddr, CurrentLine) then
+      begin
+        WriteLn('[INFO] Stepped to line: ', CurrentLine.FileName, ':', CurrentLine.LineNumber);
+        Result := True;
+        Exit;
+      end;
+
+      Dec(MaxSteps);
+    until MaxSteps <= 0;
+
     if gVerbose then
-      WriteLn(StdErr, '[INFO] StepInto: no source line, falling back to instruction step');
-    Result := FProcessController.Step;
+      WriteLn(StdErr, '[INFO] StepInto: no source line found within instruction limit');
+    Result := True;
     Exit;
   end;
 
@@ -2629,6 +2707,8 @@ var
   Buffer: array[0..7] of Byte;
   RBP: QWord;
   I: Integer;
+  DotPos: Integer;
+  BaseName, FieldPath, ErrorMsg: String;
 begin
   Result := False;
 
@@ -2638,18 +2718,32 @@ begin
     Exit;
   end;
 
-  if FTypeSystem.OverrideRIP <> 0 then
-    RIP := FTypeSystem.OverrideRIP
+  DotPos := Pos('.', VarName);
+  if DotPos > 0 then
+  begin
+    BaseName := Copy(VarName, 1, DotPos - 1);
+    FieldPath := Copy(VarName, DotPos + 1, Length(VarName));
+    if not FTypeSystem.ResolveFieldAddress(BaseName, FieldPath, VarInfo, ErrorMsg) then
+    begin
+      WriteLn(StdErr, '[ERROR] ', ErrorMsg);
+      Exit;
+    end;
+  end
   else
   begin
-    RIP := FProcessController.GetLastBreakpointAddress;
-    if RIP = 0 then RIP := FProcessController.GetCurrentAddress;
-  end;
+    if FTypeSystem.OverrideRIP <> 0 then
+      RIP := FTypeSystem.OverrideRIP
+    else
+    begin
+      RIP := FProcessController.GetLastBreakpointAddress;
+      if RIP = 0 then RIP := FProcessController.GetCurrentAddress;
+    end;
 
-  if not FDebugInfoReader.FindVariableWithScope(VarName, RIP, VarInfo) then
-  begin
-    WriteLn(StdErr, '[ERROR] Variable not found: ', VarName);
-    Exit;
+    if not FDebugInfoReader.FindVariableWithScope(VarName, RIP, VarInfo) then
+    begin
+      WriteLn(StdErr, '[ERROR] Variable not found: ', VarName);
+      Exit;
+    end;
   end;
 
   if not FDebugInfoReader.FindType(VarInfo.TypeID, TypeInfo) then
