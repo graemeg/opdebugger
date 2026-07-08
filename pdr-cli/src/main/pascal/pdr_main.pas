@@ -111,7 +111,7 @@ end;
 procedure PrintCommandHelp;
 begin
   WriteLn('PDR Debugger Commands:');
-  WriteLn('  run, r         - Start program (automatically done on launch)');
+  WriteLn('  run, r         - Start program (auto-run only if args were given on launch)');
   WriteLn('  args <args>    - Set command-line arguments for program');
   WriteLn('  print <var>    - Print variable value');
   WriteLn('  callstack [n]  - Show call stack (limit to n frames, 0 for all)');
@@ -259,8 +259,10 @@ begin
 
     if not FDebugInfoReader.FindLineByAddress(CurrentAddr, LineInfo) then
     begin
-      SetLength(Result, 1);
+      SetLength(Result, 2);
       Result[0] := '[ERROR] No source information for current address';
+      Result[1] := '[INFO] Program is likely still in startup code before user code runs — ' +
+                   'use "break <file>:<line>" then "continue", or "step" to advance to the first mapped line';
       Exit;
     end;
     FileName := LineInfo.FileName;
