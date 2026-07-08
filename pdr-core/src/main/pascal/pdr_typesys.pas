@@ -193,6 +193,14 @@ type
     { Evaluate a variable using provided info }
     function EvaluateVariableInfo(const VarInfo: TVariableInfo): TVariableValue;
 
+    { Resolve a dotted field-access expression (e.g. "r.y", "obj.Field.Sub")
+      to the field's own address + TypeID, for writes via `set`.  Mirrors the
+      field-walk in ResolveFieldAccess but returns the resolved location
+      instead of a formatted value.  Sets Found=False (and ErrorMsg) if any
+      segment of the path cannot be resolved. }
+    function ResolveFieldAddress(const BaseName, FieldPath: String;
+      out FieldInfo: TVariableInfo; out ErrorMsg: String): Boolean;
+
     property OverrideRBP: QWord read FOverrideRBP write FOverrideRBP;
     property OverrideRIP: QWord read FOverrideRIP write FOverrideRIP;
   end;
@@ -1855,6 +1863,176 @@ begin
       Exit;
     end;
     VarInfo := FieldVarInfo;
+  end;
+end;
+
+function TTypeSystem.ResolveFieldAddress(const BaseName, FieldPath: String;
+  out FieldInfo: TVariableInfo; out ErrorMsg: String): Boolean;
+var
+  VarInfo: TVariableInfo;
+  TypeInfo: TTypeInfo;
+  RIP: QWord;
+  InstancePtr: QWord;
+  I: Integer;
+  FieldName, RemainingPath: String;
+  DotPos: Integer;
+  Fields: TDebuggerFieldArray;
+  Found: Boolean;
+  PtrSize: Byte;
+begin
+  Result := False;
+  ErrorMsg := '';
+  FillChar(FieldInfo, SizeOf(FieldInfo), 0);
+
+  RIP := FProcessController.GetLastBreakpointAddress;
+  if RIP = 0 then
+    RIP := FProcessController.GetCurrentAddress;
+
+  Found := False;
+  if RIP <> 0 then
+  begin
+    if FDebugInfoReader.FindVariableWithScope(BaseName, RIP, VarInfo) or
+       FDebugInfoReader.FindVariable(BaseName, VarInfo) then
+      Found := True;
+  end
+  else if FDebugInfoReader.FindVariable(BaseName, VarInfo) then
+    Found := True;
+
+  if not Found then
+  begin
+    ErrorMsg := 'Variable not found: ' + BaseName;
+    Exit;
+  end;
+
+  if VarInfo.LocationExpr = 1 then
+  begin
+    InstancePtr := GetEffectiveRBP;
+    if InstancePtr <> 0 then
+      VarInfo.Address := InstancePtr + VarInfo.LocationData;
+  end
+  else if VarInfo.LocationExpr = 2 then
+  begin
+    InstancePtr := GetEffectiveRBP;
+    if InstancePtr <> 0 then
+    begin
+      PtrSize := FDebugInfoReader.GetPointerSize;
+      if ReadPointerValue(FProcessController, InstancePtr, PtrSize, InstancePtr) then
+        VarInfo.Address := InstancePtr + VarInfo.LocationData;
+    end;
+  end
+  else if VarInfo.LocationExpr = 3 then
+  begin
+    InstancePtr := GetEffectiveRBP;
+    if InstancePtr <> 0 then
+    begin
+      PtrSize := FDebugInfoReader.GetPointerSize;
+      if ReadPointerValue(FProcessController,
+           InstancePtr + QWord(Int64(VarInfo.LocationData)), PtrSize, InstancePtr) then
+        VarInfo.Address := InstancePtr;
+    end;
+  end
+  else if VarInfo.LocationExpr = 4 then
+  begin
+    InstancePtr := FProcessController.GetTLSBase;
+    if InstancePtr <> 0 then
+      VarInfo.Address := InstancePtr + QWord(Int64(VarInfo.LocationData));
+  end;
+
+  if not FDebugInfoReader.FindType(VarInfo.TypeID, TypeInfo) then
+  begin
+    ErrorMsg := 'Type not found for: ' + BaseName;
+    Exit;
+  end;
+
+  RemainingPath := FieldPath;
+  while True do
+  begin
+    DotPos := Pos('.', RemainingPath);
+    if DotPos > 0 then
+    begin
+      FieldName := Copy(RemainingPath, 1, DotPos - 1);
+      RemainingPath := Copy(RemainingPath, DotPos + 1, Length(RemainingPath));
+    end
+    else
+    begin
+      FieldName := RemainingPath;
+      RemainingPath := '';
+    end;
+
+    if (TypeInfo.Category = tcClass) and (TypeInfo.ClassInfo <> nil) then
+    begin
+      PtrSize := FDebugInfoReader.GetPointerSize;
+      if not ReadPointerValue(FProcessController, VarInfo.Address, PtrSize, InstancePtr) then
+      begin
+        ErrorMsg := 'Failed to read instance pointer for: ' + BaseName;
+        Exit;
+      end;
+      if InstancePtr = 0 then
+      begin
+        ErrorMsg := BaseName + ' is nil';
+        Exit;
+      end;
+
+      Fields := TypeInfo.ClassInfo^.Fields;
+      Found := False;
+      for I := 0 to High(Fields) do
+        if CompareText(Fields[I].Name, FieldName) = 0 then
+        begin
+          FieldInfo.Name := Fields[I].Name;
+          FieldInfo.TypeID := Fields[I].TypeID;
+          FieldInfo.Address := InstancePtr + Fields[I].Offset;
+          FieldInfo.LocationExpr := 0;
+          FieldInfo.LocationData := 0;
+          Found := True;
+          Break;
+        end;
+
+      if not Found then
+      begin
+        ErrorMsg := 'Field or property "' + FieldName + '" not found';
+        Exit;
+      end;
+    end
+    else if (TypeInfo.Category = tcRecord) and (TypeInfo.RecordInfo <> nil) then
+    begin
+      Fields := TypeInfo.RecordInfo^.Fields;
+      Found := False;
+      for I := 0 to High(Fields) do
+        if CompareText(Fields[I].Name, FieldName) = 0 then
+        begin
+          FieldInfo.Name := Fields[I].Name;
+          FieldInfo.TypeID := Fields[I].TypeID;
+          FieldInfo.Address := VarInfo.Address + Fields[I].Offset;
+          FieldInfo.LocationExpr := 0;
+          FieldInfo.LocationData := 0;
+          Found := True;
+          Break;
+        end;
+
+      if not Found then
+      begin
+        ErrorMsg := 'Field "' + FieldName + '" not found';
+        Exit;
+      end;
+    end
+    else
+    begin
+      ErrorMsg := 'Type does not support field access';
+      Exit;
+    end;
+
+    if RemainingPath = '' then
+    begin
+      Result := True;
+      Exit;
+    end;
+
+    if not FDebugInfoReader.FindType(FieldInfo.TypeID, TypeInfo) then
+    begin
+      ErrorMsg := 'Type not found for nested access';
+      Exit;
+    end;
+    VarInfo := FieldInfo;
   end;
 end;
 
