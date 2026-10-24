@@ -56,6 +56,7 @@ type
     FWatchSlots: array[0..3] of TWatchSlotInfo;
     FLastFiredWatchpoint: Integer;
     FPendingSignal: Integer;
+    FRedirectChildIO: Boolean;     // Accepted for parity with the ptrace adapters
 
     function FindBreakpoint(Address: QWord): Integer;
     function HandleBreakpointHit: Boolean;
@@ -99,6 +100,7 @@ type
 
     property PID: Integer read FPID;
     property IsAttached: Boolean read FAttached;
+    property RedirectChildIO: Boolean read FRedirectChildIO write FRedirectChildIO;
   end;
 
 {$ENDIF}
@@ -106,6 +108,8 @@ type
 implementation
 
 {$IFDEF DARWIN}
+
+{$IF DEFINED(CPUX86_64) or DEFINED(CPUI386)}
 
 const
   { Mach kernel return codes }
@@ -359,6 +363,9 @@ begin
   inherited Destroy;
 end;
 
+type
+  PMachPortT = ^mach_port_t;
+
 function TMacOSMachAdapter.GetMainThread: Boolean;
 var
   ThreadList: Pointer;
@@ -385,9 +392,6 @@ begin
   FThreadPort := PMachPortT(ThreadList)^;
   Result := True;
 end;
-
-type
-  PMachPortT = ^mach_port_t;
 
 function TMacOSMachAdapter.SetupExceptionPort: Boolean;
 var
@@ -1743,6 +1747,183 @@ begin
     or read the TLS base from the thread's Mach port — untested. }
   Result := 0;
 end;
+
+{$ELSE} { not x86: Mach debugging only implemented for x86_64/i386 }
+
+const
+  SNotSupported = 'Debugging is not supported on this CPU (' +
+    {$I %FPCTARGETCPU%} + '-darwin); the macOS adapter supports x86_64 and i386 only';
+
+{ TMacOSMachAdapter }
+
+constructor TMacOSMachAdapter.Create;
+begin
+  inherited Create;
+  FPID := -1;
+  FAttached := False;
+  FLastFiredWatchpoint := -1;
+end;
+
+destructor TMacOSMachAdapter.Destroy;
+begin
+  inherited Destroy;
+end;
+
+function TMacOSMachAdapter.FindBreakpoint(Address: QWord): Integer;
+begin
+  Result := -1;
+end;
+
+function TMacOSMachAdapter.HandleBreakpointHit: Boolean;
+begin
+  Result := False;
+end;
+
+function TMacOSMachAdapter.GetMainThread: Boolean;
+begin
+  Result := False;
+end;
+
+function TMacOSMachAdapter.SetupExceptionPort: Boolean;
+begin
+  Result := False;
+end;
+
+function TMacOSMachAdapter.WaitForException(out ExcType: Integer): Boolean;
+begin
+  ExcType := 0;
+  Result := False;
+end;
+
+function TMacOSMachAdapter.ReplyToException(ExcType: Integer): Boolean;
+begin
+  Result := False;
+end;
+
+function TMacOSMachAdapter.Launch(const BinaryPath: String): Boolean;
+begin
+  WriteLn(StdErr, '[ERROR] ', SNotSupported);
+  Result := False;
+end;
+
+function TMacOSMachAdapter.Attach(PID: Integer): Boolean;
+begin
+  WriteLn(StdErr, '[ERROR] ', SNotSupported);
+  Result := False;
+end;
+
+function TMacOSMachAdapter.Detach: Boolean;
+begin
+  Result := False;
+end;
+
+function TMacOSMachAdapter.Continue: Boolean;
+begin
+  Result := False;
+end;
+
+function TMacOSMachAdapter.Step: Boolean;
+begin
+  Result := False;
+end;
+
+function TMacOSMachAdapter.ReadMemory(Address: QWord; Size: Cardinal;
+  out Buffer): Boolean;
+begin
+  Result := False;
+end;
+
+function TMacOSMachAdapter.WriteMemory(Address: QWord; Size: Cardinal;
+  const Buffer): Boolean;
+begin
+  Result := False;
+end;
+
+function TMacOSMachAdapter.GetRegisters(out Regs: TRegisters): Boolean;
+begin
+  FillChar(Regs, SizeOf(Regs), 0);
+  Result := False;
+end;
+
+function TMacOSMachAdapter.SetRegisters(const Regs: TRegisters): Boolean;
+begin
+  Result := False;
+end;
+
+function TMacOSMachAdapter.SetBreakpoint(Address: QWord): Boolean;
+begin
+  Result := False;
+end;
+
+function TMacOSMachAdapter.RemoveBreakpoint(Address: QWord): Boolean;
+begin
+  Result := False;
+end;
+
+function TMacOSMachAdapter.GetCurrentAddress: QWord;
+begin
+  Result := 0;
+end;
+
+function TMacOSMachAdapter.GetFrameBasePointer: QWord;
+begin
+  Result := 0;
+end;
+
+function TMacOSMachAdapter.GetLastBreakpointAddress: QWord;
+begin
+  Result := 0;
+end;
+
+function TMacOSMachAdapter.GetLastBreakpointRBP: QWord;
+begin
+  Result := 0;
+end;
+
+function TMacOSMachAdapter.SetCommandLineArgs(const Args: array of String): Boolean;
+begin
+  Result := False;
+end;
+
+function TMacOSMachAdapter.SetWatchpoint(Address: QWord; Size: Byte;
+  WatchType: TWatchpointType): Integer;
+begin
+  Result := -1;
+end;
+
+function TMacOSMachAdapter.ClearWatchpoint(Slot: Integer): Boolean;
+begin
+  Result := False;
+end;
+
+function TMacOSMachAdapter.GetFiredWatchpoint: Integer;
+begin
+  Result := -1;
+end;
+
+function TMacOSMachAdapter.InjectCall(MethodAddr, SelfPtr: QWord;
+  ManagedReturn: Boolean; out RetValue: QWord): Boolean;
+begin
+  RetValue := 0;
+  Result := False;
+end;
+
+function TMacOSMachAdapter.SendInterrupt: Boolean;
+begin
+  Result := False;
+end;
+
+function TMacOSMachAdapter.GetLoadBase(const BinaryPath: String): QWord;
+begin
+  Result := 0;
+end;
+
+function TMacOSMachAdapter.GetTLSBase: QWord;
+begin
+  Result := 0;
+end;
+
+{$IFEND} { CPU }
 
 {$ENDIF} { DARWIN }
 

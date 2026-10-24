@@ -17,22 +17,26 @@ uses
   {$ENDIF}
   Classes, SysUtils,
   opdf_types, pdr_ports, pdr_engine, pdr_typesys, pdr_symbols,
-  {$IFDEF FREEBSD}
+  {$IF DEFINED(FREEBSD)}
   pdr_freebsd_ptrace,
+  {$ELSEIF DEFINED(DARWIN)}
+  pdr_macos_mach,
   {$ELSE}
   pdr_linux_ptrace,
-  {$ENDIF}
+  {$IFEND}
   pdr_arch_adapters, pdr_opdf_adapter;
 
 type
-  { Platform process-controller selection.  Both adapters expose the same
+  { Platform process-controller selection.  All adapters expose the same
     surface (IProcessController plus a RedirectChildIO property), so the
     construction code below stays platform-agnostic via this alias. }
-  {$IFDEF FREEBSD}
+  {$IF DEFINED(FREEBSD)}
   TPlatformPtraceAdapter = TFreeBSDPtraceAdapter;
+  {$ELSEIF DEFINED(DARWIN)}
+  TPlatformPtraceAdapter = TMacOSMachAdapter;
   {$ELSE}
   TPlatformPtraceAdapter = TLinuxPtraceAdapter;
-  {$ENDIF}
+  {$IFEND}
 
 {$IFDEF UNIX}
 function c_isatty(fd: LongInt): LongInt; cdecl; external 'c' name 'isatty';
