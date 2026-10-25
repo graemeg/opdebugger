@@ -222,6 +222,32 @@ end;
 
 { Session management }
 
+{ True when the file starts with a Mach-O (thin 32/64-bit, either byte
+  order) or fat/universal magic. }
+function IsMachOFile(const BinaryPath: String): Boolean;
+var
+  F: TFileStream;
+  Magic: Cardinal;
+begin
+  Result := False;
+  try
+    F := TFileStream.Create(BinaryPath, fmOpenRead or fmShareDenyNone);
+    try
+      if F.Read(Magic, SizeOf(Magic)) <> SizeOf(Magic) then
+        Exit;
+    finally
+      F.Free;
+    end;
+  except
+    Exit;
+  end;
+  case Magic of
+    $FEEDFACE, $FEEDFACF, $CEFAEDFE, $CFFAEDFE,  { thin, either byte order }
+    $CAFEBABE, $BEBAFECA:                        { fat/universal }
+      Result := True;
+  end;
+end;
+
 function TDebuggerEngine.LoadProgram(const BinaryPath: String): Boolean;
 begin
   Result := False;
@@ -340,8 +366,10 @@ begin
 
   { Compute ASLR/PIE slide for position-independent executables.
     ET_DYN (type=3) indicates a PIE binary whose link-time addresses
-    are relative; all OPDF addresses are adjusted by the runtime load base. }
-  if TELFSectionReader.GetELFType(FBinaryPath) = 3 then
+    are relative; all OPDF addresses are adjusted by the runtime load base.
+    A Mach-O executable is always slid (arm64 macOS requires PIE); its
+    adapter's GetLoadBase returns the slide itself. }
+  if (TELFSectionReader.GetELFType(FBinaryPath) = 3) or IsMachOFile(FBinaryPath) then
   begin
     LoadBase := FProcessController.GetLoadBase(FBinaryPath);
     if LoadBase <> 0 then
@@ -966,6 +994,24 @@ begin
     end;
   end;
   {$ENDIF}
+  {$IFDEF CPUAARCH64}
+  { At entry the return address is still in LR; once the prologue has run
+    (stp x29, x30, [sp, #-N]!; mov x29, sp) it is in the frame record. }
+  AtEntry := False;
+  if FDebugInfoReader.FindFunctionByAddress(Regs.PC, FuncInfo) then
+    AtEntry := (Regs.PC = FuncInfo.LowPC);
+
+  if AtEntry then
+    ReturnAddr := Regs.X[30]
+  else
+  begin
+    if not FProcessController.ReadMemory(Regs.X[29] + 8, 8, ReturnAddr) then
+    begin
+      WriteLn(StdErr, '[ERROR] Failed to read return address from stack');
+      Exit;
+    end;
+  end;
+  {$ENDIF}
 
   if gVerbose then
     WriteLn(StdErr, '[DEBUG] StepOut: return address = 0x', IntToHex(ReturnAddr, 1));
@@ -1078,6 +1124,28 @@ begin
 
   if HasValue then
     Regs.EAX := Cardinal(ReturnValue);
+  {$ENDIF}
+  {$IFDEF CPUAARCH64}
+  { Unwind as the epilogue would: mov sp, x29; ldp x29, x30, [sp], #16; ret }
+  if not FProcessController.ReadMemory(Regs.X[29], 8, SavedRBP) then
+  begin
+    WriteLn(StdErr, '[ERROR] Failed to read saved FP from stack');
+    Exit;
+  end;
+
+  if not FProcessController.ReadMemory(Regs.X[29] + 8, 8, ReturnAddr) then
+  begin
+    WriteLn(StdErr, '[ERROR] Failed to read return address from stack');
+    Exit;
+  end;
+
+  Regs.SP := Regs.X[29] + 16;
+  Regs.X[29] := SavedRBP;
+  Regs.X[30] := ReturnAddr;
+  Regs.PC := ReturnAddr;
+
+  if HasValue then
+    Regs.X[0] := QWord(ReturnValue);
   {$ENDIF}
 
   if not FProcessController.SetRegisters(Regs) then
@@ -1271,14 +1339,17 @@ begin
     Exit;
   end;
 
-  {$IFDEF CPUX86_64}
+  {$IF DEFINED(CPUX86_64)}
   ObjPtr := Regs.RDI;
   RaiseAddr := Regs.RSI;
+  {$ELSEIF DEFINED(CPUAARCH64)}
+  ObjPtr := Regs.X[0];
+  RaiseAddr := Regs.X[1];
   {$ELSE}
   { On i386, parameters are on the stack — not implemented yet }
   WriteLn(StdErr, '[INFO] Exception raised (i386 parameter reading not implemented)');
   Exit;
-  {$ENDIF}
+  {$IFEND}
 
   if ObjPtr = 0 then
   begin
@@ -2891,10 +2962,16 @@ begin
     Exit;
   end;
 
+  {$IF DEFINED(CPUX86_64) or DEFINED(CPUAARCH64)}
   {$IFDEF CPUX86_64}
   FramePtr := Regs.RBP;
   StackPtr := Regs.RSP;
   RetAddr := Regs.RIP;
+  {$ELSE}
+  FramePtr := Regs.X[29];
+  StackPtr := Regs.SP;
+  RetAddr := Regs.PC;
+  {$ENDIF}
 
   while ((FramePtr <> 0) or (StackPtr <> 0)) and
         ((Limit = 0) or (FrameCount < Limit)) do
@@ -2939,7 +3016,9 @@ begin
     end
     else
     begin
-      { Classic frame-pointer walking: [RBP] = old RBP, [RBP+8] = return address }
+      { Classic frame-pointer walking: [RBP] = old RBP, [RBP+8] = return
+        address — on AArch64 the frame record is the same shape:
+        [X29] = caller's X29, [X29+8] = saved LR }
       if FramePtr = 0 then
         Break;
       if not FProcessController.ReadMemory(FramePtr, 16, FrameBuffer) then
@@ -2949,7 +3028,7 @@ begin
       StackPtr := 0;
     end;
   end;
-  {$ENDIF}
+  {$IFEND}
 
   {$IFDEF CPUI386}
   FramePtr := Regs.EBP;
@@ -3105,13 +3184,13 @@ begin
   if not FProcessController.GetRegisters(Regs) then
     Exit;
 
-  {$IFDEF CPUX86_64}
+  {$IF DEFINED(CPUX86_64) or DEFINED(CPUAARCH64)}
   FramePtr := FProcessController.GetLastBreakpointRBP;
   if FramePtr = 0 then
-    FramePtr := Regs.RBP;
+    FramePtr := {$IFDEF CPUX86_64}Regs.RBP{$ELSE}Regs.X[29]{$ENDIF};
   RetAddr := FProcessController.GetLastBreakpointAddress;
   if RetAddr = 0 then
-    RetAddr := Regs.RIP;
+    RetAddr := {$IFDEF CPUX86_64}Regs.RIP{$ELSE}Regs.PC{$ENDIF};
 
   while (FramePtr <> 0) and (Count < 256) do
   begin
@@ -3126,7 +3205,7 @@ begin
     FramePtr := FrameBuffer[0];
     RetAddr := FrameBuffer[1];
   end;
-  {$ENDIF}
+  {$IFEND}
 
   {$IFDEF CPUI386}
   FramePtr := FProcessController.GetLastBreakpointRBP;

@@ -16,5 +16,6 @@
 
   <moduleDependencies>
     <module>../opdf-lib</module>
+    <module>../pdr-adapters</module>
   </moduleDependencies>
 </project>

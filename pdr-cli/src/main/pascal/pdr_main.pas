@@ -864,6 +864,14 @@ begin
               WriteLn('  EBP = 0x', IntToHex(Regs.EBP, 8), '    ESP = 0x', IntToHex(Regs.ESP, 8));
               WriteLn('  EIP = 0x', IntToHex(Regs.EIP, 8), '    EFLAGS = 0x', IntToHex(Regs.EFLAGS, 8));
               {$ENDIF}
+              {$IFDEF CPUAARCH64}
+              for I := 0 to 14 do
+                WriteLn(Format('  X%-2d = 0x%.16x    X%-2d = 0x%.16x',
+                  [I, Regs.X[I], I + 15, Regs.X[I + 15]]));
+              WriteLn('  FP  = 0x', IntToHex(Regs.X[29], 16), '    LR  = 0x', IntToHex(Regs.X[30], 16));
+              WriteLn('  SP  = 0x', IntToHex(Regs.SP, 16), '    PC  = 0x', IntToHex(Regs.PC, 16));
+              WriteLn('  CPSR = 0x', IntToHex(Regs.PSTATE, 8));
+              {$ENDIF}
             end
             else
               WriteLn(StdErr, '[ERROR] Failed to read registers');

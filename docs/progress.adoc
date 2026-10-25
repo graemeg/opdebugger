@@ -416,7 +416,15 @@ NOTE: Consider whether array assignment should remain strictly per-element (`Som
 * [ ] Write `pdr_windows_debug.pas` — `IProcessController` via Windows debug API
 * [ ] Wire format dispatch in `pdr_opdf_adapter.pas` (ELF vs PE detection)
 * [ ] Windows i386: i386 `CONTEXT` struct variant in `pdr_windows_debug.pas`
-* [ ] macOS: Mach-O section reader + Mach port process controller (deferred)
+* [x] macOS arm64 (Apple Silicon): Mach-O section reader finds `__opdf` in any
+  segment (Blaise executables carry it in `__OPDF,__opdf`); `TMacOSMachAdapter`
+  AArch64 implementation — PT_TRACE_ME/PT_STEP process control with
+  `task_for_pid`, `mach_vm_*` memory access, `BRK #0` breakpoints (W^X-aware
+  code patching), WVR/WCR hardware watchpoints, call injection and ASLR slide
+  discovery. Engine: AArch64 step-out, force-return, callstack and frame
+  navigation. Verified by the full Blaise suite (32/32) and
+  `tests/macos-adapter` (36/36).
+* [ ] macOS x86_64: the Mach adapter's x86_64/i386 code is still untested
 
 ---
 

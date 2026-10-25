@@ -633,7 +633,7 @@ end;
 
 function BuildMachO(const SectionData: array of Byte;
   const SymbolName: String; SymbolValue: QWord;
-  Is64: Boolean; CPUType: Cardinal): String;
+  Is64: Boolean; CPUType: Cardinal; const SegName: String = '__DATA'): String;
 var
   F: TFileStream;
   FilePath: String;
@@ -702,9 +702,9 @@ begin
       begin
         WriteCardinal(F, TEST_LC_SEGMENT_64);
         WriteCardinal(F, SegCmdSize + SectSize);
-        { segname: __DATA padded to 16 }
-        WriteString(F, '__DATA');
-        WritePadding(F, 10);
+        { segname padded to 16 }
+        WriteString(F, SegName);
+        WritePadding(F, 16 - Length(SegName));
         WriteQWord(F, 0);             { vmaddr }
         WriteQWord(F, 0);             { vmsize }
         WriteQWord(F, DataOffset);    { fileoff }
@@ -714,11 +714,11 @@ begin
         WriteCardinal(F, 1);          { nsects }
         WriteCardinal(F, 0);          { flags }
 
-        { section_64: __opdf in __DATA }
+        { section_64: __opdf in SegName }
         WriteString(F, '__opdf');
         WritePadding(F, 10);          { sectname padded to 16 }
-        WriteString(F, '__DATA');
-        WritePadding(F, 10);          { segname padded to 16 }
+        WriteString(F, SegName);
+        WritePadding(F, 16 - Length(SegName)); { segname padded to 16 }
         WriteQWord(F, 0);             { addr }
         WriteQWord(F, Length(SectionData)); { size }
         WriteCardinal(F, DataOffset); { offset }
@@ -1094,6 +1094,46 @@ begin
 end;
 
 
+{ The OPDF payload need not live in __DATA: an executable may carry it in a
+  segment of its own (e.g. __OPDF,__opdf).  The ELF-style '.opdf' name must
+  still find it. }
+procedure TestMachOOpdfInOwnSegment;
+var
+  Path: String;
+  Reader: IBinaryReader;
+  Stream: TMemoryStream;
+  Buf: array[0..1] of Byte;
+begin
+  Section('Mach-O 64-bit: __opdf in its own segment');
+
+  Path := BuildMachO([$AB, $CD], 'f', $100001000,
+    True, Cardinal(TEST_CPU_TYPE_ARM64), '__OPDF');
+  Reader := CreateBinaryReader(Path);
+  Check(Reader <> nil, 'Factory creates reader for arm64 Mach-O');
+  if Reader = nil then Exit;
+
+  Stream := Reader.ExtractSection('.opdf');
+  Check(Stream <> nil, '.opdf found in __OPDF,__opdf');
+  if Stream <> nil then
+  begin
+    Check(Stream.Size = 2, '__OPDF,__opdf section size = 2');
+    Stream.ReadBuffer(Buf, 2);
+    Check((Buf[0] = $AB) and (Buf[1] = $CD), '__OPDF,__opdf section data correct');
+    Stream.Free;
+  end;
+
+  Stream := Reader.ExtractSection('__OPDF,__opdf');
+  Check(Stream <> nil, '__OPDF,__opdf direct naming works');
+  if Stream <> nil then
+    Stream.Free;
+
+  Stream := Reader.ExtractSection('__DATA,__opdf');
+  Check(Stream = nil, 'explicit __DATA,__opdf does not match __OPDF,__opdf');
+  if Stream <> nil then
+    Stream.Free;
+end;
+
+
 { ====================================================================
   Test: Mach-O 32 Reader
   ==================================================================== }
@@ -1341,6 +1381,7 @@ begin
     TestPE64Reader;
     TestPEArchitectures;
     TestMachO64Reader;
+    TestMachOOpdfInOwnSegment;
     TestMachO32Reader;
     TestMachOArchitectures;
     TestFactory;

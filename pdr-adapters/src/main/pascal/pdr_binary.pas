@@ -1216,7 +1216,8 @@ begin
         FStream.ReadBuffer(Sect64, SizeOf(Sect64));
         CurSectName := FixedCString(Sect64.sectname, 16);
 
-        if (CurSegName = SegName) and (CurSectName = SectName) then
+        if ((SegName = '') or (CurSegName = SegName)) and
+           (CurSectName = SectName) then
         begin
           Offset := Sect64.offset;
           Size := Sect64.size;
@@ -1235,7 +1236,8 @@ begin
         FStream.ReadBuffer(Sect32, SizeOf(Sect32));
         CurSectName := FixedCString(Sect32.sectname, 16);
 
-        if (CurSegName = SegName) and (CurSectName = SectName) then
+        if ((SegName = '') or (CurSegName = SegName)) and
+           (CurSectName = SectName) then
         begin
           Offset := Sect32.offset;
           Size := Sect32.size;
@@ -1258,11 +1260,13 @@ begin
   Result := nil;
 
   { Mach-O sections are addressed as segment,section.
-    Convention: '.opdf' maps to '__DATA,__opdf'.
-    If caller passes the ELF-style name, map it. }
+    An ELF-style name ('.opdf') maps to section '__opdf' in ANY segment:
+    objects carry it in __DATA, but an executable may give it a segment of
+    its own (e.g. __OPDF,__opdf).  An explicit 'segment,section' name
+    matches only that segment. }
   if (Length(Name) > 0) and (Name[1] = '.') then
   begin
-    SegName := '__DATA';
+    SegName := '';
     SectName := '__' + Copy(Name, 2, Length(Name) - 1);
   end
   else if Pos(',', Name) > 0 then
@@ -1272,7 +1276,7 @@ begin
   end
   else
   begin
-    SegName := '__DATA';
+    SegName := '';
     SectName := Name;
   end;
 

@@ -21,7 +21,7 @@ program opdf_dump;
 {$mode objfpc}{$H+}
 
 uses
-  Classes, SysUtils, Math, opdf_types, elf_reader;
+  Classes, SysUtils, Math, opdf_types, pdr_binary;
 
 const
   OPDF_DUMP_VERSION = {$I version.inc};
@@ -824,6 +824,7 @@ end;
 
 var
   Section: TMemoryStream;
+  Reader: IBinaryReader;
 
 begin
   ParseArgs;
@@ -840,13 +841,15 @@ begin
     Halt(1);
   end;
 
-  if not TELFSectionReader.IsELFBinary(BinaryPath) then
+  { ELF, PE/COFF or Mach-O — whichever the binary is }
+  Reader := CreateBinaryReader(BinaryPath);
+  if Reader = nil then
   begin
-    WriteLn('[ERROR] Not an ELF binary: ', BinaryPath);
+    WriteLn('[ERROR] Not a recognised ELF, PE or Mach-O binary: ', BinaryPath);
     Halt(1);
   end;
 
-  Section := TELFSectionReader.ExtractSection(BinaryPath, '.opdf');
+  Section := Reader.ExtractSection('.opdf');
   if not Assigned(Section) then
   begin
     WriteLn('[ERROR] No .opdf section found in: ', BinaryPath);
