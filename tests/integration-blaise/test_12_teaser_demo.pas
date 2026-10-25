@@ -36,7 +36,7 @@ var
 begin
   ParentVar := 'Initial Value';
   Counter := 0;
-  InnerNested;
+  InnerNested();
 end;
 
 var
@@ -44,7 +44,7 @@ var
   Sentinel: Integer;
 begin
   Obj := TTeaser.Create('Mystery', Wed);
-  OuterProcedure;
-  Obj.Free;
+  OuterProcedure();
+  Obj.Free();
   Sentinel := 1;
 end.

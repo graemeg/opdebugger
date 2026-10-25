@@ -26,7 +26,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Blaise lives beside the debugger repo by default; override with BLAISE_ROOT.
-BLAISE_ROOT="${BLAISE_ROOT:-/data/devel/new-pascal-compiler}"
+BLAISE_ROOT="${BLAISE_ROOT:-/nas/data/devel/new-pascal-compiler}"
 
 # Colors
 RED='\033[0;31m'
@@ -40,7 +40,6 @@ FAILED=0
 
 PDR_BIN="$PROJECT_ROOT/pdr-cli/target/pdr"
 BLAISE="${BLAISE:-$BLAISE_ROOT/compiler/target/blaise}"
-RUNTIME_UNITS="$BLAISE_ROOT/runtime/src/main/pascal"
 STDLIB_UNITS="$BLAISE_ROOT/stdlib/src/main/pascal"
 
 echo "=== PDR Blaise Integration Test Runner (Launch Mode) ==="
@@ -82,7 +81,6 @@ run_test() {
             --source "$test_name" \
             --output "$test_base" \
             --backend native --debug-opdf \
-            --unit-path "$RUNTIME_UNITS" \
             --unit-path "$STDLIB_UNITS" \
             > "$test_base.compile.log" 2>&1; then
         echo -e "${RED}  FAILED: Compilation${NC}"

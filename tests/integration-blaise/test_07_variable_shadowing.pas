@@ -27,9 +27,9 @@ end;
 begin
   Counter := 100;
   WriteLn('Global Counter = ', Counter);
-  ModifyCounter;
+  ModifyCounter();
   WriteLn('After ModifyCounter, global Counter = ', Counter);
-  PrintOtherCounter;
+  PrintOtherCounter();
   WriteLn('After PrintOtherCounter, global Counter = ', Counter);
   Sentinel := 1;
 end.

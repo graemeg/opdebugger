@@ -55,5 +55,5 @@ begin
   Sentinel := 1;        { break here }
 
   Obj.Inner.Free;
-  Obj.Free;
+  Obj.Free();
 end.

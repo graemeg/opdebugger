@@ -22,7 +22,7 @@ var
 
 constructor TMyClass.Create;
 begin
-  inherited Create;
+  inherited Create();
   FInteger := 42;
   FBoolean := True;
   FAnsiString := 'Hello from a class';
@@ -30,12 +30,12 @@ end;
 
 destructor TMyClass.Destroy;
 begin
-  inherited Destroy;
+  inherited Destroy();
 end;
 
 begin
   MyNilInstance := nil;
   MyInstance := TMyClass.Create;
   Sentinel := 1;        { break here: instance constructed, nil still nil }
-  MyInstance.Free;
+  MyInstance.Free();
 end.

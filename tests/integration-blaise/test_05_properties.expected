@@ -1,2 +1,2 @@
-Instance = TDerivedClass(@$00007171EFFDB058) { FBaseValue: 100, FBaseString: 'Base class string', FDerivedValue: True, FDerivedString: 'Derived class string' }
-BaseInstance = TBaseClass(@$00007171EFFDB0A0) { FBaseValue: 100, FBaseString: 'Base class string' }
+Instance = TDerivedClass(@$0000000104C3C0B8) { FBaseValue: 100, FBaseString: 'Base class string', FDerivedValue: True, FDerivedString: 'Derived class string', BaseString: 'Base class string', DerivedString: 'Derived class string', BaseValue: <getter: TDerivedClass_GetBaseValue>, DerivedValue: <getter: TDerivedClass_GetDerivedValue> }
+BaseInstance = TBaseClass(@$0000000104C3C108) { FBaseValue: 100, FBaseString: 'Base class string' }

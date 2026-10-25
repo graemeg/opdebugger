@@ -36,26 +36,26 @@ var
 
 constructor TBaseClass.Create;
 begin
-  inherited Create;
+  inherited Create();
   FBaseValue := 100;
   FBaseString := 'Base class string';
 end;
 
 destructor TBaseClass.Destroy;
 begin
-  inherited Destroy;
+  inherited Destroy();
 end;
 
 constructor TDerivedClass.Create;
 begin
-  inherited Create;
+  inherited Create();
   FDerivedValue := True;
   FDerivedString := 'Derived class string';
 end;
 
 destructor TDerivedClass.Destroy;
 begin
-  inherited Destroy;
+  inherited Destroy();
 end;
 
 function TDerivedClass.GetBaseValue: Integer;
@@ -72,6 +72,6 @@ begin
   Instance := TDerivedClass.Create;
   BaseInstance := TBaseClass.Create;
   Sentinel := 1;        { break here: both instances constructed }
-  Instance.Free;
-  BaseInstance.Free;
+  Instance.Free();
+  BaseInstance.Free();
 end.

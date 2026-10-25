@@ -53,6 +53,6 @@ begin
   CounterObj.FCount := 42;
   Counter := CounterObj;
   Sentinel := 2;   { break here: Counter is non-nil }
-  Box.Free;
-  CounterObj.Free;
+  Box.Free();
+  CounterObj.Free();
 end.

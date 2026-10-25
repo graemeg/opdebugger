@@ -18,7 +18,7 @@ var
 
 begin
   MainVal := 1;
-  DoWork;
+  DoWork();
   MainVal := 2;
   WriteLn('Done');
 end.

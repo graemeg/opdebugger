@@ -16,13 +16,13 @@ end;
 procedure Level2;
 begin
   WriteLn('In Level2');
-  Level3;
+  Level3();
 end;
 
 procedure Level1;
 begin
   WriteLn('In Level1');
-  Level2;
+  Level2();
 end;
 
 var
@@ -33,7 +33,7 @@ begin
   WriteLn('Call Stack Test');
   X := 10;
   Y := 20;
-  Level1;
+  Level1();
   WriteLn('Done');
   Sentinel := 1;
 end.
