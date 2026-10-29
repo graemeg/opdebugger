@@ -418,6 +418,11 @@ type
       convention applies: high index as SizeInt at data - PointerSize. }
     function DynArrayLen32: Boolean;
 
+    { True when the producer set OPDF_FLAG_LEN64: the element count of a
+      dynamic array is the Int64 at data - 8.  Checked before
+      DynArrayLen32. }
+    function DynArrayLen64: Boolean;
+
     { Find address for source line }
     function FindAddressByLine(const FileName: String; LineNum: Cardinal;
                               out Address: QWord): Boolean;

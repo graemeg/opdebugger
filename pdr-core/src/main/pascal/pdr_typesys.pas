@@ -908,13 +908,23 @@ begin
   end;
 
   { Read the element count.  Layout depends on the producer (header
-    flag OPDF_FLAG_DYNARRAY_LEN32 — see the OPDF specification):
-    set   → [refcount: Int32][length: Int32] header; length is the
-            Int32 at ArrayPtr - 4.
-    clear → FPC convention; high index (Length - 1) as SizeInt at
-            ArrayPtr - PtrSize. }
+    flags — see the OPDF specification):
+    OPDF_FLAG_LEN64          → length is the Int64 at ArrayPtr - 8.
+    OPDF_FLAG_DYNARRAY_LEN32 → [refcount: Int32][length: Int32] header;
+                               length is the Int32 at ArrayPtr - 4.
+    neither                  → FPC convention; high index (Length - 1)
+                               as SizeInt at ArrayPtr - PtrSize. }
   FillChar(HighBuf, SizeOf(HighBuf), 0);
-  if TypeSystem.FDebugInfoReader.DynArrayLen32 then
+  if TypeSystem.FDebugInfoReader.DynArrayLen64 then
+  begin
+    if not ProcessController.ReadMemory(ArrayPtr - 8, 8, HighBuf) then
+    begin
+      Result.Value := '<error: failed to read array length>';
+      Exit;
+    end;
+    ArrayLength := LongInt(PInt64(@HighBuf)^);
+  end
+  else if TypeSystem.FDebugInfoReader.DynArrayLen32 then
   begin
     if not ProcessController.ReadMemory(ArrayPtr - 4, 4, HighBuf) then
     begin

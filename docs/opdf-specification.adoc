@@ -124,7 +124,8 @@ end;
 |Bit |Name |Meaning
 
 |0 |`OPDF_FLAG_HAS_DIRECTORY` |A unit-directory record follows the header.
-|1 |`OPDF_FLAG_DYNARRAY_LEN32` |Dynamic arrays use a `[refcount: Int32][length: Int32]` heap header; the element count is the Int32 at `data - 4`. When clear, the FPC convention applies: the high index (`Length - 1`) is stored as a SizeInt at `data - PointerSize`.
+|1 |`OPDF_FLAG_DYNARRAY_LEN32` |Dynamic arrays use a `[refcount: Int32][length: Int32]` heap header; the element count is the Int32 at `data - 4`. When clear (and bit 2 is clear), the FPC convention applies: the high index (`Length - 1`) is stored as a SizeInt at `data - PointerSize`.
+|2 |`OPDF_FLAG_LEN64` |A dynamic array's element count is the Int64 at `data - 8` (Blaise 0.16 and later). Takes precedence over bit 1, which such producers do not set. A string's length is also 64-bit; its offsets are in the string record.
 |===
 
 Unassigned bits are reserved and must be emitted as zero.
@@ -400,9 +401,21 @@ The variable stores elements inline, packed contiguously from `LowerBound` to `U
 .Dynamic array runtime layout (x86_64)
 
 The heap header layout depends on the producer and is declared via the
-`OPDF_FLAG_DYNARRAY_LEN32` header flag.
+`OPDF_FLAG_LEN64` and `OPDF_FLAG_DYNARRAY_LEN32` header flags.
 
-With `OPDF_FLAG_DYNARRAY_LEN32` set (e.g. the Blaise compiler):
+With `OPDF_FLAG_LEN64` set (the Blaise compiler from 0.16):
+
+----
+Variable: [Pointer: 8 bytes]
+  -> Heap block:
+     Offset -24: Element hook (Pointer)
+     Offset -12: Reference count (Int32)
+     Offset  -8: Length (Int64) — element count
+     Offset   0: Element 0 (16-aligned)
+     ...
+----
+
+With `OPDF_FLAG_DYNARRAY_LEN32` set (the Blaise compiler before 0.16):
 
 ----
 Variable: [Pointer: 8 bytes]

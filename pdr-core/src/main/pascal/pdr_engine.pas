@@ -2711,7 +2711,17 @@ begin
       Exit;
     end;
     FillChar(LenBuf, SizeOf(LenBuf), 0);
-    if FDebugInfoReader.DynArrayLen32 then
+    if FDebugInfoReader.DynArrayLen64 then
+    begin
+      { Int64 length at data - 8 (OPDF_FLAG_LEN64). }
+      if not FProcessController.ReadMemory(DynPtr - 8, 8, LenBuf) then
+      begin
+        WriteLn(StdErr, '[ERROR] Failed to read dynamic array length');
+        Exit;
+      end;
+      UpperBound := PInt64(@LenBuf)^ - 1;
+    end
+    else if FDebugInfoReader.DynArrayLen32 then
     begin
       { [refcount: Int32][length: Int32] header — length at data - 4. }
       if not FProcessController.ReadMemory(DynPtr - 4, 4, LenBuf) then

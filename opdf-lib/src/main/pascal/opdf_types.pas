@@ -31,6 +31,11 @@ const
     the FPC convention applies: high index (Length - 1) stored as a
     SizeInt at data - PointerSize. }
   OPDF_FLAG_DYNARRAY_LEN32 = 2;
+  { A string's and a dynamic array's Length is an Int64 at data - 8 (Blaise
+    0.16 and later: a 24-byte string header, a 32-byte dynamic-array header
+    with the refcount at data - 12).  Takes precedence over
+    OPDF_FLAG_DYNARRAY_LEN32, which such producers no longer set. }
+  OPDF_FLAG_LEN64 = 4;
 
 type
   { Architecture identifiers }
