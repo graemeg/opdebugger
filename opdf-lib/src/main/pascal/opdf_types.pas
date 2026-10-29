@@ -36,6 +36,13 @@ const
     with the refcount at data - 12).  Takes precedence over
     OPDF_FLAG_DYNARRAY_LEN32, which such producers no longer set. }
   OPDF_FLAG_LEN64 = 4;
+  { Every recFunctionScope ends with a ParentScopeID (Cardinal, after the
+    name): the ScopeID of the enclosing routine of a nested one, 0 for a
+    top-level routine.  ScopeIDs are unique within one OPDF block (one
+    header); a reader joining blocks keeps them apart.  When set, a reader
+    searches only the linked parent for an outer variable, never guessing
+    from DeclIndex.  Blaise 0.16 and later. }
+  OPDF_FLAG_SCOPE_PARENT = 8;
 
 type
   { Architecture identifiers }

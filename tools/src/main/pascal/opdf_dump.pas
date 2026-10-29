@@ -309,15 +309,24 @@ begin
       [Def.Address, Def.LineNumber, Def.ColumnNumber, FileName]));
 end;
 
-procedure DumpFunctionScope(Stream: TStream);
+procedure DumpFunctionScope(Stream: TStream; RecEnd: Int64);
 var
   Def: TDefFunctionScope;
   Name: String;
+  Parent: Cardinal;
 begin
   Stream.Read(Def, SizeOf(Def));
   Name := ReadString(Stream, Def.NameLen);
-  WriteLn(Format('    ScopeID=0x%x LowPC=0x%x HighPC=0x%x DeclIdx=%d Name="%s"',
-    [Def.ScopeID, Def.LowPC, Def.HighPC, Def.DeclIndex, Name]));
+  { OPDF_FLAG_SCOPE_PARENT: a ParentScopeID follows the name }
+  if Stream.Position + SizeOf(Cardinal) <= RecEnd then
+  begin
+    Stream.Read(Parent, SizeOf(Parent));
+    WriteLn(Format('    ScopeID=0x%x LowPC=0x%x HighPC=0x%x DeclIdx=%d Parent=0x%x Name="%s"',
+      [Def.ScopeID, Def.LowPC, Def.HighPC, Def.DeclIndex, Parent, Name]));
+  end
+  else
+    WriteLn(Format('    ScopeID=0x%x LowPC=0x%x HighPC=0x%x DeclIdx=%d Name="%s"',
+      [Def.ScopeID, Def.LowPC, Def.HighPC, Def.DeclIndex, Name]));
 end;
 
 procedure DumpInterface(Stream: TStream);
@@ -670,7 +679,7 @@ begin
                                 Write(Format('  [%d] LineInfo (size=%d): ', [TotalRecords, RecHeader.RecSize]));
                               DumpLineInfo(Stream, OptFilterFile);
                             end;
-          recFunctionScope: DumpFunctionScope(Stream);
+          recFunctionScope: DumpFunctionScope(Stream, RecStart + RecHeader.RecSize);
           recInterface:     DumpInterface(Stream);
           recEnum:          DumpEnum(Stream);
           recSet:           DumpSet(Stream);

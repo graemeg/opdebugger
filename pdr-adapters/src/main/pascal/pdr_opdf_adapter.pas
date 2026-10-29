@@ -38,6 +38,11 @@ type
     HighPC: QWord;          // End address of function
     Name: String;           // Function name
     DeclIndex: Word;        // Declaration order in parent scope
+    { OPDF_FLAG_SCOPE_PARENT producers link a nested routine to its
+      enclosing one; Linked is False for files without the flag, where
+      ParentScopeID is unknown and the DeclIndex heuristic applies. }
+    Linked: Boolean;
+    ParentScopeID: Cardinal; // enclosing routine's ScopeID; 0 = top-level
   end;
   PFunctionScope = ^TFunctionScope;
 
@@ -122,6 +127,7 @@ type
     procedure ClearCache;
     function FindOPDFFile(const BinaryPath: String): String;
     function GetCurrentFunctionScope(RIP: QWord): Cardinal;
+    function FindScope(ScopeID: Cardinal): PFunctionScope;
     function FindLocalVariablesInScope(ScopeID: Cardinal): TLocalVariableArray;
     function CollisionRemap(TypeID: TTypeID): TTypeID;
     function ResolveTypeCollision(OrigTypeID: TTypeID; const TypeName: String;
@@ -619,8 +625,25 @@ var
   RecStartPos: Int64;
   Resolution: Byte;
   GlobalTypeID: TTypeID;
+  ScopeBase, MaxScopeID: Cardinal;
+  BlockLinked: Boolean;
+  ParentID: Cardinal;
+
+  { A block's ScopeIDs restart (each unit's emitter numbers its own), so
+    each block's are offset past the previous blocks'. }
+  function MapScope(AID: Cardinal): Cardinal;
+  begin
+    if AID = 0 then
+      Exit(0);
+    Result := AID + ScopeBase;
+    if Result > MaxScopeID then
+      MaxScopeID := Result;
+  end;
+
 begin
   Result := False;
+  ScopeBase := 0;
+  MaxScopeID := 0;
 
   // Clear any previously loaded data
   ClearCache;
@@ -676,6 +699,7 @@ begin
   end;
 
   FHeader := FReader.Header;
+  BlockLinked := (FHeader.Flags and OPDF_FLAG_SCOPE_PARENT) <> 0;
 
   if not IsValidOPDFHeader(FHeader) then
   begin
@@ -699,6 +723,8 @@ begin
     { Check if we're at another OPDF header (next compilation unit) }
     if FReader.TryReadNextHeader then
     begin
+      ScopeBase := MaxScopeID;
+      BlockLinked := (FReader.Header.Flags and OPDF_FLAG_SCOPE_PARENT) <> 0;
       if gVerbose then
         WriteLn(StdErr, '[DEBUG] New OPDF header at offset 0x', IntToHex(FStream.Position - SizeOf(TOPDFHeader), 1));
       Continue;
@@ -909,6 +935,7 @@ begin
           if FReader.ReadLocalVar(DefLocalVar, LocationData, CompanionData, VarName) then
           begin
             { Get or create local variables list for this scope }
+            DefLocalVar.ScopeID := MapScope(DefLocalVar.ScopeID);
             LocalList := TFPList(FLocalVariables.Find(IntToStr(DefLocalVar.ScopeID)));
             if not Assigned(LocalList) then
             begin
@@ -934,9 +961,16 @@ begin
         begin
           if FReader.ReadFunctionScope(DefFunctionScope, FunctionName) then
           begin
+            { OPDF_FLAG_SCOPE_PARENT: the ParentScopeID after the name }
+            ParentID := 0;
+            if BlockLinked and
+               (FStream.Position + SizeOf(Cardinal) <= RecStartPos + RecHeader.RecSize) then
+              FStream.Read(ParentID, SizeOf(ParentID));
             { Add function scope to cache }
             New(PScope);
-            PScope^.ScopeID := DefFunctionScope.ScopeID;
+            PScope^.ScopeID := MapScope(DefFunctionScope.ScopeID);
+            PScope^.Linked := BlockLinked;
+            PScope^.ParentScopeID := MapScope(ParentID);
             PScope^.LowPC := DefFunctionScope.LowPC;
             PScope^.HighPC := DefFunctionScope.HighPC;
             PScope^.Name := TFPCDemangler.DemangleGenericName(FunctionName);
@@ -1321,6 +1355,19 @@ begin
     WriteLn(StdErr, '[DEBUG] Variable not found: ', Name);
 end;
 
+function TOPDFReaderAdapter.FindScope(ScopeID: Cardinal): PFunctionScope;
+var
+  I: Integer;
+begin
+  for I := 0 to FFunctionScopes.Count - 1 do
+  begin
+    Result := PFunctionScope(FFunctionScopes[I]);
+    if Result^.ScopeID = ScopeID then
+      Exit;
+  end;
+  Result := nil;
+end;
+
 { Find variable with scope awareness - checks local variables first, then globals }
 function TOPDFReaderAdapter.FindVariableWithScope(const Name: String; RIP: QWord;
                                                   out VarInfo: TVariableInfo): Boolean;
@@ -1368,6 +1415,37 @@ begin
                   ' LocationData=', LocalVar.LocationData);
         Exit;
       end;
+    end;
+
+    { A linked scope (OPDF_FLAG_SCOPE_PARENT) names its enclosing routine:
+      search that routine's locals only.  The parent-frame location reads
+      the caller's saved frame pointer, which is the enclosing routine's
+      frame for one level of nesting (see the specification), so a
+      grandparent's variables are not offered rather than read from the
+      wrong frame. }
+    FuncScope := FindScope(ScopeID);
+    if (FuncScope <> nil) and FuncScope^.Linked then
+    begin
+      if FuncScope^.ParentScopeID <> 0 then
+      begin
+        Locals := FindLocalVariablesInScope(FuncScope^.ParentScopeID);
+        for J := 0 to High(Locals) do
+        begin
+          LocalVar := Locals[J];
+          if LowerCase(LocalVar.Name) = SearchName then
+          begin
+            VarInfo.Name := LocalVar.Name;
+            VarInfo.TypeID := LocalVar.TypeID;
+            VarInfo.Address := 0;
+            VarInfo.LocationExpr := 2; { Parent frame RBP-relative }
+            VarInfo.LocationData := LocalVar.LocationData;
+            Result := True;
+            Exit;
+          end;
+        end;
+      end;
+      Result := FindVariable(Name, VarInfo);
+      Exit;
     end;
 
     { Not found in current scope — search enclosing scopes (for nested procedures).
@@ -1757,6 +1835,11 @@ begin
     end;
   end;
   if CurScope = nil then
+    Exit;
+  { A linked scope already lists the outer variables the routine uses
+    (the producer records them in the nested scope), and its parent is
+    named exactly, so the DeclIndex heuristic below must not run. }
+  if CurScope^.Linked then
     Exit;
   CurDeclIndex := CurScope^.DeclIndex;
 

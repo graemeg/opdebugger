@@ -1,0 +1,14 @@
+run
+break test_39_scope_lookup.pas:16
+break test_39_scope_lookup.pas:26
+break test_39_scope_lookup.pas:44
+continue
+locals
+continue
+print Captured
+print Uncaptured
+print Counter
+continue
+print Counter
+print SL.FCount
+quit

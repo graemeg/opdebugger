@@ -126,6 +126,7 @@ end;
 |0 |`OPDF_FLAG_HAS_DIRECTORY` |A unit-directory record follows the header.
 |1 |`OPDF_FLAG_DYNARRAY_LEN32` |Dynamic arrays use a `[refcount: Int32][length: Int32]` heap header; the element count is the Int32 at `data - 4`. When clear (and bit 2 is clear), the FPC convention applies: the high index (`Length - 1`) is stored as a SizeInt at `data - PointerSize`.
 |2 |`OPDF_FLAG_LEN64` |A dynamic array's element count is the Int64 at `data - 8` (Blaise 0.16 and later). Takes precedence over bit 1, which such producers do not set. A string's length is also 64-bit; its offsets are in the string record.
+|3 |`OPDF_FLAG_SCOPE_PARENT` |Every `recFunctionScope` in this block ends with a `ParentScopeID` (see Function Scope). A reader resolves an outer variable through the named parent only and does not apply the `DeclIndex` heuristic (Blaise 0.16 and later).
 |===
 
 Unassigned bits are reserved and must be emitted as zero.
@@ -862,16 +863,21 @@ Associates a function name with its code address range. Used to resolve which sc
 [source,pascal]
 ----
 TDefFunctionScope = packed record
-  ScopeID: Cardinal;  // 4 bytes — low PC cast to Cardinal (scope identifier)
+  ScopeID: Cardinal;  // 4 bytes — scope identifier, unique within the block
   LowPC: QWord;       // 8 bytes — function entry address (linker-resolved)
   HighPC: QWord;      // 8 bytes — function exit address (linker-resolved)
+  DeclIndex: Word;    // 2 bytes — declaration order in the parent scope
   NameLen: TNameLen;  // 2 bytes
   // Followed by: Name (NameLen bytes)
+  // Followed by: ParentScopeID (Cardinal, 4 bytes) when the header sets
+  //              OPDF_FLAG_SCOPE_PARENT
 end;
-// Fixed part: 22 bytes
+// Fixed part: 24 bytes
 ----
 
-`ScopeID` must match the `ScopeID` fields in all `recLocalVar` records belonging to this function. It is derived from `LowPC` at read time (low 32 bits of the entry address).
+`ScopeID` must match the `ScopeID` fields in all `recLocalVar` records belonging to this function. It is unique within one OPDF block (the records after one header); a producer that emits one block per compilation unit may number each block's scopes from 1, so a reader that joins blocks keeps their ScopeIDs apart (pdr offsets each block's IDs past the previous blocks').  A producer may use the low 32 bits of `LowPC` as the ScopeID.
+
+`ParentScopeID` is the `ScopeID` of the routine that encloses a nested routine, in the same block, and 0 for a top-level routine (a standalone routine, a method or the program body).  It is present on every scope record of a block whose header sets `OPDF_FLAG_SCOPE_PARENT`; a reader that predates the field skips it, since records are advanced by `RecSize`.  With the flag set, a debugger resolving a name at a breakpoint searches the stopped routine's locals, then the parent's (addressed through the parent frame, `LocationExpr = 2`, one level of nesting), then the globals.  Without it, the parent is unknown and the reader may fall back to the `DeclIndex` heuristic, which suits FPC's `DeclIndex` (the routine's position in the parent's symbol list) but not a producer that numbers routines in emission order.
 
 === Unwind Info (recUnwindInfo = 24)
 
