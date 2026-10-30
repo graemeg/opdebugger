@@ -2,11 +2,11 @@ program test_34_return;
 
 { 'return' forces the current function to return immediately; execution
   resumes at the caller's line after the call.  Port of the FPC suite's
-  test_34 (LongInt -> Integer for the Blaise dialect). }
+  test_34 (LongInt -> Int for the Blaise dialect). }
 
 procedure DoWork;
 var
-  LocalA: Integer;
+  LocalA: Int;
 begin
   LocalA := 10;
   LocalA := 20;
@@ -14,7 +14,7 @@ begin
 end;
 
 var
-  MainVal: Integer;
+  MainVal: Int;
 
 begin
   MainVal := 1;

@@ -11,7 +11,7 @@ var
   WorkingDays: TDaySet;
   Weekend: TDaySet;
   EmptySet: TDaySet;
-  Sentinel: Integer;   { dummy breakpoint target after all assignments }
+  Sentinel: Int;   { dummy breakpoint target after all assignments }
 
 begin
   WorkingDays := [Mon, Tue, Wed, Thu, Fri];

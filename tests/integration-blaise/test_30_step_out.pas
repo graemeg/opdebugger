@@ -3,13 +3,13 @@ program test_30_step_out;
 { finish (step-out) inside a called function must return to the caller's
   next line after the call.  Port of the FPC suite's test_30. }
 
-function Twice(N: Integer): Integer;
+function Twice(N: Int): Int;
 begin
   Result := N * 2;
 end;
 
 var
-  Value, Doubled: Integer;
+  Value, Doubled: Int;
 
 begin
   Value := 21;

@@ -1,4 +1,4 @@
-      4    A, B, C: Integer;
+      4    A, B, C: Int;
       5
       6  begin
       7    A := 10;

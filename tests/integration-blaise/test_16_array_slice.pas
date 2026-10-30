@@ -4,9 +4,9 @@ program test_16_array_slice;
   Port of the FPC suite's test_16. }
 
 var
-  BigArray: array[0..9] of Integer;
-  Sentinel: Integer;
-  I: Integer;
+  BigArray: array[0..9] of Int;
+  Sentinel: Int;
+  I: Int;
 
 begin
   for I := 0 to 9 do

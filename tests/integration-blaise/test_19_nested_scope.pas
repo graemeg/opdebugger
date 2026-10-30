@@ -6,11 +6,11 @@ program test_19_nested_scope;
 
   procedure Foo;
   var
-    SeenByBar: Integer;
+    SeenByBar: Int;
 
     procedure Bar;
     var
-      BarLocal: Integer;
+      BarLocal: Int;
     begin
       SeenByBar := 1;
       BarLocal := 2;
@@ -18,7 +18,7 @@ program test_19_nested_scope;
     end;
 
   var
-    NotSeenByBar: Integer;
+    NotSeenByBar: Int;
 
   begin
     SeenByBar := 99;

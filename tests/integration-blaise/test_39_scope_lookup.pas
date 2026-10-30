@@ -10,7 +10,7 @@ program test_39_scope_lookup;
 uses Classes;
 
 procedure Other;
-var Counter: Integer;
+var Counter: Int;
 begin
   Counter := 7;
   WriteLn('[PROG] other ', Counter);
@@ -18,8 +18,8 @@ end;
 
 procedure Outer;
 var
-  Captured: Integer;
-  Uncaptured: Integer;
+  Captured: Int;
+  Uncaptured: Int;
 
   procedure Inner;
   begin
@@ -33,7 +33,7 @@ begin
 end;
 
 var
-  Counter: Integer;
+  Counter: Int;
   SL: TStringList;
 begin
   Counter := 99;

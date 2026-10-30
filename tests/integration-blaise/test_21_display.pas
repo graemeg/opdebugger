@@ -4,8 +4,8 @@ program test_21_display;
   Port of the FPC suite's test_21. }
 
 var
-  Iter: Integer;
-  Sum: Integer;
+  Iter: Int;
+  Sum: Int;
 begin
   Sum := 0;
   for Iter := 1 to 5 do

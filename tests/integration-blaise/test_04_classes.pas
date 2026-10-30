@@ -7,7 +7,7 @@ program test_04_classes;
 type
   TMyClass = class
   private
-    FInteger: Integer;
+    FInteger: Int;
     FBoolean: Boolean;
     FAnsiString: String;
   public
@@ -18,7 +18,7 @@ type
 var
   MyInstance: TMyClass;
   MyNilInstance: TMyClass;
-  Sentinel: Integer;
+  Sentinel: Int;
 
 constructor TMyClass.Create;
 begin

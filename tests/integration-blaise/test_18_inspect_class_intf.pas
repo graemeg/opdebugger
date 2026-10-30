@@ -7,24 +7,24 @@ program test_18_inspect_class_intf;
 type
   ICounter = interface
     procedure Increment;
-    function GetValue: Integer;
+    function GetValue: Int;
   end;
 
   TSimpleCounter = class(TObject, ICounter)
   private
-    FCount: Integer;
+    FCount: Int;
   public
     procedure Increment;
-    function GetValue: Integer;
+    function GetValue: Int;
   end;
 
   TMyBox = class
   private
-    FWidth: Integer;
-    FHeight: Integer;
+    FWidth: Int32;
+    FHeight: Int32;
   public
-    property Width: Integer read FWidth write FWidth;
-    property Height: Integer read FHeight write FHeight;
+    property Width: Int32 read FWidth write FWidth;
+    property Height: Int32 read FHeight write FHeight;
   end;
 
 procedure TSimpleCounter.Increment;
@@ -32,7 +32,7 @@ begin
   Inc(FCount);
 end;
 
-function TSimpleCounter.GetValue: Integer;
+function TSimpleCounter.GetValue: Int;
 begin
   Result := FCount;
 end;
@@ -41,7 +41,7 @@ var
   Box: TMyBox;
   Counter: ICounter;
   CounterObj: TSimpleCounter;
-  Sentinel: Integer;
+  Sentinel: Int;
 
 begin
   Box := TMyBox.Create;

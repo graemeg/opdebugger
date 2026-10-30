@@ -2,15 +2,15 @@ program test_35_expressions;
 
 { The expression evaluator handles arithmetic, comparison, boolean, bit-shift,
   subscript, and built-in calls in 'print'.  Port of the FPC suite's test_35
-  (LongInt -> Integer, AnsiString -> String). }
+  (LongInt -> Int, AnsiString -> String). }
 
 var
-  IntA: Integer;
-  IntB: Integer;
-  FloatC: Double;
+  IntA: Int;
+  IntB: Int;
+  FloatC: Float;
   BoolFlag: Boolean;
   MyStr: String;
-  Arr: array[0..4] of Integer;
+  Arr: array[0..4] of Int;
 
 begin
   IntA := 10;

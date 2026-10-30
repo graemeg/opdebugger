@@ -4,10 +4,10 @@ program test_09_dynamic_arrays;
   Port of the FPC suite's test_09 (Blaise type system: one UTF-8 string type). }
 
 var
-  DynIntArray: array of Integer;
+  DynIntArray: array of Int;
   DynStringArray: array of String;
-  NilArray: array of Integer;
-  Sentinel: Integer;
+  NilArray: array of Int;
+  Sentinel: Int;
 
 begin
   SetLength(DynIntArray, 5);

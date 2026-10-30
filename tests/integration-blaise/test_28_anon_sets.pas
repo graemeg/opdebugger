@@ -16,7 +16,7 @@ type
 var
   SetOne: TSetA;
   SetTwo: TSetB;
-  Sentinel: Integer;
+  Sentinel: Int;
 begin
   SetOne := [sa1, sa2];
   SetTwo := [sb1, sb2];

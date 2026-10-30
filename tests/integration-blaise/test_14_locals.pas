@@ -4,13 +4,13 @@ program test_14_locals;
   Port of the FPC suite's test_14. }
 
 var
-  GlobalCount: Integer;
-  Sentinel: Integer;
+  GlobalCount: Int;
+  Sentinel: Int;
 
-function Compute(A, B: Integer): Integer;
+function Compute(A, B: Int): Int;
 var
-  Sum: Integer;
-  Product: Integer;
+  Sum: Int;
+  Product: Int;
 begin
   Sum := A + B;
   Product := A * B;

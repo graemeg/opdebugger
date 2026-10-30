@@ -24,7 +24,7 @@ end;
 procedure OuterProcedure;
 var
   ParentVar: String;
-  Counter: Integer;
+  Counter: Int;
 
   procedure InnerNested;
   begin
@@ -41,7 +41,7 @@ end;
 
 var
   Obj: TTeaser;
-  Sentinel: Integer;
+  Sentinel: Int;
 begin
   Obj := TTeaser.Create('Mystery', Wed);
   OuterProcedure();

@@ -5,13 +5,13 @@ program test_26_step_over;
   that step-over uses function scope (address range) rather than line numbers.
   Port of the FPC suite's test_26 — feature-agnostic. }
 
-procedure SetResult(var N: Integer; V: Integer);
+procedure SetResult(var N: Int; V: Int);
 begin
   N := V;
 end;
 
 var
-  Counter: Integer;
+  Counter: Int;
 
 begin
   Counter := 0;

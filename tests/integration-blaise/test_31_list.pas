@@ -1,7 +1,7 @@
 program test_31_list;
 
 var
-  A, B, C: Integer;
+  A, B, C: Int;
 
 begin
   A := 10;

@@ -4,8 +4,8 @@ program test_20_conditional_break;
   7th hit of the loop body.  Port of the FPC suite's test_20. }
 
 var
-  Iter: Integer;
-  Sum: Integer;
+  Iter: Int;
+  Sum: Int;
 begin
   Sum := 0;
   for Iter := 1 to 10 do

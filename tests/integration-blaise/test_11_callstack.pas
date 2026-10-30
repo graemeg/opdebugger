@@ -7,7 +7,7 @@ program test_11_callstack;
 
 procedure Level3;
 var
-  Marker: Integer;
+  Marker: Int;
 begin
   WriteLn('In Level3');
   Marker := 1;   { break here }
@@ -26,8 +26,8 @@ begin
 end;
 
 var
-  X, Y: Integer;
-  Sentinel: Integer;
+  X, Y: Int;
+  Sentinel: Int;
 
 begin
   WriteLn('Call Stack Test');

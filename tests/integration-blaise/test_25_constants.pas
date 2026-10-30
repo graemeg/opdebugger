@@ -1,6 +1,6 @@
 program test_25_constants;
 
-{ Compile-time constants render via 'print': ordinal (Integer, Boolean, Char),
+{ Compile-time constants render via 'print': ordinal (Int, Boolean, Char),
   real, and string kinds.  Port of the FPC suite's test_25.  Boolean and real
   constants exercise the ckOrd(typed)/ckReal OPDF constant paths. }
 
@@ -12,7 +12,7 @@ const
   AppTitle    = 'Hello Debug';
 
 var
-  Sentinel: Integer;
+  Sentinel: Int;
 
 begin
   Sentinel := 1;        { break here }

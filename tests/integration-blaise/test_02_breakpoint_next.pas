@@ -1,12 +1,12 @@
 program test_02_breakpoint_next;
 
 { Breakpoint + next (step-over at program scope).  Port of the FPC suite's
-  test_02; feature-agnostic — the Integer assignments exist only to give
+  test_02; feature-agnostic — the Int assignments exist only to give
   `next` something to step over. }
 
 var
-  MyInt: Integer;
-  Sentinel: Integer;
+  MyInt: Int;
+  Sentinel: Int;
 
 begin
   WriteLn('Test: Breakpoint and Next');

@@ -1,16 +1,16 @@
 program test_32_frame_navigation;
 
-procedure Inner(X: Integer);
+procedure Inner(X: Int);
 var
-  LocalInner: Integer;
+  LocalInner: Int;
 begin
   LocalInner := X * 3;
   WriteLn(LocalInner);  { line 8: break here }
 end;
 
-procedure Outer(Y: Integer);
+procedure Outer(Y: Int);
 var
-  LocalOuter: Integer;
+  LocalOuter: Int;
 begin
   LocalOuter := Y + 10;
   Inner(LocalOuter);    { line 16 }

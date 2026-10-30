@@ -4,9 +4,9 @@ program test_17_set_variable;
   Port of the FPC suite's test_17. }
 
 var
-  Counter: Integer;
+  Counter: Int;
   MyFlag: Boolean;
-  Sentinel: Integer;
+  Sentinel: Int;
 
 begin
   Counter := 5;

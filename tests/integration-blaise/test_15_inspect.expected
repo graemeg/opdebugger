@@ -1,2 +1,2 @@
-PX = 100     [Integer, offset +0]
-PY = 200     [Integer, offset +4]
+PX = 100     [Int32, offset +0]
+PY = 200     [Int32, offset +4]

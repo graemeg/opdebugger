@@ -4,8 +4,8 @@ program test_36_expr_condition;
   Port of the FPC suite's test_36. }
 
 var
-  Idx: Integer;
-  Total: Integer;
+  Idx: Int;
+  Total: Int;
 
 begin
   Total := 0;

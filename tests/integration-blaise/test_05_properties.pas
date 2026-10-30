@@ -7,7 +7,7 @@ program test_05_properties;
 type
   TBaseClass = class
   private
-    FBaseValue: Integer;
+    FBaseValue: Int;
     FBaseString: String;
   public
     constructor Create;
@@ -18,12 +18,12 @@ type
   private
     FDerivedValue: Boolean;
     FDerivedString: String;
-    function GetBaseValue: Integer;
+    function GetBaseValue: Int;
     function GetDerivedValue: Boolean;
   public
     constructor Create;
     destructor Destroy; override;
-    property BaseValue: Integer read GetBaseValue;
+    property BaseValue: Int read GetBaseValue;
     property BaseString: String read FBaseString;
     property DerivedValue: Boolean read GetDerivedValue;
     property DerivedString: String read FDerivedString;
@@ -32,7 +32,7 @@ type
 var
   Instance: TDerivedClass;
   BaseInstance: TBaseClass;
-  Sentinel: Integer;
+  Sentinel: Int;
 
 constructor TBaseClass.Create;
 begin
@@ -58,7 +58,7 @@ begin
   inherited Destroy();
 end;
 
-function TDerivedClass.GetBaseValue: Integer;
+function TDerivedClass.GetBaseValue: Int;
 begin
   Result := FBaseValue;
 end;

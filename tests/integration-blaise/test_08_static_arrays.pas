@@ -7,10 +7,10 @@ program test_08_static_arrays;
   (Blaise has no array-of-Char type — character data is the string type). }
 
 var
-  IntArray: array[0..4] of Integer;
+  IntArray: array[0..4] of Int;
   StringArray: array[0..2] of String;
-  TwoDArray: array[0..1, 0..2] of Integer;
-  Sentinel: Integer;
+  TwoDArray: array[0..1, 0..2] of Int;
+  Sentinel: Int;
 
 begin
   IntArray[0] := 10;

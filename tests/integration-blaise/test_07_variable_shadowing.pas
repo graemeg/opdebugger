@@ -5,12 +5,12 @@ program test_07_variable_shadowing;
   FPC suite's test_07. }
 
 var
-  Counter: Integer;  // global Counter
-  Sentinel: Integer;
+  Counter: Int;  // global Counter
+  Sentinel: Int;
 
 procedure ModifyCounter;
 var
-  Counter: Integer;  // local, shadows global
+  Counter: Int;  // local, shadows global
 begin
   Counter := 42;
   WriteLn('Inside ModifyCounter, Counter = ', Counter);  { break here: 42 }
@@ -18,7 +18,7 @@ end;
 
 procedure PrintOtherCounter;
 var
-  Counter: Integer;  // local, shadows global
+  Counter: Int;  // local, shadows global
 begin
   Counter := 99;
   WriteLn('Inside PrintOtherCounter, Counter = ', Counter);  { break here: 99 }

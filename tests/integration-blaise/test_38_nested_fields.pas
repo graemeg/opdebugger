@@ -6,8 +6,8 @@ program test_38_nested_fields;
 
 type
   TPoint = record
-    XPos: Integer;
-    YPos: Integer;
+    XPos: Int;
+    YPos: Int;
   end;
 
   TRect = record
@@ -17,8 +17,8 @@ type
 
   TInner = class
   public
-    Value: Integer;
-    constructor Create(AValue: Integer);
+    Value: Int;
+    constructor Create(AValue: Int);
   end;
 
   TOuter = class
@@ -28,7 +28,7 @@ type
     constructor Create(AName: String; AInner: TInner);
   end;
 
-constructor TInner.Create(AValue: Integer);
+constructor TInner.Create(AValue: Int);
 begin
   Value := AValue;
 end;
@@ -42,7 +42,7 @@ end;
 var
   Rect: TRect;
   Obj: TOuter;
-  Sentinel: Integer;
+  Sentinel: Int;
 
 begin
   Rect.TopLeft.XPos := 10;

@@ -4,8 +4,8 @@ program test_22_watchpoint;
   Port of the FPC suite's test_22. }
 
 var
-  Counter: Integer;
-  Sentinel: Integer;
+  Counter: Int;
+  Sentinel: Int;
 begin
   Counter := 0;
   Sentinel := 1;       { break here, after Counter assigned }

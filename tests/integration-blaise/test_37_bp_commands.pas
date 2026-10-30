@@ -1,8 +1,8 @@
 program test_37_bp_commands;
 
 var
-  Idx: Integer;
-  Total: Integer;
+  Idx: Int;
+  Total: Int;
 
 begin
   Total := 0;

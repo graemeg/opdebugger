@@ -5,13 +5,13 @@ program test_15_inspect;
 
 type
   TMyPoint = record
-    PX: Integer;
-    PY: Integer;
+    PX: Int32;
+    PY: Int32;
   end;
 
 var
   MyPt: TMyPoint;
-  Sentinel: Integer;
+  Sentinel: Int;
 
 begin
   MyPt.PX := 100;

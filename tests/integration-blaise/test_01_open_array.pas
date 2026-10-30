@@ -13,9 +13,9 @@ program test_01_open_array;
   output), so 'a'/'b' would be filtered away. }
 
 type
-  TIntArray = array of Integer;
+  TIntArray = array of Int;
 
-procedure Bar(OpenArr: array of Integer; DynArr: TIntArray);
+procedure Bar(OpenArr: array of Int; DynArr: TIntArray);
 begin
   WriteLn(OpenArr[1]);   { break here: OpenArr (open) and DynArr (dynamic) are live }
 end;
