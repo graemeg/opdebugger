@@ -302,7 +302,8 @@ type
     LocationExpr: Byte;       // 1 byte (location expression type)
     DeclIndex: Word;          // 2 bytes (declaration order in parent scope)
     NameLen: TNameLen;        // 2 bytes
-    // Followed by location data (register, stack offset, etc.)
+    // Followed by LocationData (LongInt, 4 bytes: stack offset, register, ...)
+    // and, for LocationExpr=5 (open array), CompanionData (LongInt, 4 bytes)
     // Followed by Name (NameLen bytes)
   end;
 
@@ -410,7 +411,7 @@ type
   TDefConstant = packed record
     TypeID: TTypeID;      // 4 bytes (type of the constant, 0 if untyped)
     ConstKind: Byte;      // 1 byte (TConstantKind)
-    ValueLen: Word;       // 2 bytes (byte length of value data)
+    ValueLen: Cardinal;   // 4 bytes (byte length of value data)
     NameLen: TNameLen;    // 2 bytes (byte length of name)
     // Followed by ValueLen bytes of value data
     // Followed by NameLen bytes of name
@@ -430,7 +431,7 @@ type
     ClassTypeID: TTypeID;   // 4 bytes — owning class type
     TypeID:      TTypeID;   // 4 bytes — constant's type (0 if untyped)
     ConstKind:   Byte;      // 1 byte (TConstantKind)
-    ValueLen:    Word;      // 2 bytes (byte length of value data)
+    ValueLen:    Cardinal;  // 4 bytes (byte length of value data)
     NameLen:     TNameLen;  // 2 bytes
     // Followed by ValueLen bytes of value data
     // Followed by NameLen bytes of name

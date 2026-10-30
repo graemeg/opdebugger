@@ -750,10 +750,11 @@ TDefLocalVar = packed record
   LocationExpr: Byte;   // 1 byte — location expression type
   DeclIndex: Word;      // 2 bytes — declaration order in parent scope
   NameLen: TNameLen;    // 2 bytes
-  // Followed by: LocationData (SmallInt, 2 bytes — see Location Expressions)
+  // Followed by: LocationData (LongInt, 4 bytes — see Location Expressions)
+  // Followed by: CompanionData (LongInt, 4 bytes) when LocationExpr = 5
   // Followed by: Name (NameLen bytes)
 end;
-// Fixed part: 13 bytes + LocationData (2 bytes) + Name
+// Fixed part: 13 bytes + LocationData (4 bytes, 8 for an open array) + Name
 ----
 
 === Function Parameter (recParameter = 13)
@@ -782,12 +783,12 @@ A named constant whose value is known at compile time and has no runtime address
 TDefConstant = packed record
   TypeID: TTypeID;    // 4 bytes — type of the constant (0 if untyped)
   ConstKind: Byte;    // 1 byte — TConstantKind (see table below)
-  ValueLen: Word;     // 2 bytes — byte length of value data
+  ValueLen: Cardinal; // 4 bytes — byte length of value data
   NameLen: TNameLen;  // 2 bytes — byte length of name
   // Followed by: ValueLen bytes of value data
   // Followed by: NameLen bytes of name (unmangled Pascal identifier)
 end;
-// Fixed part: 9 bytes
+// Fixed part: 11 bytes
 ----
 
 The name is the unmangled Pascal identifier (e.g. `MaxItems`, not the linker-mangled form), since constants have no linker symbol.
@@ -968,23 +969,23 @@ Location expressions encode where a variable resides at runtime. The `LocationEx
 
 |`1`
 |RBP-relative (current frame)
-|`SmallInt` (2 bytes): signed offset from frame base pointer
+|`LongInt` (4 bytes): signed offset from frame base pointer
 
 |`2`
 |Parent frame RBP-relative
-|`SmallInt` (2 bytes): signed offset from enclosing procedure's frame base pointer
+|`LongInt` (4 bytes): signed offset from enclosing procedure's frame base pointer
 
 |`3`
 |RBP-relative indirect (current frame)
-|`SmallInt` (2 bytes): signed offset of a frame slot that holds the value's ADDRESS
+|`LongInt` (4 bytes): signed offset of a frame slot that holds the value's ADDRESS
 
 |`4`
 |TLS-relative (thread-local)
-|`SmallInt` (2 bytes): signed offset from the thread-local storage base
+|`LongInt` (4 bytes): signed offset from the thread-local storage base
 
 |`5`
 |Open-array (current frame)
-|Two `SmallInt` (4 bytes): the data-pointer slot offset, then the companion `_high` slot offset
+|Two `LongInt` (8 bytes): the data-pointer slot offset, then the companion `_high` slot offset
 
 |`6..255`
 |Reserved

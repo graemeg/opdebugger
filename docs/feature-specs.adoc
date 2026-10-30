@@ -879,7 +879,7 @@ New record type `recConstant = 20` with `TDefConstant` packed record:
 
 * `TypeID: TTypeID` (4 bytes) — type of the constant (0 if untyped)
 * `ConstKind: Byte` (1 byte) — `TConstantKind` (ckOrd=0, ckString=1, ckReal=2, ckNil=3, ckWideStr=4)
-* `ValueLen: Word` (2 bytes) — length of embedded value data
+* `ValueLen: Cardinal` (4 bytes) — length of embedded value data
 * `NameLen: TNameLen` (2 bytes)
 * Followed by ValueLen bytes of value data, then NameLen bytes of name
 

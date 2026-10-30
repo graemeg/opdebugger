@@ -62,7 +62,7 @@ type
                            Address: QWord);
     procedure WriteLocalVar(const VarName: String; TypeID: TTypeID;
                           ScopeID: Cardinal; LocationExpr: Byte;
-                          LocationData: SmallInt);
+                          LocationData: LongInt);
 
     { Write class definition }
     procedure WriteClass(TypeID: TTypeID; ParentTypeID: TTypeID;
@@ -152,7 +152,7 @@ type
     { Read specific record types }
     function ReadPrimitive(out Def: TDefPrimitive; out Name: String): Boolean;
     function ReadGlobalVar(out Def: TDefGlobalVar; out Name: String): Boolean;
-    function ReadLocalVar(out Def: TDefLocalVar; out LocationData: SmallInt; out CompanionData: SmallInt; out Name: String): Boolean;
+    function ReadLocalVar(out Def: TDefLocalVar; out LocationData: LongInt; out CompanionData: LongInt; out Name: String): Boolean;
     function ReadShortString(out Def: TDefShortString; out Name: String): Boolean;
     function ReadAnsiString(out Def: TDefAnsiString; out Name: String): Boolean;
     function ReadUnicodeString(out Def: TDefUnicodeString; out Name: String): Boolean;
@@ -460,7 +460,7 @@ end;
 
 procedure TOPDFWriter.WriteLocalVar(const VarName: String; TypeID: TTypeID;
                                   ScopeID: Cardinal; LocationExpr: Byte;
-                                  LocationData: SmallInt);
+                                  LocationData: LongInt);
 var
   RecHeader: TOPDFRecordHeader;
   Payload: TDefLocalVar;
@@ -475,11 +475,11 @@ begin
   Payload.NameLen := Length(VarName);
 
   RecHeader.RecType := Ord(recLocalVar);
-  RecHeader.RecSize := SizeOf(TDefLocalVar) + SizeOf(SmallInt) + Length(VarName);
+  RecHeader.RecSize := SizeOf(TDefLocalVar) + SizeOf(LongInt) + Length(VarName);
 
   FStream.Write(RecHeader, SizeOf(RecHeader));
   FStream.Write(Payload, SizeOf(Payload));
-  FStream.Write(LocationData, SizeOf(SmallInt));
+  FStream.Write(LocationData, SizeOf(LongInt));
   WriteString(VarName);
 
   Inc(FRecordCount);
@@ -932,7 +932,7 @@ begin
   Result := True;
 end;
 
-function TOPDFReader.ReadLocalVar(out Def: TDefLocalVar; out LocationData: SmallInt; out CompanionData: SmallInt; out Name: String): Boolean;
+function TOPDFReader.ReadLocalVar(out Def: TDefLocalVar; out LocationData: LongInt; out CompanionData: LongInt; out Name: String): Boolean;
 begin
   Result := False;
   CompanionData := 0;
@@ -942,19 +942,19 @@ begin
 
   FStream.Read(Def, SizeOf(Def));
 
-  if FStream.Position + SizeOf(SmallInt) > FStream.Size then
+  if FStream.Position + SizeOf(LongInt) > FStream.Size then
     Exit;
 
-  FStream.Read(LocationData, SizeOf(SmallInt));
+  FStream.Read(LocationData, SizeOf(LongInt));
 
-  { LocationExpr=5 (open-array): a trailing SmallInt holds the companion
+  { LocationExpr=5 (open-array): a trailing LongInt holds the companion
     '_high' slot RBP offset, from which the element count is read at
     runtime.  Consume it so the stream stays aligned. }
   if Def.LocationExpr = 5 then
   begin
-    if FStream.Position + SizeOf(SmallInt) > FStream.Size then
+    if FStream.Position + SizeOf(LongInt) > FStream.Size then
       Exit;
-    FStream.Read(CompanionData, SizeOf(SmallInt));
+    FStream.Read(CompanionData, SizeOf(LongInt));
   end;
 
   if FStream.Position + Def.NameLen > FStream.Size then

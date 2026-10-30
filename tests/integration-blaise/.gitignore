@@ -12,3 +12,5 @@ test_*_*
 !test_*_*.pas
 !test_*_*.commands
 !test_*_*.expected
+# Assets a test program embeds ({$EMBEDSTR}).
+!test_*_*.txt

@@ -1,0 +1,9 @@
+run
+break test_40_large_frame.pas:21
+continue
+print Marker
+print Tail
+print Pad[0]
+print Short
+print Big
+quit

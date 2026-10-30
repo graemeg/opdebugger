@@ -227,8 +227,8 @@ type
     TypeID: TTypeID;
     Address: QWord;
     LocationExpr: Byte;      // For stack-based: 0=global, 1=RBP-relative, 5=open-array
-    LocationData: SmallInt;  // For stack-based: RBP offset
-    CompanionData: SmallInt; // Open-array (LocationExpr=5): companion _high slot RBP offset
+    LocationData: LongInt;   // For stack-based: RBP offset
+    CompanionData: LongInt;  // Open-array (LocationExpr=5): companion _high slot RBP offset
     CompanionAddr: QWord;    // Open-array: resolved absolute address of the _high slot
   end;
 

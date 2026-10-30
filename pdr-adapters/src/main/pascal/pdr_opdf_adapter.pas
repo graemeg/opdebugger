@@ -52,8 +52,8 @@ type
     TypeID: TTypeID;        // Type identifier
     ScopeID: Cardinal;      // Function scope ID
     LocationExpr: Byte;     // Location expression type (1=RBP-relative, 5=open-array)
-    LocationData: SmallInt; // RBP offset (signed)
-    CompanionData: SmallInt;// Open-array (LocationExpr=5): companion _high slot offset
+    LocationData: LongInt;  // RBP offset (signed)
+    CompanionData: LongInt; // Open-array (LocationExpr=5): companion _high slot offset
     DeclIndex: Word;        // Declaration order in parent scope
   end;
   PLocalVariableInfo = ^TLocalVariableInfo;
@@ -611,8 +611,8 @@ var
   WriteMethName: String;
   FileName: String;
   FunctionName: String;
-  LocationData: SmallInt;
-  CompanionData: SmallInt;
+  LocationData: LongInt;
+  CompanionData: LongInt;
   PType: PTypeInfo;
   PVar: PVariableInfo;
   PLine: PLineInfo;

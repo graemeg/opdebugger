@@ -840,7 +840,7 @@ found in `TBlock.Decls`:
 |`ScopeID`      |Sequential scope ID of the enclosing function
 |`LocationExpr` |`1` (RBP-relative for all locals in Blaise)
 |`DeclIndex`    |Declaration order within the block
-|`LocationData` |Signed 16-bit RBP offset (see below)
+|`LocationData` |Signed 32-bit RBP offset (see below)
 |`Name`         |First name from `VarDecl.Names` (emit one record per name)
 |===
 
