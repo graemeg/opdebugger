@@ -297,6 +297,20 @@ type
   TStringArray = array of String;
   TVariableInfoArray = array of TVariableInfo;
   TVariableValueArray = array of TVariableValue;
+
+  { One frame of the call stack, innermost first (Index 0).  FunctionName
+    is '<unknown>' and FileName empty when the address has no debug info. }
+  TStackFrame = record
+    Index: Integer;
+    FunctionName: String;
+    FileName: String;
+    LineNumber: Integer;
+    Address: QWord;
+    HasFunction: Boolean;
+    HasLine: Boolean;
+  end;
+
+  TStackFrameArray = array of TStackFrame;
   TLineInfoArray = array of TLineInfo;
   TFunctionInfoArray = array of TFunctionInfo;
 

@@ -77,6 +77,7 @@ type
     procedure ApplyPendingBreakpoints;
     function LoadSourceFile(const FileName: String): TStringList;
     procedure BuildFrameCache;
+    function MakeStackFrame(AIndex: Integer; AAddress: QWord): TStackFrame;
     procedure ResetSelectedFrame;
     procedure ApplyFrameOverrides;
     function EvaluateConditionExpr(const Expr: String): Boolean;
@@ -142,6 +143,11 @@ type
                                 LowIndex, HighIndex: Int64): TVariableValueArray;
     function SetVariable(const VarName, Value: String): Boolean;
     function GetCallStack(Limit: Integer = 0): TStringArray;
+    { The call stack as records (GetCallStack formats these). }
+    function GetStackFrames(Limit: Integer = 0): TStackFrameArray;
+    { The source position the process is stopped at; False when it is not
+      paused or the address has no line information. }
+    function GetCurrentLocation(out FileName: String; out LineNumber: Integer): Boolean;
 
     { Source listing }
     function GetSourceLines(const FileName: String; Line: Integer;
@@ -2944,16 +2950,78 @@ begin
     WriteLn(StdErr, '[ERROR] Failed to write to address $', IntToHex(Addr, 16));
 end;
 
+function TDebuggerEngine.MakeStackFrame(AIndex: Integer; AAddress: QWord): TStackFrame;
+var
+  FuncInfo: TFunctionInfo;
+  LineInfo: TLineInfo;
+begin
+  Result.Index := AIndex;
+  Result.Address := AAddress;
+  Result.FunctionName := '<unknown>';
+  Result.FileName := '';
+  Result.LineNumber := 0;
+  Result.HasFunction := FDebugInfoReader.FindFunctionByAddress(AAddress, FuncInfo);
+  Result.HasLine := False;
+  if Result.HasFunction then
+  begin
+    Result.FunctionName := FuncInfo.Name;
+    Result.HasLine := FDebugInfoReader.FindLineByAddress(AAddress, LineInfo);
+    if Result.HasLine then
+    begin
+      Result.FileName := LineInfo.FileName;
+      Result.LineNumber := LineInfo.LineNumber;
+    end;
+  end;
+end;
+
 function TDebuggerEngine.GetCallStack(Limit: Integer = 0): TStringArray;
+var
+  Frames: TStackFrameArray;
+  I: Integer;
+  AddrFmt: String;
+begin
+  {$IFDEF CPUI386}
+  AddrFmt := '0x%08X';
+  {$ELSE}
+  AddrFmt := '0x%016X';
+  {$ENDIF}
+  Frames := GetStackFrames(Limit);
+  SetLength(Result, Length(Frames));
+  for I := 0 to High(Frames) do
+    if not Frames[I].HasFunction then
+      Result[I] := Format('#%d <unknown> (' + AddrFmt + ')', [I, Frames[I].Address])
+    else if Frames[I].HasLine then
+      Result[I] := Format('#%d %s at %s:%d (' + AddrFmt + ')',
+        [I, Frames[I].FunctionName, ExtractFileName(Frames[I].FileName),
+         Frames[I].LineNumber, Frames[I].Address])
+    else
+      Result[I] := Format('#%d %s (' + AddrFmt + ')', [I, Frames[I].FunctionName, Frames[I].Address]);
+end;
+
+function TDebuggerEngine.GetCurrentLocation(out FileName: String; out LineNumber: Integer): Boolean;
+var
+  Frames: TStackFrameArray;
+begin
+  FileName := '';
+  LineNumber := 0;
+  Result := False;
+  if FState <> dsPaused then
+    Exit;
+  Frames := GetStackFrames(1);
+  if (Length(Frames) = 0) or not Frames[0].HasLine then
+    Exit;
+  FileName := Frames[0].FileName;
+  LineNumber := Frames[0].LineNumber;
+  Result := True;
+end;
+
+function TDebuggerEngine.GetStackFrames(Limit: Integer = 0): TStackFrameArray;
 var
   Regs: TRegisters;
   FramePtr: QWord;
   StackPtr: QWord;
   RetAddr: QWord;
   FrameCount: Integer;
-  FuncInfo: TFunctionInfo;
-  LineInfo: TLineInfo;
-  FrameStr: String;
   FrameBuffer: array[0..15] of QWord;
   UnwindEntry: TUnwindEntry;
   CFA: QWord;
@@ -2986,20 +3054,8 @@ begin
   while ((FramePtr <> 0) or (StackPtr <> 0)) and
         ((Limit = 0) or (FrameCount < Limit)) do
   begin
-    if FDebugInfoReader.FindFunctionByAddress(RetAddr, FuncInfo) then
-    begin
-      if FDebugInfoReader.FindLineByAddress(RetAddr, LineInfo) then
-        FrameStr := Format('#%d %s at %s:%d (0x%016X)',
-          [FrameCount, FuncInfo.Name, ExtractFileName(LineInfo.FileName),
-           LineInfo.LineNumber, RetAddr])
-      else
-        FrameStr := Format('#%d %s (0x%016X)', [FrameCount, FuncInfo.Name, RetAddr]);
-    end
-    else
-      FrameStr := Format('#%d <unknown> (0x%016X)', [FrameCount, RetAddr]);
-
     SetLength(Result, FrameCount + 1);
-    Result[FrameCount] := FrameStr;
+    Result[FrameCount] := MakeStackFrame(FrameCount, RetAddr);
     Inc(FrameCount);
 
     { Try unwind info first, fall back to frame-pointer walking }
@@ -3048,20 +3104,8 @@ begin
   while ((FramePtr <> 0) or (StackPtr <> 0)) and
         ((Limit = 0) or (FrameCount < Limit)) do
   begin
-    if FDebugInfoReader.FindFunctionByAddress(RetAddr, FuncInfo) then
-    begin
-      if FDebugInfoReader.FindLineByAddress(RetAddr, LineInfo) then
-        FrameStr := Format('#%d %s at %s:%d (0x%08X)',
-          [FrameCount, FuncInfo.Name, ExtractFileName(LineInfo.FileName),
-           LineInfo.LineNumber, RetAddr])
-      else
-        FrameStr := Format('#%d %s (0x%08X)', [FrameCount, FuncInfo.Name, RetAddr]);
-    end
-    else
-      FrameStr := Format('#%d <unknown> (0x%08X)', [FrameCount, RetAddr]);
-
     SetLength(Result, FrameCount + 1);
-    Result[FrameCount] := FrameStr;
+    Result[FrameCount] := MakeStackFrame(FrameCount, RetAddr);
     Inc(FrameCount);
 
     if FDebugInfoReader.FindUnwindEntry(RetAddr, UnwindEntry) then
