@@ -716,6 +716,16 @@ begin
 
   if Length(TempBreakpoints) = 0 then
   begin
+    { The last line of a routine: stepping over it returns to the caller,
+      as in any debugger.  Only the program's own last line has nowhere to
+      go. }
+    if HasScope and not SameText(CurrentScope.Name, 'main') and
+       not SameText(CurrentScope.Name, 'PASCALMAIN') then
+    begin
+      if gVerbose then
+        WriteLn(StdErr, '[INFO] Last line of ', CurrentScope.Name, ': stepping out');
+      Exit(StepOut);
+    end;
     WriteLn(StdErr, '[ERROR] No subsequent lines found (might be at end of program)');
     WriteLn(StdErr, '[INFO] Current line ', CurrentLine.LineNumber, ' appears to be the last line with debug info');
     Exit;
