@@ -17,6 +17,8 @@
     <module>pdr-core</module>
     <module>pdr-adapters</module>
     <module>pdr-cli</module>
+    <module>pdr-dap</module>
     <module>tools</module>
+    <module>tests/dap-adapter</module>
   </modules>
 </project>

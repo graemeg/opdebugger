@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <name>dap-adapter-tests</name>
+  <author>Graeme Geldenhuys</author>
+  <license>BSD-3-Clause</license>
+  <description>Unit tests for the pdr-dap protocol layer (framing and session, with a scripted backend)</description>
+
+  <build>
+    <packaging>application</packaging>
+    <mainSource>test_dap.pas</mainSource>
+    <executableName>test_dap</executableName>
+  </build>
+
+  <moduleDependencies>
+    <module>../../pdr-dap</module>
+    <module>../../pdr-core</module>
+    <module>../../opdf-lib</module>
+  </moduleDependencies>
+</project>

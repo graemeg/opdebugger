@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <name>pdr-dap</name>
+  <author>Graeme Geldenhuys</author>
+  <license>BSD-3-Clause</license>
+  <description>PDR Debug Adapter Protocol server (DAP over stdio)</description>
+
+  <build>
+    <packaging>application</packaging>
+    <mainSource>pdr_dap.pas</mainSource>
+    <executableName>pdr-dap</executableName>
+  </build>
+
+  <!-- Dependencies -->
+  <moduleDependencies>
+    <module>../pdr-adapters</module>
+    <module>../pdr-core</module>
+    <module>../opdf-lib</module>
+  </moduleDependencies>
+</project>
