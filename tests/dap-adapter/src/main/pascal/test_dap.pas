@@ -41,6 +41,8 @@ type
     function Globals: TVariableValueArray;
     function Evaluate(AFrame: Integer; const AExpr: String): TVariableValue;
     procedure Terminate;
+    procedure Pause;
+    procedure SetCatchExceptions(ACatch: Boolean);
     function Take: TStopInfo;
   end;
 
@@ -205,6 +207,16 @@ end;
 procedure TFakeBackend.Terminate;
 begin
   Log.Add('terminate');
+end;
+
+procedure TFakeBackend.Pause;
+begin
+  Log.Add('pause');
+end;
+
+procedure TFakeBackend.SetCatchExceptions(ACatch: Boolean);
+begin
+  Log.Add('catch ' + BoolToStr(ACatch, 'yes', 'no'));
 end;
 
 { TCapture }
@@ -516,6 +528,52 @@ begin
   Check(M.Integers['request_seq'] > 0, 'request_seq echoed');
 end;
 
+procedure TestExceptionFilters;
+var
+  B: TFakeBackend;
+  C: TCapture;
+  S: TDapSession;
+  M: TJSONObject;
+  F: TJSONArray;
+begin
+  NewSession(B, C, S);
+  Launch(S, '');
+  M := C.Find('response', 'initialize');
+  F := M.Objects['body'].Arrays['exceptionBreakpointFilters'];
+  Check((F <> nil) and (F.Count = 1), 'one exception filter');
+  CheckEquals('raised', TJSONObject(F[0]).Strings['filter'], 'the raised filter');
+  Check(TJSONObject(F[0]).Booleans['default'], 'on by default');
+  S.Handle(Req('setExceptionBreakpoints', '{"filters": []}'));
+  CheckEquals('catch no', B.Log[B.Log.Count - 1], 'no filters: do not stop on raise');
+  M := C.Find('response', 'setExceptionBreakpoints');
+  Check((M <> nil) and M.Booleans['success'], 'setExceptionBreakpoints succeeds');
+  S.Handle(Req('setExceptionBreakpoints', '{"filters": ["raised"]}'));
+  CheckEquals('catch yes', B.Log[B.Log.Count - 1], 'raised: stop on raise');
+end;
+
+procedure TestPause;
+var
+  B: TFakeBackend;
+  C: TCapture;
+  S: TDapSession;
+  M: TJSONObject;
+begin
+  NewSession(B, C, S);
+  SetLength(B.Stops, 1);
+  B.Stops[0] := StopInfo(srPause);
+  Launch(S, '');
+  { While continue blocks, the reader thread hands pause over at once. }
+  Check(not S.HandleWhileRunning(Req('next', '{"threadId": 1}')), 'next waits its turn');
+  Check(B.Log.IndexOf('over') < 0, 'next not run early');
+  Check(S.HandleWhileRunning(Req('pause', '{"threadId": 1}')), 'pause is handled at once');
+  CheckEquals('pause', B.Log[B.Log.Count - 1], 'pause interrupts the program');
+  M := C.Find('response', 'pause');
+  Check((M <> nil) and M.Booleans['success'], 'pause succeeds');
+  S.Handle(Req('configurationDone', ''));
+  M := C.Find('event', 'stopped');
+  CheckEquals('pause', M.Objects['body'].Strings['reason'], 'stopped because paused');
+end;
+
 begin
   Failures := 0;
   Checks := 0;
@@ -529,6 +587,8 @@ begin
   TestStackScopesVariablesEvaluate;
   TestDisconnectAndUnknown;
   TestSequenceNumbers;
+  TestExceptionFilters;
+  TestPause;
   WriteLn(Checks - Failures, '/', Checks, ' checks passed');
   if Failures > 0 then
     Halt(1);

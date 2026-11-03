@@ -21,7 +21,7 @@ uses
   SysUtils, pdr_ports;
 
 type
-  TStopReason = (srEntry, srBreakpoint, srStep, srException, srExited);
+  TStopReason = (srEntry, srBreakpoint, srStep, srException, srPause, srExited);
 
   TStopInfo = record
     Reason: TStopReason;
@@ -52,6 +52,11 @@ type
     function Globals: TVariableValueArray;
     function Evaluate(AFrame: Integer; const AExpr: String): TVariableValue;
     procedure Terminate;
+    { Interrupt the running program; the blocked Resume or step returns
+      srPause.  Called on another thread while Resume or a step runs. }
+    procedure Pause;
+    { Stop when the program raises an exception (the default). }
+    procedure SetCatchExceptions(ACatch: Boolean);
   end;
 
 function StopInfo(AReason: TStopReason; const AText: String = ''; AExitCode: Integer = 0): TStopInfo;

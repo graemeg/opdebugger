@@ -24,7 +24,7 @@ uses
   {$IFDEF UNIX}
   cthreads,
   {$ENDIF}
-  Classes, SysUtils, BaseUnix,
+  Classes, SysUtils, SyncObjs, BaseUnix,
   dap_wire, dap_backend, dap_session, dap_engine_backend;
 
 type
@@ -53,6 +53,84 @@ begin
   WriteDapMessage(FOut, AJson);
 end;
 
+type
+  { Reads requests on its own thread so a pause can interrupt a blocked
+    continue: pause is handled at once, the rest are queued for the main
+    thread in order.  An empty entry marks the end of the input. }
+  TReader = class(TThread)
+  private
+    FInput: TStream;
+    FSession: TDapSession;
+    FQueue: TStringList;
+    FLock: TCriticalSection;
+    FReady: TEvent;
+    procedure Push(const ABody: String);
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(AInput: TStream; ASession: TDapSession);
+    destructor Destroy; override;
+    { The next request, waiting for one; False at the end of the input. }
+    function Next(out ABody: String): Boolean;
+  end;
+
+constructor TReader.Create(AInput: TStream; ASession: TDapSession);
+begin
+  FInput := AInput;
+  FSession := ASession;
+  FQueue := TStringList.Create;
+  FLock := TCriticalSection.Create;
+  FReady := TEvent.Create(nil, False, False, '');
+  inherited Create(False);
+end;
+
+destructor TReader.Destroy;
+begin
+  FReady.Free;
+  FLock.Free;
+  FQueue.Free;
+  inherited Destroy;
+end;
+
+procedure TReader.Push(const ABody: String);
+begin
+  FLock.Enter;
+  try
+    FQueue.Add(ABody);
+  finally
+    FLock.Leave;
+  end;
+  FReady.SetEvent;
+end;
+
+procedure TReader.Execute;
+var
+  Body: String;
+begin
+  while ReadDapMessage(FInput, Body) do
+    if (Body <> '') and not FSession.HandleWhileRunning(Body) then
+      Push(Body);
+  Push('');
+end;
+
+function TReader.Next(out ABody: String): Boolean;
+begin
+  repeat
+    FLock.Enter;
+    try
+      if FQueue.Count > 0 then
+      begin
+        ABody := FQueue[0];
+        FQueue.Delete(0);
+        Exit(ABody <> '');
+      end;
+    finally
+      FLock.Leave;
+    end;
+    FReady.WaitFor(INFINITE);
+  until False;
+end;
+
 { A private copy of AFd that children do not inherit. }
 function PrivateCopy(AFd: cint): cint;
 begin
@@ -66,6 +144,7 @@ var
   Server: TServer;
   Backend: TEngineBackend;
   Session: TDapSession;
+  Reader: TReader;
   Body: String;
 begin
   InFd := PrivateCopy(0);
@@ -83,14 +162,16 @@ begin
   Server := TServer.Create(OutFd);
   Backend := TEngineBackend.Create;
   Session := TDapSession.Create(Backend, @Server.Send);
+  Reader := TReader.Create(Input, Session);
   try
-    while ReadDapMessage(Input, Body) do
+    while Reader.Next(Body) do
     begin
       Session.Handle(Body);
       if Session.Finished then
         Break;
     end;
   finally
+    { The reader may be blocked reading; the process exit ends it. }
     Session.Free;
     Backend.Free;
     Server.Free;

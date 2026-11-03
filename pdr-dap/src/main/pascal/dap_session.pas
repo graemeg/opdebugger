@@ -13,7 +13,8 @@
   Launch flow: initialize, launch (the program starts paused at its entry
   point), "initialized" event, setBreakpoints..., configurationDone (the
   program runs unless stopOnEntry).  Execution requests block until the
-  program stops, so pause is not supported yet.
+  program stops; meanwhile the reader thread hands requests to
+  HandleWhileRunning, which answers pause at once.
 }
 unit dap_session;
 
@@ -23,7 +24,7 @@ unit dap_session;
 interface
 
 uses
-  Classes, SysUtils, fpjson, jsonparser, pdr_ports, dap_backend;
+  Classes, SysUtils, SyncObjs, fpjson, jsonparser, pdr_ports, dap_backend;
 
 type
   TDapSend = procedure(const AJson: String) of object;
@@ -38,6 +39,7 @@ type
     FFinished: Boolean;
     { Breakpoint handles per source path, replaced by each setBreakpoints. }
     FBreakpoints: TStringList;
+    FLock: TCriticalSection;
     procedure Send(AMessage: TJSONObject);
     procedure Respond(ARequest: TJSONObject; ABody: TJSONObject);
     procedure Fail(ARequest: TJSONObject; const AMessage: String);
@@ -54,11 +56,17 @@ type
     procedure DoEvaluate(R: TJSONObject);
     procedure DoExecution(R: TJSONObject; const ACommand: String);
     procedure DoDisconnect(R: TJSONObject);
+    procedure DoSetExceptionBreakpoints(R: TJSONObject);
+    procedure DoPause(R: TJSONObject);
   public
     constructor Create(ABackend: IDebugBackend; ASend: TDapSend);
     destructor Destroy; override;
     { Handle one request (a JSON object). }
     procedure Handle(const ARequest: String);
+    { Called on the reader thread while another request may be running:
+      handles ARequest now and returns True when it is a pause, else
+      returns False and leaves it for Handle. }
+    function HandleWhileRunning(const ARequest: String): Boolean;
     { A disconnect or terminate request has been handled. }
     property Finished: Boolean read FFinished;
   end;
@@ -122,21 +130,26 @@ begin
   FSend := ASend;
   FBreakpoints := TStringList.Create;
   FBreakpoints.OwnsObjects := True;
+  FLock := TCriticalSection.Create;
 end;
 
 destructor TDapSession.Destroy;
 begin
   FBreakpoints.Free;
+  FLock.Free;
   inherited Destroy;
 end;
 
 procedure TDapSession.Send(AMessage: TJSONObject);
 begin
-  Inc(FSeq);
-  AMessage.Add('seq', FSeq);
+  { The reader thread answers pause while the main thread may be sending. }
+  FLock.Enter;
   try
+    Inc(FSeq);
+    AMessage.Add('seq', FSeq);
     FSend(AMessage.AsJSON);
   finally
+    FLock.Leave;
     AMessage.Free;
   end;
 end;
@@ -198,6 +211,7 @@ begin
     srBreakpoint: B.Add('reason', 'breakpoint');
     srStep: B.Add('reason', 'step');
     srException: B.Add('reason', 'exception');
+    srPause: B.Add('reason', 'pause');
   end;
   if AStop.Text <> '' then
     B.Add('text', AStop.Text);
@@ -208,13 +222,21 @@ end;
 
 procedure TDapSession.DoInitialize(R: TJSONObject);
 var
-  B: TJSONObject;
+  B, F: TJSONObject;
+  L: TJSONArray;
 begin
   B := TJSONObject.Create;
   B.Add('supportsConfigurationDoneRequest', True);
   B.Add('supportsConditionalBreakpoints', True);
   B.Add('supportsEvaluateForHovers', True);
   B.Add('supportsTerminateRequest', True);
+  F := TJSONObject.Create;
+  F.Add('filter', 'raised');
+  F.Add('label', 'Raised exceptions');
+  F.Add('default', True);
+  L := TJSONArray.Create;
+  L.Add(F);
+  B.Add('exceptionBreakpointFilters', L);
   Respond(R, B);
 end;
 
@@ -478,6 +500,54 @@ begin
   end;
 end;
 
+procedure TDapSession.DoSetExceptionBreakpoints(R: TJSONObject);
+var
+  D: TJSONData;
+  I: Integer;
+  Catch: Boolean;
+begin
+  Catch := False;
+  if Args(R) <> nil then
+  begin
+    D := Args(R).Find('filters');
+    if (D <> nil) and (D.JSONType = jtArray) then
+      for I := 0 to D.Count - 1 do
+        if D.Items[I].AsString = 'raised' then
+          Catch := True;
+  end;
+  FBackend.SetCatchExceptions(Catch);
+  Respond(R, nil);
+end;
+
+procedure TDapSession.DoPause(R: TJSONObject);
+begin
+  FBackend.Pause;
+  Respond(R, nil);
+end;
+
+function TDapSession.HandleWhileRunning(const ARequest: String): Boolean;
+var
+  D: TJSONData;
+begin
+  Result := False;
+  try
+    D := GetJSON(ARequest);
+  except
+    on E: Exception do
+      Exit;
+  end;
+  try
+    if (D.JSONType = jtObject) and (Str(TJSONObject(D), 'type') = 'request')
+      and (Str(TJSONObject(D), 'command') = 'pause') then
+    begin
+      DoPause(TJSONObject(D));
+      Result := True;
+    end;
+  finally
+    D.Free;
+  end;
+end;
+
 procedure TDapSession.DoDisconnect(R: TJSONObject);
 begin
   if FLaunched then
@@ -510,7 +580,8 @@ begin
       if Cmd = 'initialize' then DoInitialize(R)
       else if Cmd = 'launch' then DoLaunch(R)
       else if Cmd = 'setBreakpoints' then DoSetBreakpoints(R)
-      else if Cmd = 'setExceptionBreakpoints' then Respond(R, nil)
+      else if Cmd = 'setExceptionBreakpoints' then DoSetExceptionBreakpoints(R)
+      else if Cmd = 'pause' then DoPause(R)
       else if Cmd = 'configurationDone' then DoConfigurationDone(R)
       else if Cmd = 'threads' then DoThreads(R)
       else if Cmd = 'stackTrace' then DoStackTrace(R)

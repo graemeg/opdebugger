@@ -1,7 +1,7 @@
 #!/bin/bash
 #
-# pdr-dap end-to-end test: builds a Blaise program with OPDF debug
-# information and drives pdr-dap over the Debug Adapter Protocol.
+# pdr-dap end-to-end tests: build Blaise programs with OPDF debug
+# information and drive pdr-dap over the Debug Adapter Protocol.
 #
 #   BLAISE=<blaise> tests/dap-integration/run_tests.sh
 #
@@ -25,3 +25,10 @@ mkdir -p "$WORK"
     --backend native --debug-opdf --unit-path "$STDLIB_UNITS" > "$WORK/compile.log" 2>&1 \
     || { cat "$WORK/compile.log"; exit 1; }
 python3 -I "$SCRIPT_DIR/dap_session_test.py" "$ADAPTER" "$WORK/test_11_callstack" "$SOURCE"
+
+# Pause while continue is blocked, then disconnect while paused.
+LOOP_SOURCE="$SCRIPT_DIR/programs/dap_loop.pas"
+"$BLAISE" --source "$LOOP_SOURCE" --output "$WORK/dap_loop" \
+    --backend native --debug-opdf --unit-path "$STDLIB_UNITS" > "$WORK/compile-loop.log" 2>&1 \
+    || { cat "$WORK/compile-loop.log"; exit 1; }
+python3 -I "$SCRIPT_DIR/dap_pause_test.py" "$ADAPTER" "$WORK/dap_loop"
