@@ -597,6 +597,13 @@ begin
       Continue;
     end;
 
+    if OPDFHeaderProblem(Header) <> '' then
+    begin
+      WriteLn('[ERROR] Unit at offset 0x', IntToHex(Stream.Position - SizeOf(TOPDFHeader), 1),
+        ': ', OPDFHeaderProblem(Header));
+      Halt(1);
+    end;
+
     Inc(UnitCount);
     FillChar(UnitCounts, SizeOf(UnitCounts), 0);
 

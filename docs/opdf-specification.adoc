@@ -2,7 +2,7 @@
 :toc: left
 :toclevels: 4
 :sectnums:
-:version: 0.4.0
+:version: 0.5.0
 :date: 2026-03-04
 
 == Introduction
@@ -108,7 +108,7 @@ All data is stored in little-endian format (Intel standard).
 ----
 TOPDFHeader = packed record
   Magic: array[0..3] of Char;  // 'OPDF' (4 bytes)
-  Version: Word;               // Format version (current: 1) (2 bytes)
+  Version: Word;               // Format version (current: 2) (2 bytes)
   BuildID: TGUID;              // UUID linking binary to debug info (16 bytes)
   TargetArch: Byte;            // Architecture ID (1 byte)
   PointerSize: Byte;           // Pointer size in bytes: 4 or 8 (1 byte)
@@ -117,6 +117,21 @@ TOPDFHeader = packed record
 end;
 // Total: 32 bytes
 ----
+
+==== Format Version
+
+`Version` identifies the record layout. A producer bumps it with every change that a reader of the previous layout would misread, such as a field changing width. A reader accepts its own version only. For any other version it reports both version numbers and refuses to load the data, because reading records with the wrong field widths shows wrong values, wrong breakpoint addresses or nothing at all. Additions that a reader can detect for itself (a header flag, a new record type it can skip) do not change the version.
+
+The check applies to every header in the section, not just the first. Each compilation unit has its own header, so one unit compiled by an older compiler is reported even if the rest of the program is current.
+
+.Format versions
+[cols="1,5"]
+|===
+|Version |Layout
+
+|1 |`recLocalVar` `LocationData` and `CompanionData`, and `recConstant` / `recClassConst` `ValueLen`, are 2 bytes.
+|2 |Those fields are 4 bytes (`LocationData` and `CompanionData` signed, `ValueLen` unsigned). Blaise emits version 2 from commit `4545de3b`.
+|===
 
 .Header Flags
 [cols="1,2,4"]
@@ -1113,6 +1128,12 @@ PDB). Motivated by 3.4x type duplication observed in 93-unit project.
 |0.4.0
 |2026-03-04
 |Hash-based TypeID allocation. recPrimitive now supports sub-kind values.
+
+|0.5.0
+|2026-11-04
+|Format version 2: the header `Version` field is bumped on layout changes,
+and readers refuse other versions with a message naming both. Version 2
+widens `LocationData`, `CompanionData` and `ValueLen` to 4 bytes.
 |===
 
 == Appendices

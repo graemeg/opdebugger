@@ -139,6 +139,7 @@ type
     FStream: TStream;
     FHeader: TOPDFHeader;
     FHeaderRead: Boolean;
+    FError: String;
   public
     constructor Create(AStream: TStream);
     destructor Destroy; override;
@@ -194,6 +195,9 @@ type
     function AtEnd: Boolean;
 
     property Header: TOPDFHeader read FHeader;
+    { Why the last header could not be read: not OPDF, or another format
+      version.  '' after a header that was read. }
+    property Error: String read FError;
   end;
 
 implementation
@@ -871,12 +875,16 @@ begin
     Exit(True);
 
   if FStream.Size < SizeOf(TOPDFHeader) then
+  begin
+    FError := 'not OPDF debug information (too short for a header)';
     Exit;
+  end;
 
   FStream.Position := 0;
   FStream.Read(FHeader, SizeOf(FHeader));
 
-  Result := IsValidOPDFHeader(FHeader);
+  FError := OPDFHeaderProblem(FHeader);
+  Result := FError = '';
   FHeaderRead := Result;
 end;
 
@@ -1488,6 +1496,16 @@ begin
 end;
 
 function TOPDFReader.TryReadNextHeader: Boolean;
+
+  { An OPDF header of a version this reader does not read: a unit built
+    by another compiler.  Its records cannot be read, so record why. }
+  function OtherVersion(const AHeader: TOPDFHeader): Boolean;
+  begin
+    Result := AHeader.Magic = OPDF_MAGIC;
+    if Result then
+      FError := OPDFHeaderProblem(AHeader);
+  end;
+
 var
   SavedPos: Int64;
   ScanPos: Int64;
@@ -1508,6 +1526,8 @@ begin
       Exit;
     end;
     FStream.Position := SavedPos;
+    if OtherVersion(TempHeader) then
+      Exit;
   end;
 
   { Scan forward past padding bytes (zeros) inserted by linker alignment.
@@ -1526,6 +1546,11 @@ begin
       begin
         FHeader := TempHeader;
         Result := True;
+        Exit;
+      end;
+      if OtherVersion(TempHeader) then
+      begin
+        FStream.Position := SavedPos;
         Exit;
       end;
     end

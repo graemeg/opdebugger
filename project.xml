@@ -20,5 +20,6 @@
     <module>pdr-dap</module>
     <module>tools</module>
     <module>tests/dap-adapter</module>
+    <module>tests/opdf-reader</module>
   </modules>
 </project>

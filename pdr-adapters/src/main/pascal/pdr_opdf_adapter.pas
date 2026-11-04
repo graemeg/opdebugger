@@ -694,7 +694,7 @@ begin
   // Read and validate header
   if not FReader.ReadHeader then
   begin
-    WriteLn(StdErr, '[ERROR] Failed to read OPDF header');
+    WriteLn(StdErr, '[ERROR] Cannot load debug information: ', FReader.Error);
     Exit;
   end;
 
@@ -728,6 +728,14 @@ begin
       if gVerbose then
         WriteLn(StdErr, '[DEBUG] New OPDF header at offset 0x', IntToHex(FStream.Position - SizeOf(TOPDFHeader), 1));
       Continue;
+    end;
+
+    { A unit whose OPDF is another format version (linked in from a build
+      by another compiler): its records would be misread. }
+    if FReader.Error <> '' then
+    begin
+      WriteLn(StdErr, '[ERROR] Cannot load debug information: ', FReader.Error);
+      Exit;
     end;
 
     if not FReader.ReadRecordHeader(RecHeader) then

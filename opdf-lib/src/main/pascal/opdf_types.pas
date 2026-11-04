@@ -20,8 +20,12 @@ const
   { Magic bytes for OPDF format identification }
   OPDF_MAGIC = 'OPDF';
 
-  { Current format version }
-  OPDF_VERSION = 1;
+  { Format version.  It changes whenever the record layout changes in a
+    way an older reader would misread; the reader accepts this version
+    only and reports any other by name (OPDFHeaderProblem).
+      1  2-byte LocalVar LocationData/CompanionData and Constant ValueLen
+      2  those fields are 4 bytes }
+  OPDF_VERSION = 2;
 
   { Header flags }
   OPDF_FLAG_HAS_DIRECTORY = 1;
@@ -489,6 +493,8 @@ function RecordTypeToString(RecType: TOPDFRecordType): String;
 
 { Validate OPDF header }
 function IsValidOPDFHeader(const Header: TOPDFHeader): Boolean;
+{ Why Header cannot be read, or '' when it can. }
+function OPDFHeaderProblem(const Header: TOPDFHeader): String;
 
 implementation
 
@@ -539,7 +545,23 @@ end;
 
 function IsValidOPDFHeader(const Header: TOPDFHeader): Boolean;
 begin
-  Result := (Header.Magic = OPDF_MAGIC) and (Header.Version = OPDF_VERSION);
+  Result := OPDFHeaderProblem(Header) = '';
+end;
+
+function OPDFHeaderProblem(const Header: TOPDFHeader): String;
+begin
+  if Header.Magic <> OPDF_MAGIC then
+    Result := 'not OPDF debug information'
+  else if Header.Version < OPDF_VERSION then
+    Result := Format('the debug information is OPDF version %d, but this pdr ' +
+      'reads version %d: rebuild the program with a current compiler',
+      [Header.Version, OPDF_VERSION])
+  else if Header.Version > OPDF_VERSION then
+    Result := Format('the debug information is OPDF version %d, but this pdr ' +
+      'reads version %d: update pdr to match the compiler',
+      [Header.Version, OPDF_VERSION])
+  else
+    Result := '';
 end;
 
 end.

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project>
+  <name>opdf-reader-tests</name>
+  <author>Graeme Geldenhuys</author>
+  <license>BSD-3-Clause</license>
+  <description>Unit tests for TOPDFReader: header validation and the format version check</description>
+
+  <build>
+    <packaging>application</packaging>
+    <mainSource>test_opdf_reader.pas</mainSource>
+    <executableName>test_opdf_reader</executableName>
+  </build>
+
+  <moduleDependencies>
+    <module>../../opdf-lib</module>
+  </moduleDependencies>
+</project>
