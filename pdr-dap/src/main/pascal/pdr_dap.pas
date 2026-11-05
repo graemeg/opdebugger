@@ -27,6 +27,11 @@ uses
   Classes, SysUtils, SyncObjs, BaseUnix,
   dap_wire, dap_backend, dap_session, dap_engine_backend;
 
+{$IFNDEF FD_CLOEXEC_DEFINED}
+const
+  FD_CLOEXEC = 1;   // from <fcntl.h>; 1 on Linux/BSD/macOS
+{$ENDIF}
+
 type
   TServer = class
   private
