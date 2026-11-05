@@ -1,0 +1,6 @@
+Step = 3
+[CALLSTACK]
+#0 Work at test_41_thread_breakpoint.pas:25
+#1 TWorker_Execute at test_41_thread_breakpoint.pas:34
+Count = 4
+Count = 5

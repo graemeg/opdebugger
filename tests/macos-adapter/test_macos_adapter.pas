@@ -54,8 +54,10 @@ var
   Reader: IBinaryReader;
   Adapter: TMacOSMachAdapter;
   Ctrl: IProcessController;
-  SymSetValues, SymCounter, SymGetAnswer: QWord;
-  Slide, Bp, CounterAddr: QWord;
+  SymSetValues, SymCounter, SymGetAnswer, SymWork, SymTotal: QWord;
+  Slide, Bp, CounterAddr, WorkBp, TotalAddr: QWord;
+  Hit: Integer;
+  AllOnWork, ArgsInOrder: Boolean;
   Insn: Cardinal;
   Regs, Regs2: TRegisters;
   Slot: Integer;
@@ -77,10 +79,13 @@ begin
   SymSetValues := Reader.FindSymbolAddress('set_values');
   SymCounter := Reader.FindSymbolAddress('counter');
   SymGetAnswer := Reader.FindSymbolAddress('get_answer');
+  SymWork := Reader.FindSymbolAddress('work');
+  SymTotal := Reader.FindSymbolAddress('total');
   Reader := nil;
-  if (SymSetValues = 0) or (SymCounter = 0) or (SymGetAnswer = 0) then
+  if (SymSetValues = 0) or (SymCounter = 0) or (SymGetAnswer = 0) or
+     (SymWork = 0) or (SymTotal = 0) then
   begin
-    WriteLn('Target is missing set_values/counter/get_answer symbols');
+    WriteLn('Target is missing set_values/counter/get_answer/work/total symbols');
     Halt(2);
   end;
 
@@ -153,6 +158,33 @@ begin
   Check(Ctrl.GetFiredWatchpoint = Slot, 'Watchpoint fires again');
   Check(ReadQWordAt(Adapter, CounterAddr) = 20, 'counter = 20 after the second store');
   Check(Ctrl.ClearWatchpoint(Slot), 'ClearWatchpoint');
+
+  { work() runs only on a second thread.  The stop must be reported for the
+    thread that hit the breakpoint: its PC and registers, and stepping over
+    the breakpoint on that thread when continuing. }
+  Section('Breakpoint on a second thread');
+  WorkBp := SymWork + Slide;
+  TotalAddr := SymTotal + Slide;
+  Check(Ctrl.SetBreakpoint(WorkBp), 'SetBreakpoint at work');
+  AllOnWork := True;
+  ArgsInOrder := True;
+  for Hit := 1 to 5 do
+  begin
+    if not Ctrl.Continue or not Adapter.IsAttached then
+    begin
+      AllOnWork := False;
+      Break;
+    end;
+    if (Ctrl.GetLastBreakpointAddress <> WorkBp) or
+       (Ctrl.GetCurrentAddress <> WorkBp) then
+      AllOnWork := False;
+    if not Ctrl.GetRegisters(Regs2) or (Regs2.X[0] <> QWord(Hit)) then
+      ArgsInOrder := False;
+  end;
+  Check(AllOnWork, 'Each of the five calls stops on work, in the worker thread');
+  Check(ArgsInOrder, 'X0 holds the argument of each call (1 to 5)');
+  Check(ReadQWordAt(Adapter, TotalAddr) = 20, 'total = 20 at the fifth call');
+  Check(Ctrl.RemoveBreakpoint(WorkBp), 'RemoveBreakpoint at work');
 
   Section('Run to exit');
   Check(Ctrl.Continue, 'Continue to process exit');

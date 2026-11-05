@@ -1,0 +1,11 @@
+break test_41_thread_breakpoint.pas:25 if count=3
+continue
+print Step
+callstack 2
+break test_41_thread_breakpoint.pas:34
+continue
+print Count
+continue
+print Count
+continue
+quit

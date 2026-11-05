@@ -1,0 +1,1 @@
+--source /a/fairly/long/path/to/some/source/file.pas --output /another/long/path/out --unit-path stdlib/src/main/pascal
