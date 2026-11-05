@@ -43,6 +43,33 @@ begin
   WriteLn('--- ', Title, ' ---');
 end;
 
+const
+  MACH_PORT_TYPE_DEAD_NAME = Cardinal(1) shl (16 + 4);
+
+function mach_task_self: Cardinal; cdecl; external 'c' name 'mach_task_self';
+function mach_port_names(task: Cardinal; out names: Pointer; out namesCnt: Cardinal;
+  out types: Pointer; out typesCnt: Cardinal): Integer; cdecl; external 'c';
+function vm_deallocate(task: Cardinal; address: PtrUInt; size: PtrUInt): Integer;
+  cdecl; external 'c';
+
+{ Dead names in this process's own port space: each is a right on a task
+  or thread that died while the adapter still held it. }
+function DeadNameCount: Integer;
+var
+  Names, Types: Pointer;
+  NamesCnt, TypesCnt, I: Cardinal;
+begin
+  Result := -1;
+  if mach_port_names(mach_task_self, Names, NamesCnt, Types, TypesCnt) <> 0 then
+    Exit;
+  Result := 0;
+  for I := 0 to TypesCnt - 1 do
+    if (PCardinal(Types)[I] and MACH_PORT_TYPE_DEAD_NAME) <> 0 then
+      Inc(Result);
+  vm_deallocate(mach_task_self, PtrUInt(Names), NamesCnt * SizeOf(Cardinal));
+  vm_deallocate(mach_task_self, PtrUInt(Types), TypesCnt * SizeOf(Cardinal));
+end;
+
 function ReadQWordAt(Adapter: TMacOSMachAdapter; Addr: QWord): QWord;
 begin
   Result := QWord(-1);
@@ -55,7 +82,9 @@ var
   Adapter: TMacOSMachAdapter;
   Ctrl: IProcessController;
   SymSetValues, SymCounter, SymGetAnswer, SymWork, SymTotal: QWord;
-  Slide, Bp, CounterAddr, WorkBp, TotalAddr: QWord;
+  SymReleased, SymParked, SymExitSvc: QWord;
+  Slide, Bp, CounterAddr, WorkBp, TotalAddr, ParkedBp, ExitBp: QWord;
+  DeadBefore, DeadAfter: Integer;
   Hit: Integer;
   AllOnWork, ArgsInOrder: Boolean;
   Insn: Cardinal;
@@ -81,14 +110,20 @@ begin
   SymGetAnswer := Reader.FindSymbolAddress('get_answer');
   SymWork := Reader.FindSymbolAddress('work');
   SymTotal := Reader.FindSymbolAddress('total');
+  SymReleased := Reader.FindSymbolAddress('released');
+  SymParked := Reader.FindSymbolAddress('parked_pc');
+  SymExitSvc := Reader.FindSymbolAddress('exit_svc');
   Reader := nil;
   if (SymSetValues = 0) or (SymCounter = 0) or (SymGetAnswer = 0) or
-     (SymWork = 0) or (SymTotal = 0) then
+     (SymWork = 0) or (SymTotal = 0) or (SymReleased = 0) or
+     (SymParked = 0) or (SymExitSvc = 0) then
   begin
-    WriteLn('Target is missing set_values/counter/get_answer/work/total symbols');
+    WriteLn('Target is missing one of set_values/counter/get_answer/work/total/',
+            'released/parked_pc/exit_svc');
     Halt(2);
   end;
 
+  DeadBefore := DeadNameCount;
   Adapter := TMacOSMachAdapter.Create;
   Ctrl := Adapter;  { interface reference owns the adapter }
   Adapter.RedirectChildIO := True;
@@ -186,10 +221,42 @@ begin
   Check(ReadQWordAt(Adapter, TotalAddr) = 20, 'total = 20 at the fifth call');
   Check(Ctrl.RemoveBreakpoint(WorkBp), 'RemoveBreakpoint at work');
 
-  Section('Run to exit');
-  Check(Ctrl.Continue, 'Continue to process exit');
+  { The sleeper thread blocks in read() with its PC on parked_pc, where a
+    breakpoint waits that it has not reached yet.  The main thread then
+    stores to a watched variable: the stop is that watchpoint, on the main
+    thread, not the breakpoint the sleeper sits on. }
+  Section('Watchpoint while another thread sits on a breakpoint');
+  ParkedBp := SymParked + Slide;
+  Check(Ctrl.SetBreakpoint(ParkedBp), 'SetBreakpoint at parked_pc');
+  Slot := Ctrl.SetWatchpoint(SymReleased + Slide, 8, wtWrite);
+  Check(Slot >= 0, 'SetWatchpoint on released');
+  Check(Ctrl.Continue, 'Continue to the store to released');
+  Check(Ctrl.GetFiredWatchpoint = Slot, 'The watchpoint is reported as fired');
+  Check(Ctrl.GetCurrentAddress <> ParkedBp,
+    'The stop is on the main thread, not the sleeper parked on the breakpoint');
+  Check(ReadQWordAt(Adapter, SymReleased + Slide) = 1, 'released = 1 after the store');
+  Check(Ctrl.ClearWatchpoint(Slot), 'ClearWatchpoint');
+  Check(Ctrl.Continue, 'Continue until the sleeper wakes');
+  Check(Ctrl.GetFiredWatchpoint = -1, 'No watchpoint reported for the breakpoint hit');
+  Check((Ctrl.GetLastBreakpointAddress = ParkedBp) and
+        (Ctrl.GetCurrentAddress = ParkedBp),
+    'The woken sleeper stops on parked_pc');
+  Check(Ctrl.RemoveBreakpoint(ParkedBp), 'RemoveBreakpoint at parked_pc');
+
+  { A breakpoint on the exit system call: the step over it is where the
+    process exits. }
+  Section('Exit while stepping over a breakpoint');
+  ExitBp := SymExitSvc + Slide;
+  Check(Ctrl.SetBreakpoint(ExitBp), 'SetBreakpoint at exit_svc');
+  Check(Ctrl.Continue, 'Continue to exit_svc');
+  Check(Ctrl.GetCurrentAddress = ExitBp, 'PC is on exit_svc');
+  Check(Ctrl.Continue, 'Continue: the process exits during the step');
   Check(not Adapter.IsAttached, 'Adapter detached after exit');
   Check(Ctrl.GetCurrentAddress = 0, 'GetCurrentAddress is 0 after exit');
+  DeadAfter := DeadNameCount;
+  Check(DeadAfter = DeadBefore,
+    Format('No rights on the dead task or its threads are left behind ' +
+           '(dead names before %d, after %d)', [DeadBefore, DeadAfter]));
 
   WriteLn;
   WriteLn('========================');

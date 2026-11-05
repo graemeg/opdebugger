@@ -90,6 +90,7 @@ type
     function GetThreadList(out Threads: TThreadPortArray): Boolean;
     procedure ReleaseThreadList(const Threads: TThreadPortArray; Keep: Cardinal);
     procedure SelectThread(Thread: Cardinal; const Threads: TThreadPortArray);
+    function MainThreadOnWatchpoint: Boolean;
     procedure SelectStoppedThread(Sig: Integer);
     function RawStep(out Status: cInt; Isolate: Boolean): Boolean;
     function StepOverBreakpointAtPC(out Stepped: Boolean; out Status: cInt): Boolean;
@@ -2071,12 +2072,14 @@ procedure TMacOSMachAdapter.MarkDetached;
 var
   I: Integer;
 begin
-  { Drop the rights held on the current and main threads; the names may
-    already be dead, which mach_port_deallocate accepts. }
+  { Drop the rights held on the current and main threads and on the task;
+    the names may already be dead, which mach_port_deallocate accepts. }
   if (FThreadPort <> 0) and (FThreadPort <> FMainThreadPort) then
     mach_port_deallocate(mach_task_self, FThreadPort);
   if FMainThreadPort <> 0 then
     mach_port_deallocate(mach_task_self, FMainThreadPort);
+  if FTaskPort <> 0 then
+    mach_port_deallocate(mach_task_self, FTaskPort);
   FAttached := False;
   FPID := -1;
   FTaskPort := 0;
@@ -2152,12 +2155,40 @@ begin
     WriteLn(StdErr, '[DEBUG] Current thread is now port ', FThreadPort);
 end;
 
+{ A watchpoint is armed and the main thread's last exception was one. }
+function TMacOSMachAdapter.MainThreadOnWatchpoint: Boolean;
+var
+  ExcState: arm_exception_state64_t;
+  Count: mach_msg_type_number_t;
+  I: Integer;
+  EC: Cardinal;
+begin
+  Result := False;
+  for I := 0 to 3 do
+    if FWatchSlots[I].Active then
+      Result := True;
+  if not Result then
+    Exit;
+
+  FillChar(ExcState, SizeOf(ExcState), 0);
+  Count := ARM_EXCEPTION_STATE64_COUNT;
+  if thread_get_state(FMainThreadPort, ARM_EXCEPTION_STATE64, @ExcState, Count) <> KERN_SUCCESS then
+    Exit(False);
+  EC := ExcState.esr shr 26;
+  Result := (EC = ESR_EC_WATCHPOINT_LOWER) or (EC = ESR_EC_WATCHPOINT_SAME);
+end;
+
 { After a stop, make current the thread that caused it.  For a SIGTRAP, in
-  order of preference: a thread on one of pdr's breakpoints whose last
-  exception was a BRK (it trapped there), a thread merely on one (it is
-  about to trap there), a thread on a BRK compiled into the program.  The
-  exception class alone can be stale, so the PC decides.  Otherwise, and
-  for every other stop, the main thread. }
+  order of preference: the main thread if a watchpoint is armed and its
+  last exception was a watchpoint (watchpoints live on the main thread
+  only, and HandleTrap's step past each hit replaces that exception, so it
+  cannot be left over from an earlier stop); a thread on one of pdr's
+  breakpoints whose last exception was a BRK (it trapped there); a thread on
+  a BRK compiled into the program; a thread merely on one of pdr's
+  breakpoints (it may be about to trap there, or only be blocked in a
+  system call that returns to it, so it ranks below any evidence of a
+  trap).  The exception class alone can be stale, so the PC decides.
+  Otherwise, and for every other stop, the main thread. }
 procedure TMacOSMachAdapter.SelectStoppedThread(Sig: Integer);
 var
   Threads: TThreadPortArray;
@@ -2175,7 +2206,9 @@ begin
   Trapped := 0;
   OnBreakpoint := 0;
   OnProgramBrk := 0;
-  if Sig = SIGTRAP then
+  if (Sig = SIGTRAP) and MainThreadOnWatchpoint then
+    Trapped := FMainThreadPort
+  else if Sig = SIGTRAP then
     for I := 0 to High(Threads) do
     begin
       FillChar(State, SizeOf(State), 0);
@@ -2205,9 +2238,9 @@ begin
     end;
 
   if Trapped = 0 then
-    Trapped := OnBreakpoint;
-  if Trapped = 0 then
     Trapped := OnProgramBrk;
+  if Trapped = 0 then
+    Trapped := OnBreakpoint;
   if Trapped = 0 then
     Trapped := FMainThreadPort;
   SelectThread(Trapped, Threads);
@@ -2535,9 +2568,11 @@ var
   Threads, Suspended: TThreadPortArray;
   I: Integer;
   Debug: arm_debug_state64_t;
+  StepBitSet: Boolean;
 begin
   Result := False;
   Status := 0;
+  StepBitSet := False;
   SignalToDeliver := 0;
   OnMain := FThreadPort = FMainThreadPort;
   Threads := nil;
@@ -2570,6 +2605,7 @@ begin
         WriteLn(StdErr, '[ERROR] Failed to set the thread''s single-step bit');
         Exit;
       end;
+      StepBitSet := True;
     end;
 
     while True do
@@ -2603,23 +2639,25 @@ begin
       SignalToDeliver := Sig;
     end;
 
-    if not OnMain and ReadDebugState(FThreadPort, Debug) then
-    begin
-      Debug.mdscr_el1 := Debug.mdscr_el1 and not QWord(MDSCR_SS);
-      WriteDebugState(FThreadPort, Debug);
-    end;
-
     { The kernel implements PT_STEP through the thread's debug state and
       clears that state when the step completes — watchpoints included.
       Put them back. }
     ApplyWatchpoints(True);
     Result := True;
   finally
+    { Clear the step bit on every path, failed ones included, or the thread
+      would stop after its next instruction once it runs again. }
+    if StepBitSet and FAttached and ReadDebugState(FThreadPort, Debug) then
+    begin
+      Debug.mdscr_el1 := Debug.mdscr_el1 and not QWord(MDSCR_SS);
+      WriteDebugState(FThreadPort, Debug);
+    end;
     if FAttached then
       for I := 0 to High(Suspended) do
         thread_resume(Suspended[I]);
-    if FAttached then
-      ReleaseThreadList(Threads, 0);
+    { Even when the process exited during the step: the rights are then on
+      dead names, which still have to be given back. }
+    ReleaseThreadList(Threads, 0);
   end;
 end;
 
