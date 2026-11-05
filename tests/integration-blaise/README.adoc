@@ -36,10 +36,17 @@ drops single-letter names to skip incidental `WriteLn` output.
 `<name>.commands`:: pdr commands piped on stdin (e.g. `break`, `continue`,
 `print`).
 
+`<name>.args` (optional):: The program's arguments, on one line, passed
+after the binary.  pdr then starts the program itself, so the commands of
+such a test begin without `run`.
+
 `<name>.expected`:: The filtered, address-normalised baseline.  These are
 written for Blaise semantics and are *not* copies of the FPC suite's
 baselines — 0-based indexing and the single string type change the printed
 output even for an otherwise-equivalent program.
+
+A test also fails when pdr itself exits with a non-zero status, such as
+217 for an unhandled exception, even if its output matches.
 
 == Running
 

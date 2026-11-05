@@ -1129,9 +1129,11 @@ begin
   end;
 
   // Store command-line arguments
+  { Assign element by element: a Move would copy the strings without taking
+    a reference, so each would be freed twice when both arrays are released. }
   SetLength(FCommandLineArgs, Length(Args));
-  if Length(Args) > 0 then
-    Move(Args[0], FCommandLineArgs[0], Length(Args) * SizeOf(String));
+  for I := 0 to High(Args) do
+    FCommandLineArgs[I] := Args[I];
 
   // Create platform-specific adapters
   FProcessController := TPlatformPtraceAdapter.Create;

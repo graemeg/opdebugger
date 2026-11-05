@@ -95,9 +95,27 @@ run_test() {
     # diagnostics go to stderr): merging them with 2>&1 risks splicing a
     # partial stderr line into a result line, since the two streams buffer
     # independently.
+    #
+    # An optional <name>.args holds the program's arguments (one line, split
+    # on whitespace), passed after the binary; pdr then starts the program
+    # itself, so such a test's commands begin without 'run'.
+    #
+    # pdr must exit with status 0: a crash in pdr (an unhandled exception
+    # exits with 217) fails the test even when the filtered output matches.
     echo "  [2/3] Running PDR..."
     if [ -f "$test_base.commands" ]; then
-        "$PDR_BIN" --source "$test_base.commands" "$test_base" 2>/dev/null | filter_output > "$test_base.actual"
+        local prog_args=()
+        if [ -f "$test_base.args" ]; then
+            read -r -a prog_args < "$test_base.args"
+        fi
+        "$PDR_BIN" --source "$test_base.commands" "$test_base" "${prog_args[@]}" 2>/dev/null \
+            | filter_output > "$test_base.actual"
+        local pdr_status=${PIPESTATUS[0]}
+        if [ "$pdr_status" -ne 0 ]; then
+            echo -e "${RED}  ✗ FAILED: pdr exited with status $pdr_status${NC}"
+            ((FAILED++))
+            return 1
+        fi
     else
         echo -e "${YELLOW}  No commands file${NC}"
         return 0

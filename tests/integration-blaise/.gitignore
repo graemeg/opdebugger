@@ -12,5 +12,7 @@ test_*_*
 !test_*_*.pas
 !test_*_*.commands
 !test_*_*.expected
+# Program arguments a test passes after the binary.
+!test_*_*.args
 # Assets a test program embeds ({$EMBEDSTR}).
 !test_*_*.txt
